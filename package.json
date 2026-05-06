@@ -1,0 +1,17 @@
+{
+  "name": "sports-card-portfolio",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "frontend",
+    "backend",
+    "infrastructure"
+  ],
+  "scripts": {
+    "install:all": "npm install && npm --prefix frontend install && npm --prefix backend install && npm --prefix infrastructure install",
+    "dev": "npm --prefix frontend run dev",
+    "build": "npm --prefix frontend run build",
+    "deploy:infra": "npm --prefix infrastructure run deploy",
+    "synth": "npm --prefix infrastructure run synth"
+  }
+}

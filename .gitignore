@@ -1,0 +1,11 @@
+node_modules/
+dist/
+.env
+.env.local
+*.env
+cdk.out/
+cdk.context.json
+frontend/src/aws-exports.js
+*.js.map
+.DS_Store
+coverage/
