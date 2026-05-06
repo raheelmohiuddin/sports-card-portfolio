@@ -1,6 +1,8 @@
 const { getPool, ensureUser } = require("../_db");
 const { S3Client, PutObjectCommand } = require("@aws-sdk/client-s3");
 const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
+const { json } = require("../_response");
+const { isValidCertNumber, sanitize, isHttpsUrl, isValidCount } = require("../_validate");
 
 const s3 = new S3Client({});
 
@@ -14,24 +16,32 @@ async function makeUploadUrl(bucket, key) {
 
 exports.handler = async (event) => {
   const claims = event.requestContext?.authorizer?.jwt?.claims;
-  if (!claims) {
-    return { statusCode: 401, body: JSON.stringify({ error: "Unauthorized" }) };
-  }
+  if (!claims) return json(401, { error: "Unauthorized" });
 
   let body;
   try {
     body = JSON.parse(event.body ?? "{}");
   } catch {
-    return { statusCode: 400, body: JSON.stringify({ error: "Invalid JSON body" }) };
+    return json(400, { error: "Invalid JSON body" });
   }
 
   const {
     certNumber, year, brand, sport, playerName, cardNumber,
-    grade, gradeDescription, frontImageUrl, backImageUrl, psaData,
+    grade, gradeDescription, frontImageUrl, backImageUrl,
+    psaPopulation, psaPopulationHigher, psaData,
   } = body;
 
-  if (!certNumber) {
-    return { statusCode: 400, body: JSON.stringify({ error: "certNumber is required" }) };
+  if (!isValidCertNumber(certNumber)) {
+    return json(400, { error: "certNumber is required and must be 1–30 alphanumeric characters" });
+  }
+  if (frontImageUrl != null && !isHttpsUrl(frontImageUrl)) {
+    return json(400, { error: "frontImageUrl must be a valid HTTPS URL" });
+  }
+  if (backImageUrl != null && !isHttpsUrl(backImageUrl)) {
+    return json(400, { error: "backImageUrl must be a valid HTTPS URL" });
+  }
+  if (!isValidCount(psaPopulation) || !isValidCount(psaPopulationHigher)) {
+    return json(400, { error: "psaPopulation values must be non-negative integers" });
   }
 
   const db = await getPool();
@@ -40,24 +50,36 @@ exports.handler = async (event) => {
   const result = await db.query(
     `INSERT INTO cards
        (user_id, cert_number, year, brand, sport, player_name, card_number,
-        grade, grade_description, image_url, back_image_url, psa_data)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+        grade, grade_description, image_url, back_image_url,
+        psa_population, psa_population_higher, psa_data)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
      ON CONFLICT (user_id, cert_number) DO UPDATE
-       SET year              = EXCLUDED.year,
-           brand             = EXCLUDED.brand,
-           sport             = EXCLUDED.sport,
-           player_name       = EXCLUDED.player_name,
-           grade             = EXCLUDED.grade,
-           grade_description = EXCLUDED.grade_description,
-           image_url         = EXCLUDED.image_url,
-           back_image_url    = EXCLUDED.back_image_url,
-           psa_data          = EXCLUDED.psa_data
+       SET year                  = EXCLUDED.year,
+           brand                 = EXCLUDED.brand,
+           sport                 = EXCLUDED.sport,
+           player_name           = EXCLUDED.player_name,
+           grade                 = EXCLUDED.grade,
+           grade_description     = EXCLUDED.grade_description,
+           image_url             = EXCLUDED.image_url,
+           back_image_url        = EXCLUDED.back_image_url,
+           psa_population        = EXCLUDED.psa_population,
+           psa_population_higher = EXCLUDED.psa_population_higher,
+           psa_data              = EXCLUDED.psa_data
      RETURNING id`,
     [
-      userId, certNumber, year, brand, sport, playerName, cardNumber,
-      grade, gradeDescription,
+      userId,
+      certNumber.trim(),
+      sanitize(year, 10),
+      sanitize(brand, 200),
+      sanitize(sport, 100),
+      sanitize(playerName, 300),
+      sanitize(cardNumber, 100),
+      sanitize(grade, 10),
+      sanitize(gradeDescription, 200),
       frontImageUrl ?? null,
-      backImageUrl ?? null,
+      backImageUrl  ?? null,
+      psaPopulation        != null ? parseInt(psaPopulation, 10)       : null,
+      psaPopulationHigher  != null ? parseInt(psaPopulationHigher, 10) : null,
       psaData ? JSON.stringify(psaData) : null,
     ]
   );
@@ -67,7 +89,6 @@ exports.handler = async (event) => {
   const frontKey = `cards/${userId}/${cardId}-front.jpg`;
   const backKey  = `cards/${userId}/${cardId}-back.jpg`;
 
-  // Generate both upload URLs concurrently
   const [frontUploadUrl, backUploadUrl] = await Promise.all([
     makeUploadUrl(bucket, frontKey),
     makeUploadUrl(bucket, backKey),
@@ -78,9 +99,5 @@ exports.handler = async (event) => {
     [frontKey, backKey, cardId]
   );
 
-  return {
-    statusCode: 201,
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ id: cardId, frontUploadUrl, backUploadUrl }),
-  };
+  return json(201, { id: cardId, frontUploadUrl, backUploadUrl });
 };

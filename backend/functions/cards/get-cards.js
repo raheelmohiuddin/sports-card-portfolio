@@ -1,6 +1,7 @@
 const { getPool, ensureUser } = require("../_db");
 const { S3Client, GetObjectCommand } = require("@aws-sdk/client-s3");
 const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
+const { json } = require("../_response");
 
 const s3 = new S3Client({});
 
@@ -14,9 +15,7 @@ async function signedUrl(key) {
 
 exports.handler = async (event) => {
   const claims = event.requestContext?.authorizer?.jwt?.claims;
-  if (!claims) {
-    return { statusCode: 401, body: JSON.stringify({ error: "Unauthorized" }) };
-  }
+  if (!claims) return json(401, { error: "Unauthorized" });
 
   const db = await getPool();
   const userId = await ensureUser(db, claims.sub, claims.email);
@@ -26,7 +25,11 @@ exports.handler = async (event) => {
             grade, grade_description,
             s3_image_key, image_url,
             s3_back_image_key, back_image_url,
-            estimated_value, added_at
+            psa_population, psa_population_higher,
+            manual_price,
+            estimated_value, avg_sale_price, last_sale_price,
+            num_sales, price_source, value_last_updated,
+            added_at
      FROM cards
      WHERE user_id = $1
      ORDER BY added_at DESC`,
@@ -35,33 +38,38 @@ exports.handler = async (event) => {
 
   const cards = await Promise.all(
     result.rows.map(async (row) => {
-      // S3 user-upload takes priority over stored PSA CDN URL for both sides
       const [imageUrl, backImageUrl] = await Promise.all([
-        row.s3_image_key  ? signedUrl(row.s3_image_key)       : Promise.resolve(row.image_url      ?? null),
+        row.s3_image_key      ? signedUrl(row.s3_image_key)      : Promise.resolve(row.image_url      ?? null),
         row.s3_back_image_key ? signedUrl(row.s3_back_image_key) : Promise.resolve(row.back_image_url ?? null),
       ]);
 
+      const manualPrice = row.manual_price ? parseFloat(row.manual_price) : null;
+
       return {
-        id: row.id,
-        certNumber: row.cert_number,
-        year: row.year,
-        brand: row.brand,
-        sport: row.sport,
-        playerName: row.player_name,
-        cardNumber: row.card_number,
-        grade: row.grade,
+        id:               row.id,
+        certNumber:       row.cert_number,
+        year:             row.year,
+        brand:            row.brand,
+        sport:            row.sport,
+        playerName:       row.player_name,
+        cardNumber:       row.card_number,
+        grade:            row.grade,
         gradeDescription: row.grade_description,
-        estimatedValue: row.estimated_value ? parseFloat(row.estimated_value) : null,
         imageUrl,
         backImageUrl,
-        addedAt: row.added_at,
+        psaPopulation:       row.psa_population        ?? null,
+        psaPopulationHigher: row.psa_population_higher ?? null,
+        manualPrice,
+        estimatedValue:   manualPrice ?? (row.estimated_value ? parseFloat(row.estimated_value) : null),
+        avgSalePrice:     row.avg_sale_price   ? parseFloat(row.avg_sale_price)   : null,
+        lastSalePrice:    row.last_sale_price  ? parseFloat(row.last_sale_price)  : null,
+        numSales:         row.num_sales        ?? null,
+        priceSource:      manualPrice !== null ? "manual" : (row.price_source ?? null),
+        valueLastUpdated: row.value_last_updated ?? null,
+        addedAt:          row.added_at,
       };
     })
   );
 
-  return {
-    statusCode: 200,
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(cards),
-  };
+  return json(200, cards);
 };

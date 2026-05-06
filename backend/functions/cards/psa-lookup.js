@@ -1,4 +1,6 @@
 const { SecretsManagerClient, GetSecretValueCommand } = require("@aws-sdk/client-secrets-manager");
+const { json } = require("../_response");
+const { isValidCertNumber } = require("../_validate");
 
 const smClient = new SecretsManagerClient({});
 let psaApiKey;
@@ -23,14 +25,13 @@ async function probeImage(url) {
 
 exports.handler = async (event) => {
   const certNumber = event.pathParameters?.certNumber;
-  if (!certNumber) {
-    return { statusCode: 400, body: JSON.stringify({ error: "certNumber is required" }) };
+  if (!isValidCertNumber(certNumber)) {
+    return json(400, { error: "Invalid certNumber — must be 1–30 alphanumeric characters" });
   }
 
   const apiKey = await getPsaApiKey();
   const cdnBase = `https://d1htnxwo4o0jhw.cloudfront.net/cert/${certNumber}`;
 
-  // Run API call and both image probes concurrently
   const [apiResponse, frontImageUrl, backImageUrl] = await Promise.all([
     fetch(`${process.env.PSA_API_BASE}/cert/GetByCertNumber/${certNumber}`, {
       headers: {
@@ -43,36 +44,27 @@ exports.handler = async (event) => {
   ]);
 
   if (!apiResponse.ok) {
-    if (apiResponse.status === 404) {
-      return { statusCode: 404, body: JSON.stringify({ error: "Certificate not found" }) };
-    }
-    return {
-      statusCode: apiResponse.status,
-      body: JSON.stringify({ error: "PSA API error" }),
-    };
+    if (apiResponse.status === 404) return json(404, { error: "Certificate not found" });
+    return json(apiResponse.status, { error: "PSA API error" });
   }
 
   const data = await apiResponse.json();
   const cert = data.PSACert;
 
-  const card = {
-    certNumber: cert.CertNumber,
-    year: cert.Year,
-    brand: cert.Brand,
-    sport: cert.Sport,
-    playerName: cert.Subject,
-    cardNumber: cert.CardNumber,
-    grade: cert.CardGrade,
-    gradeDescription: cert.GradeDescription,
-    variety: cert.Variety,
+  return json(200, {
+    certNumber:          cert.CertNumber,
+    year:                cert.Year,
+    brand:               cert.Brand,
+    sport:               cert.Sport,
+    playerName:          cert.Subject,
+    cardNumber:          cert.CardNumber,
+    grade:               cert.CardGrade,
+    gradeDescription:    cert.GradeDescription,
+    variety:             cert.Variety,
+    psaPopulation:       cert.TotalPopulation ?? null,
+    psaPopulationHigher: cert.PopulationHigher ?? null,
     frontImageUrl,
     backImageUrl,
-    psaData: cert,
-  };
-
-  return {
-    statusCode: 200,
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(card),
-  };
+    psaData:             cert,
+  });
 };

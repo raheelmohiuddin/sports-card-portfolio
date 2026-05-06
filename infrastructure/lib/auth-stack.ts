@@ -27,6 +27,10 @@ export class AuthStack extends Construct {
         requireSymbols: false,
       },
       accountRecovery: cognito.AccountRecovery.EMAIL_ONLY,
+      // MFA — TOTP via authenticator apps (Google Authenticator, Authy, 1Password, etc.).
+      // OPTIONAL means users can opt in; switch to REQUIRED to force enrollment.
+      mfa: cognito.Mfa.OPTIONAL,
+      mfaSecondFactor: { sms: false, otp: true },
       removalPolicy: cdk.RemovalPolicy.RETAIN,
     });
 

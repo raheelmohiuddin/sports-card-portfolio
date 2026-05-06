@@ -33,6 +33,20 @@ export async function getCards() {
   return res.json();
 }
 
+// Fetches a single card with freshly-generated signed S3 URLs.
+// cache: "no-store" bypasses the browser HTTP cache so the signed URLs
+// are never stale — each call gets a new pre-signed URL with a new signature,
+// which also means the URL string itself is different from any cached non-CORS entry.
+export async function getCard(id) {
+  const headers = await authHeaders();
+  const res = await fetch(`${API_BASE}/cards/${id}`, {
+    headers,
+    cache: "no-store",
+  });
+  if (!res.ok) throw new Error(`Get card failed: ${res.status}`);
+  return res.json();
+}
+
 export async function deleteCard(id) {
   const headers = await authHeaders();
   const res = await fetch(`${API_BASE}/cards/${id}`, { method: "DELETE", headers });
@@ -43,6 +57,33 @@ export async function getPortfolioValue() {
   const headers = await authHeaders();
   const res = await fetch(`${API_BASE}/portfolio/value`, { headers });
   if (!res.ok) throw new Error(`Portfolio value failed: ${res.status}`);
+  return res.json();
+}
+
+// Analyze a card's front image via Claude vision and return the border edge color.
+// Returns { edgeColor: "#hex", texture: "white|cream|colored" }.
+// Falls back to { edgeColor: "#f2f0eb", texture: "white" } on any failure.
+export async function generateEdgeTexture(imageUrl) {
+  const headers = await authHeaders();
+  const res = await fetch(`${API_BASE}/cards/edge-texture`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ imageUrl }),
+  });
+  if (!res.ok) throw new Error(`Edge texture failed: ${res.status}`);
+  return res.json();
+}
+
+// Set or clear a manual price override for a card.
+// Pass manualPrice as a number to set, or null to clear (reverts to eBay/mock).
+export async function updateCardPrice(id, manualPrice) {
+  const headers = await authHeaders();
+  const res = await fetch(`${API_BASE}/cards/${id}/price`, {
+    method: "PATCH",
+    headers,
+    body: JSON.stringify({ manualPrice }),
+  });
+  if (!res.ok) throw new Error(`Update price failed: ${res.status}`);
   return res.json();
 }
 

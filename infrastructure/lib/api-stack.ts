@@ -25,6 +25,7 @@ interface ApiStackProps {
 
 export class ApiStack extends Construct {
   public readonly apiUrl: string;
+  public readonly apiHostname: string;
 
   constructor(scope: Construct, id: string, props: ApiStackProps) {
     super(scope, id);
@@ -87,6 +88,12 @@ export class ApiStack extends Construct {
       entry: path.join(functionsDir, "cards/delete-card.js"),
     });
 
+    const getCardFn = new NodejsFunction(this, "GetCard", {
+      ...sharedNodejsProps,
+      functionName: "scp-get-card",
+      entry: path.join(functionsDir, "cards/get-card.js"),
+    });
+
     const psaLookupFn = new NodejsFunction(this, "PsaLookup", {
       ...sharedNodejsProps,
       functionName: "scp-psa-lookup",
@@ -99,8 +106,30 @@ export class ApiStack extends Construct {
       entry: path.join(functionsDir, "portfolio/get-value.js"),
     });
 
+    const updatePriceFn = new NodejsFunction(this, "UpdatePrice", {
+      ...sharedNodejsProps,
+      functionName: "scp-update-price",
+      entry: path.join(functionsDir, "cards/update-price.js"),
+    });
+
+    // Edge texture uses Anthropic vision — no DB or S3 access needed.
+    // VPC gives it NAT gateway egress to reach api.anthropic.com.
+    const generateEdgeTextureFn = new NodejsFunction(this, "GenerateEdgeTexture", {
+      ...sharedNodejsProps,
+      functionName: "scp-generate-edge-texture",
+      entry: path.join(functionsDir, "cards/generate-edge-texture.js"),
+      timeout: cdk.Duration.seconds(30),
+    });
+
+    generateEdgeTextureFn.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: ["secretsmanager:GetSecretValue"],
+        resources: ["arn:aws:secretsmanager:us-east-1:501789774892:secret:sports-card-portfolio/anthropic-api-key*"],
+      })
+    );
+
     // Grant permissions
-    for (const fn of [addCardFn, getCardsFn, deleteCardFn, psaLookupFn, portfolioValueFn]) {
+    for (const fn of [addCardFn, getCardsFn, getCardFn, deleteCardFn, psaLookupFn, portfolioValueFn, updatePriceFn]) {
       props.dbSecret.grantRead(fn);
       props.cardImagesBucket.grantReadWrite(fn);
       fn.addToRolePolicy(
@@ -156,6 +185,13 @@ export class ApiStack extends Construct {
 
     api.addRoutes({
       path: "/cards/{id}",
+      methods: [apigwv2.HttpMethod.GET],
+      integration: new apigwv2integrations.HttpLambdaIntegration("GetCard", getCardFn),
+      ...authRoute,
+    });
+
+    api.addRoutes({
+      path: "/cards/{id}",
       methods: [apigwv2.HttpMethod.DELETE],
       integration: new apigwv2integrations.HttpLambdaIntegration("DeleteCard", deleteCardFn),
       ...authRoute,
@@ -175,7 +211,31 @@ export class ApiStack extends Construct {
       ...authRoute,
     });
 
+    api.addRoutes({
+      path: "/cards/{id}/price",
+      methods: [apigwv2.HttpMethod.PATCH],
+      integration: new apigwv2integrations.HttpLambdaIntegration("UpdatePrice", updatePriceFn),
+      ...authRoute,
+    });
+
+    api.addRoutes({
+      path: "/cards/edge-texture",
+      methods: [apigwv2.HttpMethod.POST],
+      integration: new apigwv2integrations.HttpLambdaIntegration("GenerateEdgeTexture", generateEdgeTextureFn),
+      ...authRoute,
+    });
+
+    // Stage-level throttling — caps total req/s across all callers as a
+    // secondary defence; per-IP limiting lives in the WAF rate-based rule.
+    const cfnStage = api.defaultStage!.node.defaultChild as apigwv2.CfnStage;
+    cfnStage.addPropertyOverride("DefaultRouteSettings", {
+      ThrottlingBurstLimit: 500,
+      ThrottlingRateLimit: 50,
+    });
+
     this.apiUrl = api.apiEndpoint;
+    // Strip the protocol so this can be passed to CloudFront as an origin hostname.
+    this.apiHostname = cdk.Fn.select(2, cdk.Fn.split("/", api.apiEndpoint));
     new cdk.CfnOutput(this, "ApiEndpoint", { value: this.apiUrl });
   }
 }
