@@ -1,17 +1,21 @@
+# AWS Amplify Hosting build spec.
+# This repo is an npm workspace monorepo (frontend/, backend/, infrastructure/),
+# so the lock file lives at the root and dependencies are hoisted there.
+# Install at root, then run the Vite build from frontend/.
 version: 1
 frontend:
   phases:
     preBuild:
       commands:
-        - cd frontend
         - npm ci
     build:
       commands:
-        - npm run build
+        - npm --prefix frontend run build
   artifacts:
     baseDirectory: frontend/dist
     files:
       - "**/*"
   cache:
     paths:
+      - node_modules/**/*
       - frontend/node_modules/**/*
