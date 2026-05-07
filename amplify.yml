@@ -1,8 +1,20 @@
-# AWS Amplify Hosting build spec.
+# AWS Amplify Hosting build spec — frontend only.
+#
+# The backend (API Gateway, Lambdas, Cognito, RDS, S3, CloudFront, WAF) is
+# managed by CDK in infrastructure/. Amplify Hosting MUST NOT try to deploy
+# backend resources — declaring an explicit no-op backend phase prevents
+# Amplify from injecting its default Gen 1 amplifyPush step that would try
+# to provision a "staging" environment.
+#
 # This repo is an npm workspace monorepo (frontend/, backend/, infrastructure/),
-# so the lock file lives at the root and dependencies are hoisted there.
-# Install at root, then run the Vite build from frontend/.
+# so the lock file lives at the root and deps are hoisted there. Install at
+# root, then run the Vite build from frontend/.
 version: 1
+backend:
+  phases:
+    build:
+      commands:
+        - echo "Backend managed by CDK — skipping Amplify backend deployment"
 frontend:
   phases:
     preBuild:
