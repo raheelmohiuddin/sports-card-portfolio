@@ -20,6 +20,23 @@ frontend:
     preBuild:
       commands:
         - npm ci
+        # aws-exports.js is gitignored (Cognito IDs vary per environment), so
+        # we generate it at build time from the Amplify app's env vars.
+        # Required Amplify env vars: COGNITO_USER_POOL_ID, COGNITO_USER_POOL_CLIENT_ID
+        - |
+          cat > frontend/src/aws-exports.js <<EOF
+          const awsExports = {
+            Auth: {
+              Cognito: {
+                userPoolId: "$COGNITO_USER_POOL_ID",
+                userPoolClientId: "$COGNITO_USER_POOL_CLIENT_ID",
+                loginWith: { email: true, username: true },
+              },
+            },
+          };
+          export default awsExports;
+          EOF
+        - echo "Generated frontend/src/aws-exports.js"
     build:
       commands:
         - npm --prefix frontend run build
