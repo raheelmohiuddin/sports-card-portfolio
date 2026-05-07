@@ -15,6 +15,16 @@ export async function lookupPsaCert(certNumber) {
   return res.json();
 }
 
+// Throws a rich error so callers can branch on status (e.g. 409 duplicates).
+async function readError(res) {
+  let data = null;
+  try { data = await res.json(); } catch {}
+  const err = new Error(data?.error ?? `Request failed: ${res.status}`);
+  err.status = res.status;
+  err.data = data;
+  return err;
+}
+
 export async function addCard(cardData) {
   const headers = await authHeaders();
   const res = await fetch(`${API_BASE}/cards`, {
@@ -22,7 +32,7 @@ export async function addCard(cardData) {
     headers,
     body: JSON.stringify(cardData),
   });
-  if (!res.ok) throw new Error(`Add card failed: ${res.status}`);
+  if (!res.ok) throw await readError(res);
   return res.json(); // { id, frontUploadUrl, backUploadUrl }
 }
 
@@ -60,6 +70,44 @@ export async function getPortfolioValue() {
   return res.json();
 }
 
+export async function getPortfolioHistory() {
+  const headers = await authHeaders();
+  const res = await fetch(`${API_BASE}/portfolio/history`, { headers });
+  if (!res.ok) throw new Error(`Portfolio history failed: ${res.status}`);
+  return res.json();
+}
+
+export async function getCardSales(id) {
+  const headers = await authHeaders();
+  const res = await fetch(`${API_BASE}/cards/${id}/sales`, { headers });
+  if (!res.ok) throw new Error(`Card sales failed: ${res.status}`);
+  return res.json();
+}
+
+// Returns { uploadUrl, key, contentType } — client uploads directly to S3,
+// then writes the returned `key` to Cognito's `picture` attribute.
+export async function getAvatarUploadUrl(contentType) {
+  const headers = await authHeaders();
+  const res = await fetch(`${API_BASE}/profile/avatar-upload-url`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ contentType }),
+  });
+  if (!res.ok) throw new Error(`Avatar upload URL failed: ${res.status}`);
+  return res.json();
+}
+
+// Fresh signed GET URL for displaying the user's avatar. Server validates
+// that the key belongs to the caller (avatars/{their-sub}/...).
+export async function getAvatarViewUrl(key) {
+  const headers = await authHeaders();
+  const res = await fetch(`${API_BASE}/profile/avatar-view-url?key=${encodeURIComponent(key)}`, {
+    headers,
+  });
+  if (!res.ok) throw new Error(`Avatar view URL failed: ${res.status}`);
+  return res.json();
+}
+
 // Analyze a card's front image via Claude vision and return the border edge color.
 // Returns { edgeColor: "#hex", texture: "white|cream|colored" }.
 // Falls back to { edgeColor: "#f2f0eb", texture: "white" } on any failure.
@@ -71,6 +119,18 @@ export async function generateEdgeTexture(imageUrl) {
     body: JSON.stringify({ imageUrl }),
   });
   if (!res.ok) throw new Error(`Edge texture failed: ${res.status}`);
+  return res.json();
+}
+
+// Update editable fields on a card. Currently supports myCost; pass null to clear.
+export async function updateCard(id, patch) {
+  const headers = await authHeaders();
+  const res = await fetch(`${API_BASE}/cards/${id}`, {
+    method: "PUT",
+    headers,
+    body: JSON.stringify(patch),
+  });
+  if (!res.ok) throw new Error(`Update card failed: ${res.status}`);
   return res.json();
 }
 

@@ -26,7 +26,7 @@ exports.handler = async (event) => {
             s3_image_key, image_url,
             s3_back_image_key, back_image_url,
             psa_population, psa_population_higher,
-            manual_price,
+            manual_price, my_cost, target_price,
             estimated_value, avg_sale_price, last_sale_price,
             num_sales, price_source, value_last_updated,
             added_at
@@ -44,6 +44,10 @@ exports.handler = async (event) => {
       ]);
 
       const manualPrice = row.manual_price ? parseFloat(row.manual_price) : null;
+      const myCost      = row.my_cost      ? parseFloat(row.my_cost)      : null;
+      const targetPrice = row.target_price ? parseFloat(row.target_price) : null;
+      const estValue    = manualPrice ?? (row.estimated_value ? parseFloat(row.estimated_value) : null);
+      const targetReached = targetPrice != null && estValue != null && estValue >= targetPrice;
 
       return {
         id:               row.id,
@@ -60,7 +64,10 @@ exports.handler = async (event) => {
         psaPopulation:       row.psa_population        ?? null,
         psaPopulationHigher: row.psa_population_higher ?? null,
         manualPrice,
-        estimatedValue:   manualPrice ?? (row.estimated_value ? parseFloat(row.estimated_value) : null),
+        myCost,
+        targetPrice,
+        targetReached,
+        estimatedValue:   estValue,
         avgSalePrice:     row.avg_sale_price   ? parseFloat(row.avg_sale_price)   : null,
         lastSalePrice:    row.last_sale_price  ? parseFloat(row.last_sale_price)  : null,
         numSales:         row.num_sales        ?? null,

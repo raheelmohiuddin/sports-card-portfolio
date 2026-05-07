@@ -2,59 +2,49 @@ import { useState, useRef, useCallback, useEffect } from "react";
 
 export default function DropZone({ onFile, previewUrl, label, hint }) {
   const [dragging, setDragging] = useState(false);
+  const [hovered, setHovered]   = useState(false);
   const inputRef = useRef(null);
-  const dragCounter = useRef(0); // counter prevents flicker when dragging over children
+  const dragCounter = useRef(0);
 
   const handleFile = useCallback((file) => {
     if (!file || !file.type.startsWith("image/")) return;
     onFile(file);
   }, [onFile]);
 
-  const onDragEnter = (e) => {
-    e.preventDefault();
-    dragCounter.current++;
-    setDragging(true);
-  };
-
-  const onDragLeave = (e) => {
-    e.preventDefault();
-    dragCounter.current--;
-    if (dragCounter.current === 0) setDragging(false);
-  };
-
-  const onDragOver = (e) => {
-    e.preventDefault();
-  };
-
-  const onDrop = (e) => {
+  const onDragEnter = (e) => { e.preventDefault(); dragCounter.current++; setDragging(true); };
+  const onDragLeave = (e) => { e.preventDefault(); dragCounter.current--; if (dragCounter.current === 0) setDragging(false); };
+  const onDragOver  = (e) => { e.preventDefault(); };
+  const onDrop      = (e) => {
     e.preventDefault();
     dragCounter.current = 0;
     setDragging(false);
-    const file = e.dataTransfer.files?.[0];
-    handleFile(file);
+    handleFile(e.dataTransfer.files?.[0]);
   };
-
   const onInputChange = (e) => {
     handleFile(e.target.files?.[0]);
-    // Reset so the same file can be re-selected after clearing
     e.target.value = "";
   };
 
-  // Revoke the object URL on unmount to avoid memory leaks
-  useEffect(() => {
-    return () => {
-      if (previewUrl?.startsWith("blob:")) URL.revokeObjectURL(previewUrl);
-    };
+  useEffect(() => () => {
+    if (previewUrl?.startsWith("blob:")) URL.revokeObjectURL(previewUrl);
   }, [previewUrl]);
+
+  const stateStyle = dragging
+    ? st.zoneDragging
+    : hovered
+      ? st.zoneHovered
+      : {};
 
   return (
     <div
-      style={{ ...styles.zone, ...(dragging ? styles.zoneDragging : {}) }}
+      style={{ ...st.zone, ...stateStyle }}
       onDragEnter={onDragEnter}
       onDragLeave={onDragLeave}
       onDragOver={onDragOver}
       onDrop={onDrop}
       onClick={() => inputRef.current?.click()}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
       role="button"
       tabIndex={0}
       onKeyDown={(e) => e.key === "Enter" && inputRef.current?.click()}
@@ -69,81 +59,110 @@ export default function DropZone({ onFile, previewUrl, label, hint }) {
       />
 
       {previewUrl ? (
-        <div style={styles.previewWrap}>
-          <img src={previewUrl} alt="Preview" style={styles.previewImg} />
-          <span style={styles.changeHint}>Click or drop to replace</span>
-        </div>
-      ) : (
-        <div style={styles.emptyContent}>
-          <div style={{ ...styles.icon, ...(dragging ? styles.iconDragging : {}) }}>
-            {dragging ? "📂" : "🖼"}
+        <>
+          <img src={previewUrl} alt="Preview" style={st.previewImg} draggable={false} />
+          <div style={{ ...st.previewOverlay, opacity: hovered ? 1 : 0 }}>
+            <span style={st.replaceText}>Click or drop to replace</span>
           </div>
-          <p style={styles.labelText}>{label ?? "Drop image here"}</p>
-          <p style={styles.hintText}>{hint ?? "or click to browse — JPEG, PNG, WebP"}</p>
+        </>
+      ) : (
+        <div style={st.empty}>
+          <div style={{ ...st.iconWrap, ...(dragging ? st.iconWrapActive : {}) }}>
+            <UploadIcon />
+          </div>
+          <p style={st.label}>{label ?? "Drop image here"}</p>
+          <p style={st.hint}>{hint ?? "or click to browse · JPEG · PNG · WebP"}</p>
         </div>
       )}
     </div>
   );
 }
 
-const styles = {
+function UploadIcon() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      width="34" height="34"
+      fill="none" stroke="currentColor"
+      strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"
+    >
+      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+      <polyline points="17 8 12 3 7 8" />
+      <line x1="12" y1="3" x2="12" y2="15" />
+    </svg>
+  );
+}
+
+const st = {
   zone: {
-    border: "2px dashed #d1d5db",
-    borderRadius: 10,
-    padding: "1.5rem",
-    textAlign: "center",
+    position: "relative",
+    width: "100%",
+    aspectRatio: "5 / 7",
+    background: "rgba(15,23,42,0.6)",
+    border: "2px dashed rgba(245,158,11,0.35)",
+    borderRadius: 12,
     cursor: "pointer",
-    transition: "border-color 0.15s, background 0.15s",
-    background: "#fafafa",
+    overflow: "hidden",
+    transition: "border-color 0.2s, background 0.2s, transform 0.2s, box-shadow 0.2s",
     userSelect: "none",
     outline: "none",
   },
+  zoneHovered: {
+    borderColor: "rgba(245,158,11,0.7)",
+    background: "rgba(15,23,42,0.85)",
+    boxShadow: "0 0 0 1px rgba(245,158,11,0.15), 0 0 24px rgba(245,158,11,0.1)",
+  },
   zoneDragging: {
-    borderColor: "#4f46e5",
-    background: "#eef2ff",
+    borderColor: "#f59e0b",
+    background: "rgba(245,158,11,0.08)",
+    transform: "scale(1.01)",
+    boxShadow: "0 0 0 1px rgba(245,158,11,0.4), 0 0 32px rgba(245,158,11,0.2)",
   },
-  emptyContent: {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    gap: "0.4rem",
+  empty: {
+    position: "absolute", inset: 0,
+    display: "flex", flexDirection: "column",
+    alignItems: "center", justifyContent: "center",
+    gap: "0.6rem", padding: "1rem",
     pointerEvents: "none",
+    textAlign: "center",
   },
-  icon: {
-    fontSize: "2rem",
-    lineHeight: 1,
-    transition: "transform 0.15s",
+  iconWrap: {
+    color: "#f59e0b",
+    background: "rgba(245,158,11,0.1)",
+    border: "1px solid rgba(245,158,11,0.3)",
+    borderRadius: "50%",
+    width: 56, height: 56,
+    display: "flex", alignItems: "center", justifyContent: "center",
+    transition: "transform 0.2s, background 0.2s",
+    marginBottom: "0.4rem",
   },
-  iconDragging: {
-    transform: "scale(1.2)",
+  iconWrapActive: {
+    transform: "scale(1.1)",
+    background: "rgba(245,158,11,0.18)",
   },
-  labelText: {
-    fontWeight: 600,
-    color: "#374151",
-    fontSize: "0.95rem",
-    margin: 0,
+  label: {
+    fontSize: "0.85rem", fontWeight: 600,
+    color: "#e2e8f0", margin: 0,
+    letterSpacing: "0.01em",
   },
-  hintText: {
-    color: "#9ca3af",
-    fontSize: "0.8rem",
-    margin: 0,
-  },
-  previewWrap: {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    gap: "0.5rem",
-    pointerEvents: "none",
+  hint: {
+    fontSize: "0.7rem", color: "#64748b",
+    margin: 0, letterSpacing: "0.04em",
   },
   previewImg: {
-    maxHeight: 220,
-    maxWidth: "100%",
-    borderRadius: 6,
-    objectFit: "contain",
-    boxShadow: "0 2px 8px rgba(0,0,0,0.12)",
+    position: "absolute", inset: 0,
+    width: "100%", height: "100%",
+    objectFit: "cover", display: "block",
   },
-  changeHint: {
-    fontSize: "0.78rem",
-    color: "#9ca3af",
+  previewOverlay: {
+    position: "absolute", inset: 0,
+    background: "linear-gradient(to bottom, transparent 60%, rgba(0,0,0,0.7))",
+    display: "flex", alignItems: "flex-end", justifyContent: "center",
+    padding: "1rem", pointerEvents: "none",
+    transition: "opacity 0.2s",
+  },
+  replaceText: {
+    color: "#f59e0b", fontSize: "0.72rem", fontWeight: 700,
+    letterSpacing: "0.12em", textTransform: "uppercase",
   },
 };

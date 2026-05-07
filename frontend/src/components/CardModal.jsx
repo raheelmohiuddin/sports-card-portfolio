@@ -1,385 +1,16 @@
 import { useEffect, useRef, useState } from "react";
-import * as THREE from "three";
-import { generateEdgeTexture, getCard } from "../services/api.js";
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
+import { getCard, getCardSales } from "../services/api.js";
+import { getRarityTier, TIER_LABELS } from "../utils/rarity.js";
+import GhostIcon from "./GhostIcon.jsx";
+import CardPop from "./CardPop.jsx";
+import SalesHistory from "./SalesHistory.jsx";
 
 function isRare(card) {
-  return card.psaPopulationHigher === 0 && card.psaPopulation !== null && card.psaPopulation <= 25;
+  return getRarityTier(card) !== null;
 }
 
 function fmt(n) {
   return n != null ? `$${parseFloat(n).toLocaleString("en-US", { minimumFractionDigits: 2 })}` : null;
-}
-
-// Load a texture from a URL; resolves to null on error or missing URL.
-//
-// We fetch via fetch() rather than letting Three.js use an <img> element directly.
-// If the browser has already loaded this URL as a plain <img> (no crossOrigin attr,
-// e.g. from the portfolio grid), it caches the response without CORS headers. Three.js
-// then requests the same URL with crossOrigin="anonymous", hits the cached entry, and
-// the CORS check fails → blank face. Using fetch() issues an independent CORS request
-// that bypasses the image cache, then feeds a same-origin blob URL to Three.js.
-async function loadTexture(url) {
-  if (!url) return null;
-  let objectUrl = null;
-  try {
-    const res = await fetch(url, { mode: "cors", credentials: "omit" });
-    if (!res.ok) {
-      console.warn(`[CardModal] Texture fetch failed: HTTP ${res.status} — ${url}`);
-      return null;
-    }
-    const blob = await res.blob();
-    objectUrl = URL.createObjectURL(blob);
-    return await new Promise((resolve) => {
-      new THREE.TextureLoader().load(
-        objectUrl,
-        (tex) => {
-          tex.colorSpace = THREE.SRGBColorSpace;
-          URL.revokeObjectURL(objectUrl);
-          resolve(tex);
-        },
-        undefined,
-        (err) => {
-          console.warn("[CardModal] Three.js texture decode failed:", err);
-          URL.revokeObjectURL(objectUrl);
-          resolve(null);
-        }
-      );
-    });
-  } catch (err) {
-    console.warn("[CardModal] Texture load error:", err.message, "—", url);
-    if (objectUrl) URL.revokeObjectURL(objectUrl);
-    return null;
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Fullscreen zoom overlay
-// ---------------------------------------------------------------------------
-
-const LENS_D = 150;
-const LENS_R = LENS_D / 2;
-const LENS_MAG = 2.5;
-
-function ZoomView({ src, alt, onClose }) {
-  const [lens, setLens] = useState(null);
-  const imgRef = useRef(null);
-
-  useEffect(() => {
-    function onKey(e) { if (e.key === "Escape") onClose(); }
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
-
-  function handleMouseMove(e) {
-    const rect = imgRef.current?.getBoundingClientRect();
-    if (!rect) return;
-    setLens({ x: e.clientX - rect.left, y: e.clientY - rect.top, w: rect.width, h: rect.height });
-  }
-
-  return (
-    <div style={zoomSt.backdrop} onClick={(e) => e.target === e.currentTarget && onClose()}>
-      <button style={zoomSt.closeBtn} onClick={onClose} aria-label="Close zoom">✕</button>
-      <div style={{ position: "relative", lineHeight: 0 }}>
-        <img
-          ref={imgRef}
-          src={src}
-          alt={alt}
-          style={{ ...zoomSt.img, cursor: lens ? "none" : "crosshair" }}
-          draggable={false}
-          onMouseMove={handleMouseMove}
-          onMouseLeave={() => setLens(null)}
-        />
-        {lens && (
-          <div style={{
-            position: "absolute",
-            left: lens.x - LENS_R,
-            top: lens.y - LENS_R,
-            width: LENS_D,
-            height: LENS_D,
-            borderRadius: "50%",
-            border: "2px solid rgba(255,255,255,0.65)",
-            boxShadow: "0 4px 24px rgba(0,0,0,0.55), inset 0 0 0 1px rgba(0,0,0,0.15)",
-            backgroundImage: `url(${src})`,
-            backgroundRepeat: "no-repeat",
-            backgroundSize: `${lens.w * LENS_MAG}px ${lens.h * LENS_MAG}px`,
-            backgroundPosition: `${LENS_R - lens.x * LENS_MAG}px ${LENS_R - lens.y * LENS_MAG}px`,
-            pointerEvents: "none",
-          }} />
-        )}
-      </div>
-    </div>
-  );
-}
-
-const zoomSt = {
-  backdrop: {
-    position: "fixed", inset: 0, zIndex: 2000,
-    background: "rgba(0,0,0,0.96)",
-    display: "flex", alignItems: "center", justifyContent: "center",
-    padding: "2rem",
-  },
-  closeBtn: {
-    position: "absolute", top: 16, right: 16, zIndex: 1,
-    background: "rgba(255,255,255,0.12)", border: "none", borderRadius: "50%",
-    width: 40, height: 40, color: "#fff", fontSize: "1rem", cursor: "pointer",
-    display: "flex", alignItems: "center", justifyContent: "center",
-    backdropFilter: "blur(4px)",
-  },
-  img: {
-    maxWidth: "90vw", maxHeight: "90vh",
-    objectFit: "contain", borderRadius: 8,
-    boxShadow: "0 8px 60px rgba(0,0,0,0.6)",
-  },
-};
-
-// ---------------------------------------------------------------------------
-// Three.js card renderer
-// ---------------------------------------------------------------------------
-
-// BoxGeometry face indices: 0=+X(R), 1=-X(L), 2=+Y(T), 3=-Y(B), 4=+Z(Front), 5=-Z(Back)
-const FACE_FRONT = 4;
-const FACE_BACK  = 5;
-const CARD_W = 2.5, CARD_H = 3.5, CARD_D = 0.04; // 0.04 — thick enough to see edges clearly
-// Module-level cache keyed by card ID — persists across modal open/close
-// so Claude is only called once per card per browser session.
-const edgeColorCache = new Map();
-
-async function fetchEdgeColors(cardId, imageUrl) {
-  if (edgeColorCache.has(cardId)) return edgeColorCache.get(cardId);
-  try {
-    const result = await generateEdgeTexture(imageUrl);
-    edgeColorCache.set(cardId, result);
-    return result;
-  } catch {
-    const fallback = { edgeColor: "#f2f0eb", texture: "white" };
-    edgeColorCache.set(cardId, fallback);
-    return fallback;
-  }
-}
-
-// Generate a canvas-based paper texture from the analysed edge colour.
-// 256×16 px with additive noise and a depth gradient — tiles seamlessly.
-function buildEdgeTexture(hexColor) {
-  const W = 256, H = 16;
-  const canvas = document.createElement("canvas");
-  canvas.width = W;
-  canvas.height = H;
-  const ctx = canvas.getContext("2d");
-
-  ctx.fillStyle = hexColor;
-  ctx.fillRect(0, 0, W, H);
-
-  // Paper-fibre grain
-  const img = ctx.getImageData(0, 0, W, H);
-  const d = img.data;
-  for (let i = 0; i < d.length; i += 4) {
-    const n = (Math.random() - 0.5) * 24;
-    d[i]   = Math.max(0, Math.min(255, d[i]   + n));
-    d[i+1] = Math.max(0, Math.min(255, d[i+1] + n));
-    d[i+2] = Math.max(0, Math.min(255, d[i+2] + n));
-  }
-  ctx.putImageData(img, 0, 0);
-
-  // Depth gradient: lighter on top edge, darker on bottom
-  const grad = ctx.createLinearGradient(0, 0, 0, H);
-  grad.addColorStop(0,   "rgba(255,255,255,0.16)");
-  grad.addColorStop(0.5, "rgba(0,0,0,0)");
-  grad.addColorStop(1,   "rgba(0,0,0,0.16)");
-  ctx.fillStyle = grad;
-  ctx.fillRect(0, 0, W, H);
-
-  const tex = new THREE.CanvasTexture(canvas);
-  tex.wrapS = THREE.RepeatWrapping;
-  tex.wrapT = THREE.RepeatWrapping;
-  tex.colorSpace = THREE.SRGBColorSpace;
-  return tex;
-}
-
-function useThreeCard({ canvasRef, cardId, frontUrl, backUrl }) {
-  const [loading, setLoading] = useState(true);
-  const meshRef = useRef(null);
-
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    let frameId;
-    let disposed = false;
-
-    async function init() {
-      const W = canvas.offsetWidth;
-      const H = canvas.offsetHeight;
-
-      // Renderer — transparent background so radial gradient shows through
-      const renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true });
-      renderer.setSize(W, H, false);
-      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-
-      const scene = new THREE.Scene();
-
-      // Camera: FOV chosen so card fills ~80% of viewport height with breathing room
-      const camera = new THREE.PerspectiveCamera(40, W / H, 0.1, 100);
-      camera.position.z = 6;
-
-      // Lighting ─ ambient for overall fill, directional key light, soft back fill
-      scene.add(new THREE.AmbientLight(0xffffff, 1.1));
-      const keyLight = new THREE.DirectionalLight(0xffffff, 1.4);
-      keyLight.position.set(3, 5, 6);
-      scene.add(keyLight);
-      const fillLight = new THREE.DirectionalLight(0xdde8f0, 0.35);
-      fillLight.position.set(-4, -3, -5);
-      scene.add(fillLight);
-
-      // Edge material — slightly warm off-white like real card stock
-      // Load textures and fetch edge colour from Claude in parallel —
-      // edge analysis adds zero wall-clock time beyond texture loading.
-      const [frontTex, backTex, edgeData] = await Promise.all([
-        loadTexture(frontUrl),
-        loadTexture(backUrl),
-        cardId && frontUrl ? fetchEdgeColors(cardId, frontUrl) : Promise.resolve(null),
-      ]);
-
-      if (disposed) {
-        renderer.dispose();
-        [frontTex, backTex].forEach((t) => t?.dispose());
-        return;
-      }
-
-      const edgeTex = buildEdgeTexture(edgeData?.edgeColor ?? "#f2f0eb");
-      const edgeMat = new THREE.MeshLambertMaterial({ map: edgeTex });
-
-      const faceMat = (tex) =>
-        tex
-          ? new THREE.MeshLambertMaterial({ map: tex })
-          : new THREE.MeshLambertMaterial({ color: 0xfaf9f7 });
-
-      // Material array order must match BoxGeometry face indices
-      const materials = [
-        edgeMat,          // 0 Right
-        edgeMat,          // 1 Left
-        edgeMat,          // 2 Top
-        edgeMat,          // 3 Bottom
-        faceMat(frontTex),// 4 Front (+Z)
-        faceMat(backTex), // 5 Back  (-Z)
-      ];
-
-      const geometry = new THREE.BoxGeometry(CARD_W, CARD_H, CARD_D);
-      const mesh = new THREE.Mesh(geometry, materials);
-      scene.add(mesh);
-      meshRef.current = mesh;
-
-      setLoading(false);
-
-      function tick() {
-        frameId = requestAnimationFrame(tick);
-        renderer.render(scene, camera);
-      }
-
-      tick();
-
-      // Store renderer for cleanup
-      canvas._threeRenderer = renderer;
-    }
-
-    init();
-
-    return () => {
-      disposed = true;
-      cancelAnimationFrame(frameId);
-      meshRef.current = null;
-      if (canvas._threeRenderer) {
-        canvas._threeRenderer.dispose();
-        canvas._threeRenderer = null;
-      }
-    };
-  // Re-init when the card changes (new modal open)
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cardId, frontUrl, backUrl]);
-
-  return { loading, meshRef };
-}
-
-// ---------------------------------------------------------------------------
-// Card viewport component
-// ---------------------------------------------------------------------------
-
-function CardViewport({ card, onZoom }) {
-  const canvasRef  = useRef(null);
-  const [hovered, setHovered] = useState(false);
-  // Start with null URLs — replaced by freshly-signed ones from the API.
-  // Each new pre-signed URL has a unique signature string, so it's never
-  // the same URL the browser may have cached without CORS headers.
-  const [freshUrls, setFreshUrls] = useState({ front: null, back: null });
-
-  useEffect(() => {
-    let cancelled = false;
-    getCard(card.id)
-      .then((fresh) => {
-        if (!cancelled) setFreshUrls({ front: fresh.imageUrl ?? null, back: fresh.backImageUrl ?? null });
-      })
-      .catch(() => {
-        // Fall back to whatever URLs the portfolio already has
-        if (!cancelled) setFreshUrls({ front: card.imageUrl ?? null, back: card.backImageUrl ?? null });
-      });
-    return () => { cancelled = true; };
-  }, [card.id]);
-
-  const { loading, meshRef } = useThreeCard({
-    canvasRef,
-    cardId:   card.id,
-    frontUrl: freshUrls.front,
-    backUrl:  freshUrls.back,
-  });
-
-  function handleMouseEnter() { setHovered(true);  }
-  function handleMouseLeave() { setHovered(false); }
-
-  function handleClick() {
-    const mesh = meshRef.current;
-    if (!mesh) return;
-    // cos(rotationY) > 0 → front face (+Z) is toward camera
-    const showingFront = Math.cos(mesh.rotation.y) > 0;
-    if (showingFront && card.imageUrl) {
-      onZoom({ src: card.imageUrl, alt: `${card.playerName} — Front` });
-    } else if (!showingFront && card.backImageUrl) {
-      onZoom({ src: card.backImageUrl, alt: `${card.playerName} — Back` });
-    } else if (card.imageUrl) {
-      onZoom({ src: card.imageUrl, alt: card.playerName });
-    }
-  }
-
-  return (
-    <div
-      style={st.spotlight}
-      onMouseEnter={handleMouseEnter}
-      onMouseLeave={handleMouseLeave}
-      onClick={handleClick}
-    >
-      {/* Canvas fills the spotlight container */}
-      <canvas
-        ref={canvasRef}
-        style={st.canvas}
-        title={hovered ? "Click to zoom" : undefined}
-      />
-
-      {/* Loading state */}
-      {loading && (
-        <div style={st.loadingOverlay}>
-          <span style={st.loadingDot}>●</span>
-        </div>
-      )}
-
-      {/* Hover hint */}
-      {hovered && !loading && (
-        <div style={st.hoverHint}>
-          <span style={st.hoverHintText}>🔍 Click to zoom</span>
-        </div>
-      )}
-    </div>
-  );
 }
 
 // ---------------------------------------------------------------------------
@@ -387,131 +18,340 @@ function CardViewport({ card, onZoom }) {
 // ---------------------------------------------------------------------------
 
 export default function CardModal({ card, onClose }) {
-  const [zoomSrc, setZoomSrc] = useState(null);
-  const contentRef = useRef(null);
-  const rare = isRare(card);
+  // CardPop is always mounted while the sidebar is open — `pop.open` toggles
+  // its visibility via opacity + pointer-events. Keeping it mounted skips the
+  // React reconciliation that would otherwise run on every zoom click.
+  const [pop, setPop] = useState({ open: false, src: null, alt: null });
+  const [visible, setVisible]         = useState(false);
+  const [closing, setClosing]         = useState(false);
+  const [sales, setSales]             = useState([]);
+  const [salesLoading, setSalesLoading] = useState(true);
+  const [salesError, setSalesError]   = useState(false);
+  const tier = getRarityTier(card);
+  const rare = tier !== null;
 
-  // Close on Escape (only when zoom is not open)
+  // Slide-in on mount: paint at translateX(100%), then flip to 0 on next frame
+  // so the CSS transition has a from/to to interpolate.
   useEffect(() => {
-    if (zoomSrc) return;
-    function onKey(e) { if (e.key === "Escape") onClose(); }
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose, zoomSrc]);
+    const id = requestAnimationFrame(() => setVisible(true));
+    return () => cancelAnimationFrame(id);
+  }, []);
 
-  // Lock body scroll
+  // Lock body scroll while sidebar is open
   useEffect(() => {
     const prev = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     return () => { document.body.style.overflow = prev; };
   }, []);
 
-  function handleBackdrop(e) {
-    if (!contentRef.current?.contains(e.target)) onClose();
+  function handleClose() {
+    if (closing) return;
+    setClosing(true);
+    setVisible(false);
+    setTimeout(onClose, 320);
   }
+
+  // Escape closes the sidebar (skip when the zoom pop is open — its own
+  // Escape handler closes the pop instead)
+  useEffect(() => {
+    if (pop.open) return;
+    function onKey(e) { if (e.key === "Escape") handleClose(); }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pop.open]);
+
+  // Fetch sales history for this card
+  useEffect(() => {
+    let cancelled = false;
+    setSalesLoading(true);
+    setSalesError(false);
+    getCardSales(card.id)
+      .then((data) => {
+        if (!cancelled) setSales(data?.sales ?? []);
+      })
+      .catch(() => {
+        if (!cancelled) { setSalesError(true); setSales([]); }
+      })
+      .finally(() => {
+        if (!cancelled) setSalesLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [card.id]);
 
   const displayValue = card.estimatedValue ?? card.avgSalePrice;
 
   return (
     <>
-      <div style={st.backdrop} onClick={handleBackdrop}>
-        <div ref={contentRef} style={{ ...st.modal, ...(rare ? st.modalRare : {}) }}>
-          <button style={st.closeBtn} onClick={onClose} aria-label="Close">✕</button>
+      <div
+        style={{ ...st.backdrop, opacity: visible ? 1 : 0 }}
+        onClick={handleClose}
+      />
+      <aside
+        style={{
+          ...st.sidebar,
+          ...(tier ? sidebarTierStyle(tier) : {}),
+          transform: visible ? "translateX(0)" : "translateX(100%)",
+        }}
+        role="dialog"
+        aria-label="Card details"
+      >
+        <button style={st.closeBtn} onClick={handleClose} aria-label="Close">✕</button>
 
-          <div style={st.body}>
-            {/* ── Left: Three.js card ── */}
-            <div style={st.imageCol}>
-              <CardViewport card={card} onZoom={setZoomSrc} />
+        <div style={st.scroll}>
+          {/* ── Card image ── */}
+          <CardImage
+            card={card}
+            onZoom={(args) => setPop({ open: true, ...args })}
+          />
 
-              <div style={{ ...st.gradeBadge, ...(rare ? st.gradeBadgeRare : {}) }}>
-                PSA {card.grade}
-                {card.gradeDescription && (
-                  <span style={st.gradeDesc}> — {card.gradeDescription}</span>
+          {/* ── Player + subtitle ── */}
+          <h2 style={st.playerName}>{card.playerName ?? "Unknown Player"}</h2>
+          <p style={st.subLine}>
+            {[card.year, card.brand, card.sport].filter(Boolean).join(" · ") || "—"}
+          </p>
+
+          {/* ── Grade + tier badges ── */}
+          <div style={st.gradeRow}>
+            <div style={{ ...st.gradeBadge, ...(tier ? gradeBadgeTierStyle(tier) : {}) }}>
+              <img src="/psa.avif" alt="PSA" style={st.gradeBadgeLogo} />
+              <span style={st.gradeBadgeNum}>{card.grade}</span>
+              {card.gradeDescription && (
+                <span style={st.gradeDesc}>{card.gradeDescription}</span>
+              )}
+            </div>
+            {tier && <TierBanner tier={tier} card={card} />}
+          </div>
+
+          {/* ── Card details ── */}
+          <table style={st.table}>
+            <tbody>
+              {[
+                ["Card #",  card.cardNumber],
+                ["Cert #",  card.certNumber],
+                ["Variety", card.variety],
+              ].map(([label, val]) =>
+                val ? (
+                  <tr key={label}>
+                    <td style={st.tdLabel}>{label}</td>
+                    <td style={st.tdVal}>{val}</td>
+                  </tr>
+                ) : null
+              )}
+            </tbody>
+          </table>
+
+          {/* ── Population ── */}
+          {(card.psaPopulation !== null || card.psaPopulationHigher !== null) && (
+            <>
+              <div style={st.sectionHead}>PSA Population</div>
+              <div style={{ ...st.popBlock, ...(rare ? st.popBlockRare : {}) }}>
+                {card.psaPopulation !== null && (
+                  <PopStat
+                    label="At grade"
+                    value={card.psaPopulation.toLocaleString()}
+                    highlight={rare}
+                  />
+                )}
+                {card.psaPopulationHigher !== null && (
+                  <PopStat
+                    label="Graded higher"
+                    value={card.psaPopulationHigher.toLocaleString()}
+                    highlight={card.psaPopulationHigher === 0}
+                    highlightColor="#10b981"
+                  />
                 )}
               </div>
+            </>
+          )}
 
-              {rare && <div style={st.rareBanner}>✦ Rare — Low Population</div>}
-            </div>
+          {/* ── Market value ── */}
+          {displayValue !== null && (
+            <>
+              <div style={st.sectionHead}>Market Value</div>
+              <div style={st.priceBlock}>
+                <div style={st.mainPrice}>{fmt(displayValue)}</div>
+                <div style={st.priceDetails}>
+                  {card.avgSalePrice  && <span>Avg {fmt(card.avgSalePrice)}</span>}
+                  {card.lastSalePrice && <><span style={st.dot}>·</span><span>Last {fmt(card.lastSalePrice)}</span></>}
+                  {card.numSales      && <><span style={st.dot}>·</span><span>{card.numSales} sales</span></>}
+                </div>
+                {card.priceSource && (
+                  <span style={{ ...st.sourceBadge, ...sourceBadgeStyle(card.priceSource) }}>
+                    {badgeLabel(card.priceSource)}
+                  </span>
+                )}
+              </div>
+            </>
+          )}
 
-            {/* ── Right: details ── */}
-            <div style={st.detailCol}>
-              <h2 style={st.playerName}>{card.playerName ?? "Unknown Player"}</h2>
-              <p style={st.subLine}>
-                {[card.year, card.brand, card.sport].filter(Boolean).join(" · ")}
-              </p>
+          {/* ── Cost + P&L ── */}
+          <CostAndPnl card={card} displayValue={displayValue} />
 
-              <div style={st.divider} />
+          {/* ── Target price (only when set) ── */}
+          {card.targetPrice != null && (
+            <>
+              <div style={st.sectionHead}>Target Price</div>
+              <div style={st.targetBlock}>
+                <span style={st.targetValue}>{fmt(card.targetPrice)}</span>
+                {card.targetReached && (
+                  <span style={st.targetReachedTag}>
+                    <span style={st.targetReachedDot} /> Target Hit
+                  </span>
+                )}
+              </div>
+            </>
+          )}
 
-              <table style={st.table}>
-                <tbody>
-                  {[
-                    ["Card #",  card.cardNumber],
-                    ["Cert #",  card.certNumber],
-                    ["Year",    card.year],
-                    ["Brand",   card.brand],
-                    ["Sport",   card.sport],
-                    ["Variety", card.variety],
-                  ].map(([label, val]) =>
-                    val ? (
-                      <tr key={label}>
-                        <td style={st.tdLabel}>{label}</td>
-                        <td style={st.tdVal}>{val}</td>
-                      </tr>
-                    ) : null
-                  )}
-                </tbody>
-              </table>
-
-              {(card.psaPopulation !== null || card.psaPopulationHigher !== null) && (
-                <>
-                  <div style={st.sectionHead}>PSA Population</div>
-                  <div style={{ ...st.popBlock, ...(rare ? st.popBlockRare : {}) }}>
-                    {card.psaPopulation !== null && (
-                      <PopStat label="At this grade" value={card.psaPopulation.toLocaleString()} highlight={rare} />
-                    )}
-                    {card.psaPopulationHigher !== null && (
-                      <PopStat
-                        label="Graded higher"
-                        value={card.psaPopulationHigher.toLocaleString()}
-                        highlight={card.psaPopulationHigher === 0}
-                        highlightColor="#059669"
-                      />
-                    )}
-                  </div>
-                </>
-              )}
-
-              {displayValue !== null && (
-                <>
-                  <div style={st.sectionHead}>Market Value</div>
-                  <div style={st.priceBlock}>
-                    <div style={st.mainPrice}>{fmt(displayValue)}</div>
-                    <div style={st.priceDetails}>
-                      {card.avgSalePrice  && <span>Avg {fmt(card.avgSalePrice)}</span>}
-                      {card.lastSalePrice && <><span style={st.dot}>·</span><span>Last {fmt(card.lastSalePrice)}</span></>}
-                      {card.numSales      && <><span style={st.dot}>·</span><span>{card.numSales} sales</span></>}
-                    </div>
-                    {card.priceSource && (
-                      <span style={{ ...st.sourceBadge, ...sourceBadgeStyle(card.priceSource) }}>
-                        {badgeLabel(card.priceSource)}
-                      </span>
-                    )}
-                  </div>
-                </>
-              )}
-            </div>
-          </div>
+          {/* ── Sales history ── */}
+          <div style={st.sectionHead}>Sales History</div>
+          <SalesHistory loading={salesLoading} error={salesError} sales={sales} />
         </div>
-      </div>
+      </aside>
 
-      {zoomSrc && <ZoomView src={zoomSrc.src} alt={zoomSrc.alt} onClose={() => setZoomSrc(null)} />}
+      {/* Always mounted; toggled via pop.open. Avoids mount/unmount cost
+          and pre-warms the layout/style for instant subsequent opens. */}
+      <CardPop
+        open={pop.open}
+        src={pop.src}
+        alt={pop.alt}
+        onClose={() => setPop((p) => ({ ...p, open: false }))}
+      />
     </>
   );
+}
+
+// ─── Card image (5:7 framed, click-to-zoom) ──────────────────────────
+// Refreshes the URL via getCard on mount — the freshly-signed S3 URL
+// avoids any CORS-cache issues from the portfolio grid fetch.
+function CardImage({ card, onZoom }) {
+  const [imgUrl, setImgUrl] = useState(card.imageUrl ?? null);
+  const [loaded, setLoaded] = useState(false);
+  const [errored, setErrored] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    getCard(card.id)
+      .then((fresh) => {
+        if (!cancelled && fresh.imageUrl) setImgUrl(fresh.imageUrl);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [card.id]);
+
+  function handleClick() {
+    if (!imgUrl) return;
+    onZoom({ src: imgUrl, alt: card.playerName ?? "Card" });
+  }
+
+  return (
+    <div style={st.imageOuter}>
+      <div
+        style={{ ...st.imageFrame, cursor: imgUrl ? "pointer" : "default" }}
+        onClick={handleClick}
+        title={imgUrl ? "Click to zoom" : undefined}
+      >
+        {imgUrl && !errored ? (
+          <img
+            src={imgUrl}
+            alt={card.playerName ?? "Card"}
+            onLoad={() => setLoaded(true)}
+            onError={() => setErrored(true)}
+            draggable={false}
+            style={st.cardImage}
+          />
+        ) : (
+          <div style={st.imageFallback}>
+            <span style={{ fontSize: "2rem", opacity: 0.4 }}>🃏</span>
+            <span style={{ fontSize: "0.7rem", color: "#475569", letterSpacing: "0.08em", textTransform: "uppercase" }}>
+              {errored ? "Image unavailable" : "No image"}
+            </span>
+          </div>
+        )}
+        {!loaded && imgUrl && !errored && (
+          <div style={st.imageLoading}>
+            <span style={{ color: "#475569", fontSize: "1.2rem", animation: "pulse 1.2s ease-in-out infinite" }}>●</span>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function sidebarTierStyle(tier) {
+  if (tier === "ghost") {
+    return {
+      borderLeft: "1px solid rgba(226,232,240,0.55)",
+      boxShadow: "-12px 0 40px rgba(0,0,0,0.6), 0 0 0 1px rgba(226,232,240,0.18), 0 0 80px rgba(226,232,240,0.12)",
+    };
+  }
+  if (tier === "ultra_rare") {
+    return {
+      borderLeft: "1px solid rgba(245,158,11,0.55)",
+      boxShadow: "-12px 0 40px rgba(0,0,0,0.6), 0 0 0 1px rgba(245,158,11,0.2), 0 0 80px rgba(245,158,11,0.1)",
+    };
+  }
+  return {
+    borderLeft: "1px solid rgba(147,197,253,0.45)",
+    boxShadow: "-12px 0 40px rgba(0,0,0,0.6), 0 0 0 1px rgba(147,197,253,0.2)",
+  };
 }
 
 // ---------------------------------------------------------------------------
 // Small sub-components
 // ---------------------------------------------------------------------------
+
+// ─── Tiered rarity banner shown beneath the 3D viewport ───
+function TierBanner({ tier, card }) {
+  const variant =
+    tier === "ghost"      ? st.tierBannerGhost
+    : tier === "ultra_rare" ? st.tierBannerUltraRare
+    : st.tierBannerRare;
+  const sub = tier === "ghost"
+    ? `Pop ${card.psaPopulation} · None Higher`
+    : tier === "ultra_rare"
+    ? `Pop ${card.psaPopulation} · None Higher`
+    : `Pop ${card.psaPopulation} · None Higher`;
+  return (
+    <div style={{ ...st.tierBannerBase, ...variant }}>
+      {tier === "ghost"
+        ? <span style={st.tierBannerGhostIcon}><GhostIcon size={28} /></span>
+        : <span style={st.tierBannerMark}>✦</span>}
+      <span style={st.tierBannerLabel}>{TIER_LABELS[tier]}</span>
+      <span style={st.tierBannerDot}>·</span>
+      <span style={st.tierBannerSub}>{sub}</span>
+    </div>
+  );
+}
+
+function modalTierStyle(tier) {
+  if (tier === "ghost")
+    return { boxShadow: "0 24px 60px rgba(0,0,0,0.35), 0 0 0 2px rgba(226,232,240,0.85), 0 0 60px rgba(226,232,240,0.25)" };
+  if (tier === "ultra_rare")
+    return { boxShadow: "0 24px 60px rgba(0,0,0,0.35), 0 0 0 2px #f59e0b" };
+  return { boxShadow: "0 24px 60px rgba(0,0,0,0.35), 0 0 0 2px rgba(147,197,253,0.85)" };
+}
+
+function gradeBadgeTierStyle(tier) {
+  if (tier === "ghost") {
+    return {
+      background: "linear-gradient(135deg, #f8fafc, #cbd5e1)",
+      color: "#0f172a",
+      boxShadow: "0 0 16px rgba(255,255,255,0.45)",
+    };
+  }
+  if (tier === "ultra_rare") {
+    return {
+      background: "linear-gradient(135deg, #fef3c7, #fde68a)",
+      boxShadow: "0 2px 8px rgba(217,119,6,0.25)",
+    };
+  }
+  return {
+    background: "linear-gradient(135deg, #dbeafe, #bfdbfe)",
+    color: "#1e3a8a",
+    boxShadow: "0 0 12px rgba(147,197,253,0.4)",
+  };
+}
 
 function PopStat({ label, value, highlight, highlightColor = "#d97706" }) {
   return (
@@ -521,6 +361,38 @@ function PopStat({ label, value, highlight, highlightColor = "#d97706" }) {
         {value}
       </span>
     </div>
+  );
+}
+
+function CostAndPnl({ card, displayValue }) {
+  if (card.myCost == null) return null;
+  const hasValue  = displayValue != null;
+  const pnl       = hasValue ? displayValue - card.myCost : null;
+  const positive  = pnl != null && pnl >= 0;
+  const pnlPct    = hasValue && card.myCost > 0 ? (pnl / card.myCost) * 100 : null;
+
+  return (
+    <>
+      <div style={st.sectionHead}>Your Cost</div>
+      <div style={st.costBlock}>
+        <div style={st.costRow}>
+          <div style={st.costMain}>{fmt(card.myCost)}</div>
+        </div>
+        {pnl != null && (
+          <div style={{ ...st.pnlRow, color: positive ? "#059669" : "#dc2626" }}>
+            <span style={st.pnlAmount}>
+              {positive ? "+" : "−"}{fmt(Math.abs(pnl))}
+            </span>
+            {pnlPct != null && (
+              <span style={st.pnlPct}>
+                ({positive ? "+" : "−"}{Math.abs(pnlPct).toFixed(1)}%)
+              </span>
+            )}
+            <span style={st.pnlLabel}>{positive ? "profit" : "loss"}</span>
+          </div>
+        )}
+      </div>
+    </>
   );
 }
 
@@ -536,119 +408,273 @@ function sourceBadgeStyle(s) {
 // ---------------------------------------------------------------------------
 
 const st = {
+  // ─── Backdrop + sidebar shell ───
   backdrop: {
     position: "fixed", inset: 0, zIndex: 1000,
-    background: "rgba(0,0,0,0.72)",
-    display: "flex", alignItems: "center", justifyContent: "center",
-    padding: "1rem", backdropFilter: "blur(3px)",
+    background: "rgba(5,8,17,0.65)",
+    backdropFilter: "blur(3px)",
+    transition: "opacity 0.32s ease",
   },
-  modal: {
-    position: "relative", background: "#fff", borderRadius: 16,
-    width: "100%", maxWidth: 820, maxHeight: "90vh", overflowY: "auto",
-    boxShadow: "0 24px 60px rgba(0,0,0,0.35)",
+  sidebar: {
+    position: "fixed", top: 0, right: 0, bottom: 0,
+    width: 420, maxWidth: "100%",
+    zIndex: 1001,
+    background: "linear-gradient(180deg, #0f172a 0%, #0a0f1f 100%)",
+    borderLeft: "1px solid rgba(255,255,255,0.06)",
+    boxShadow: "-12px 0 40px rgba(0,0,0,0.6)",
+    transition: "transform 0.32s cubic-bezier(0.4, 0, 0.2, 1)",
+    color: "#e2e8f0",
+    display: "flex", flexDirection: "column",
   },
-  modalRare: { boxShadow: "0 24px 60px rgba(0,0,0,0.35), 0 0 0 2px #f59e0b" },
+  scroll: {
+    height: "100%",
+    overflowY: "auto",
+    padding: "3.25rem 1.75rem 2rem",
+  },
+
+  // ─── Tiered rarity banner ───
+  // Padding tuned to give the same outer pill height as the PSA grade badge,
+  // so the two sit beside each other as a matched pair (both ~36–38px tall
+  // with their inner elements at ~32px).
+  tierBannerBase: {
+    display: "inline-flex", alignItems: "center", gap: "0.5rem",
+    fontSize: "0.7rem", fontWeight: 800,
+    letterSpacing: "0.1em", textTransform: "uppercase",
+    padding: "3px 0.85rem 3px 0.3rem",
+    borderRadius: 999,
+  },
+  tierBannerUltraRare: {
+    background: "linear-gradient(135deg, #f59e0b, #d97706)",
+    color: "#0f172a",
+    boxShadow: "0 2px 12px rgba(217,119,6,0.45)",
+  },
+  tierBannerRare: {
+    background: "linear-gradient(135deg, rgba(147,197,253,0.18), rgba(99,102,241,0.12))",
+    color: "#1e3a8a",
+    border: "1px solid rgba(147,197,253,0.7)",
+    boxShadow: "0 0 12px rgba(147,197,253,0.3)",
+  },
+  // Pill stays static; the GhostIcon inside carries the float/sway animation.
+  // Padding inherits from tierBannerBase so all tier pills (and the PSA
+  // grade badge) line up at the same height.
+  tierBannerGhost: {
+    background: "linear-gradient(135deg, rgba(248,250,252,0.92), rgba(203,213,225,0.85))",
+    color: "#0f172a",
+    border: "1px solid rgba(255,255,255,0.9)",
+    boxShadow: "0 0 22px rgba(255,255,255,0.55), 0 0 4px rgba(255,255,255,0.9)",
+  },
+  tierBannerGhostIcon: {
+    display: "inline-flex", alignItems: "center",
+    marginRight: "0.15rem",
+  },
+  tierBannerMark: { fontSize: "0.85rem" },
+  tierBannerLabel: {},
+  tierBannerDot: { opacity: 0.5 },
+  tierBannerSub: { fontWeight: 600, letterSpacing: "0.04em", opacity: 0.85 },
   closeBtn: {
-    position: "absolute", top: 14, right: 14, zIndex: 1,
-    background: "#f3f4f6", border: "none", borderRadius: "50%",
+    position: "absolute", top: 14, right: 14, zIndex: 5,
+    background: "rgba(255,255,255,0.06)",
+    border: "1px solid rgba(255,255,255,0.08)",
+    borderRadius: "50%",
     width: 32, height: 32, fontSize: "0.85rem",
-    cursor: "pointer", color: "#6b7280",
+    cursor: "pointer", color: "#94a3b8",
     display: "flex", alignItems: "center", justifyContent: "center",
   },
-  body: { display: "flex", gap: "2rem", padding: "2rem", flexWrap: "wrap" },
 
-  imageCol: {
-    display: "flex", flexDirection: "column", alignItems: "center",
-    gap: "0.75rem", flexShrink: 0,
+  // ─── Sidebar content sections ───
+  // Card image: 5:7 framed container (matches a real trading card's aspect
+  // ratio); the <img> inside uses max-width/max-height so it never upscales
+  // past its natural resolution. object-fit: contain protects against
+  // stretching if the source image happens to have a different aspect.
+  imageOuter: {
+    display: "flex", justifyContent: "center",
+    marginBottom: "1.5rem",
   },
-
-  // Spotlight: canvas fills it via position:absolute, gradient is the background
-  spotlight: {
-    width: 284, height: 392,
-    borderRadius: 18, overflow: "hidden",
-    background: "radial-gradient(ellipse at 50% 50%, #ffffff 0%, #f4f5f7 50%, #e4e7ed 100%)",
+  imageFrame: {
     position: "relative",
-    cursor: "pointer",
-    boxShadow: "inset 0 2px 16px rgba(0,0,0,0.06)",
+    width: "100%", maxWidth: 320,
+    aspectRatio: "5 / 7",
+    background: "rgba(255,255,255,0.025)",
+    border: "1px solid rgba(255,255,255,0.05)",
+    borderRadius: 12,
+    overflow: "hidden",
+    display: "flex", alignItems: "center", justifyContent: "center",
   },
-  canvas: {
-    position: "absolute", inset: 0,
-    width: "100%", height: "100%",
+  cardImage: {
+    maxWidth: "100%",
+    maxHeight: "100%",
+    width: "auto",
+    height: "auto",
+    objectFit: "contain",
     display: "block",
   },
-  loadingOverlay: {
+  imageFallback: {
+    display: "flex", flexDirection: "column",
+    alignItems: "center", justifyContent: "center",
+    gap: "0.5rem",
+  },
+  imageLoading: {
     position: "absolute", inset: 0,
     display: "flex", alignItems: "center", justifyContent: "center",
     pointerEvents: "none",
   },
-  loadingDot: {
-    color: "#d1d5db", fontSize: "2rem",
-    animation: "pulse 1.2s ease-in-out infinite",
-  },
-  hoverHint: {
-    position: "absolute", inset: 0,
-    display: "flex", alignItems: "center", justifyContent: "center",
-    pointerEvents: "none",
-  },
-  hoverHintText: {
-    background: "rgba(0,0,0,0.52)", color: "#fff",
-    fontSize: "0.8rem", fontWeight: 600,
-    padding: "0.4rem 0.9rem", borderRadius: 20,
-    backdropFilter: "blur(4px)",
+  gradeRow: {
+    display: "flex", alignItems: "center",
+    gap: "0.6rem", flexWrap: "wrap",
+    marginTop: "1rem", marginBottom: "1.5rem",
   },
 
+  // Matches tierBannerBase padding so PSA badge + tier banner are identical
+  // height when shown as a pair in the gradeRow.
   gradeBadge: {
+    display: "inline-flex", alignItems: "center", gap: "0.5rem",
     background: "#fef3c7", color: "#92400e",
-    fontWeight: 700, fontSize: "0.9rem",
-    padding: "0.4rem 0.9rem", borderRadius: 20,
+    fontWeight: 700, fontSize: "0.85rem",
+    padding: "3px 0.85rem 3px 0.3rem",
+    borderRadius: 999,
   },
-  gradeBadgeRare: {
-    background: "linear-gradient(135deg,#fef3c7,#fde68a)",
-    boxShadow: "0 2px 8px rgba(217,119,6,0.25)",
+  // 28px image + 2px padding top/bot = 32px total — same height as the
+  // GhostIcon when rendered at size 28 (~31.5px tall). Both inner elements
+  // line up at ~32px.
+  gradeBadgeLogo: {
+    height: 28, width: "auto",
+    display: "block",
+    background: "#fff",
+    padding: "2px 5px",
+    borderRadius: 4,
   },
-  gradeDesc: { fontWeight: 400, fontSize: "0.8rem" },
-  rareBanner: {
-    background: "linear-gradient(135deg,#f59e0b,#d97706)",
-    color: "#fff", fontWeight: 700,
-    fontSize: "0.78rem", letterSpacing: "0.04em",
-    padding: "0.35rem 0.9rem", borderRadius: 20,
-    boxShadow: "0 2px 8px rgba(217,119,6,0.35)",
+  gradeBadgeNum: {
+    fontSize: "1.05rem", fontWeight: 800,
+    fontVariantNumeric: "tabular-nums",
+    letterSpacing: "-0.01em",
+  },
+  gradeDesc: {
+    fontWeight: 500, fontSize: "0.7rem",
+    opacity: 0.7, marginLeft: "0.15rem",
+    letterSpacing: "0.02em",
   },
 
-  detailCol: { flex: 1, minWidth: 240 },
-  playerName: { fontSize: "1.5rem", fontWeight: 800, margin: 0, lineHeight: 1.2 },
-  subLine: { color: "#6b7280", fontSize: "0.88rem", marginTop: "0.3rem" },
-  divider: { borderTop: "1px solid #f3f4f6", margin: "1rem 0" },
-  table: { width: "100%", borderCollapse: "collapse", marginBottom: "1.25rem" },
-  tdLabel: {
-    color: "#9ca3af", fontSize: "0.78rem", fontWeight: 500,
-    padding: "0.3rem 0.75rem 0.3rem 0", width: 90, verticalAlign: "top",
+  playerName: {
+    fontSize: "1.4rem", fontWeight: 800,
+    margin: 0, lineHeight: 1.2,
+    color: "#f1f5f9",
+    letterSpacing: "-0.02em",
   },
-  tdVal: { fontSize: "0.88rem", color: "#111827", padding: "0.3rem 0" },
+  subLine: {
+    color: "#94a3b8", fontSize: "0.85rem",
+    marginTop: "0.35rem", letterSpacing: "0.02em",
+  },
+  table: { width: "100%", borderCollapse: "collapse", marginBottom: "1.5rem" },
+  tdLabel: {
+    color: "#64748b", fontSize: "0.62rem", fontWeight: 700,
+    padding: "0.4rem 0.75rem 0.4rem 0",
+    width: 90, verticalAlign: "top",
+    letterSpacing: "0.16em", textTransform: "uppercase",
+  },
+  tdVal: {
+    fontSize: "0.88rem", color: "#e2e8f0",
+    padding: "0.4rem 0", fontWeight: 500,
+  },
   sectionHead: {
-    fontSize: "0.7rem", fontWeight: 700, letterSpacing: "0.08em",
-    textTransform: "uppercase", color: "#9ca3af", marginBottom: "0.5rem",
+    fontSize: "0.62rem", fontWeight: 700,
+    letterSpacing: "0.18em", textTransform: "uppercase",
+    color: "#64748b",
+    marginBottom: "0.65rem", marginTop: "1.25rem",
   },
   popBlock: {
-    background: "#f9fafb", borderRadius: 8,
-    padding: "0.75rem", marginBottom: "1.25rem",
-    display: "flex", gap: "1.5rem",
+    background: "rgba(255,255,255,0.025)",
+    border: "1px solid rgba(255,255,255,0.05)",
+    borderRadius: 10,
+    padding: "0.9rem 1rem", marginBottom: "0.5rem",
+    display: "flex", gap: "1.75rem",
   },
-  popBlockRare: { background: "#fffbeb", border: "1px solid #fde68a" },
-  popStat: { display: "flex", flexDirection: "column", gap: "0.15rem" },
-  popStatLabel: { fontSize: "0.72rem", color: "#9ca3af" },
-  popStatValue: { fontSize: "1.1rem", fontWeight: 700, color: "#111827" },
-  priceBlock: { marginBottom: "1rem" },
-  mainPrice: { fontSize: "1.8rem", fontWeight: 800, color: "#111827", lineHeight: 1 },
+  popBlockRare: {
+    background: "rgba(245,158,11,0.06)",
+    border: "1px solid rgba(245,158,11,0.25)",
+  },
+  popStat: { display: "flex", flexDirection: "column", gap: "0.2rem" },
+  popStatLabel: {
+    fontSize: "0.62rem", color: "#64748b",
+    letterSpacing: "0.14em", textTransform: "uppercase",
+    fontWeight: 600,
+  },
+  popStatValue: {
+    fontSize: "1.15rem", fontWeight: 800, color: "#f1f5f9",
+    fontVariantNumeric: "tabular-nums",
+    letterSpacing: "-0.01em",
+  },
+  priceBlock: { marginBottom: "0.75rem" },
+  mainPrice: {
+    fontSize: "1.85rem", fontWeight: 800,
+    color: "#f59e0b", lineHeight: 1,
+    fontVariantNumeric: "tabular-nums",
+    letterSpacing: "-0.02em",
+    textShadow: "0 0 32px rgba(245,158,11,0.18)",
+  },
   priceDetails: {
     display: "flex", alignItems: "center", flexWrap: "wrap", gap: "0.3rem",
-    fontSize: "0.8rem", color: "#6b7280", marginTop: "0.35rem",
+    fontSize: "0.78rem", color: "#94a3b8", marginTop: "0.4rem",
   },
-  dot: { color: "#d1d5db" },
+  dot: { color: "#475569" },
   sourceBadge: {
-    display: "inline-block", marginTop: "0.5rem",
-    fontSize: "0.65rem", fontWeight: 600,
-    padding: "0.15rem 0.45rem", borderRadius: 3,
-    textTransform: "uppercase", letterSpacing: "0.04em",
+    display: "inline-block", marginTop: "0.55rem",
+    fontSize: "0.6rem", fontWeight: 700,
+    padding: "0.18rem 0.5rem", borderRadius: 3,
+    textTransform: "uppercase", letterSpacing: "0.08em",
   },
+
+  // ── Cost / P&L block ──
+  costBlock: {
+    background: "rgba(255,255,255,0.025)",
+    border: "1px solid rgba(255,255,255,0.05)",
+    borderRadius: 10,
+    padding: "0.95rem 1.1rem",
+  },
+  costRow: { display: "flex", alignItems: "baseline" },
+  costMain: {
+    fontSize: "1.5rem", fontWeight: 800, color: "#f1f5f9",
+    fontVariantNumeric: "tabular-nums", lineHeight: 1,
+    letterSpacing: "-0.02em",
+  },
+  pnlRow: {
+    display: "flex", alignItems: "center", gap: "0.4rem",
+    marginTop: "0.6rem",
+    fontVariantNumeric: "tabular-nums",
+  },
+  pnlAmount: { fontSize: "1rem", fontWeight: 800 },
+  pnlPct:    { fontSize: "0.85rem", fontWeight: 700, opacity: 0.85 },
+  pnlLabel: {
+    marginLeft: "auto",
+    fontSize: "0.6rem", fontWeight: 800,
+    letterSpacing: "0.16em", textTransform: "uppercase",
+    opacity: 0.85,
+  },
+
+  // ── Target price block ──
+  targetBlock: {
+    display: "flex", alignItems: "center", justifyContent: "space-between",
+    background: "rgba(245,158,11,0.06)",
+    border: "1px solid rgba(245,158,11,0.25)",
+    borderRadius: 10,
+    padding: "0.95rem 1.1rem",
+  },
+  targetValue: {
+    fontSize: "1.4rem", fontWeight: 800, color: "#fbbf24",
+    fontVariantNumeric: "tabular-nums",
+    letterSpacing: "-0.02em",
+  },
+  targetReachedTag: {
+    display: "inline-flex", alignItems: "center", gap: "0.4rem",
+    fontSize: "0.6rem", fontWeight: 800,
+    color: "#fbbf24", letterSpacing: "0.16em",
+    background: "rgba(15,23,42,0.6)",
+    border: "1px solid rgba(245,158,11,0.55)",
+    padding: "0.25rem 0.55rem", borderRadius: 999,
+  },
+  targetReachedDot: {
+    width: 6, height: 6, borderRadius: "50%",
+    background: "#f59e0b",
+    animation: "livePulse 1.6s ease-in-out infinite",
+  },
+
 };

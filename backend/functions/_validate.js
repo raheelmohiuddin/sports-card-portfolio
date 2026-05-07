@@ -2,10 +2,13 @@
 // Parameterised pg queries already prevent SQL injection; these add a second
 // layer by rejecting malformed inputs before they reach the query layer at all.
 
-// PostgreSQL serial/bigserial IDs: positive integer, no leading zeros.
+// Card IDs — accept either a UUID (current schema) or a positive integer
+// (legacy / hypothetical SERIAL columns). UUIDs are 8-4-4-4-12 hex with hyphens.
+const UUID_RE = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
 function isValidId(val) {
   if (val == null) return false;
   const s = String(val).trim();
+  if (UUID_RE.test(s)) return true;
   const n = parseInt(s, 10);
   return Number.isFinite(n) && n > 0 && String(n) === s;
 }

@@ -11,13 +11,26 @@ export class AuthStack extends Construct {
   constructor(scope: Construct, id: string) {
     super(scope, id);
 
-    this.userPool = new cognito.UserPool(this, "UserPool", {
+    // V3 — Cognito refuses schema attribute updates (preferred_username
+    // required: true → false), so we recreate the pool. Old V2 pool kept
+    // alive per the removalPolicy and lives on as an orphan.
+    this.userPool = new cognito.UserPool(this, "UserPoolV3", {
       userPoolName: "sports-card-portfolio-users",
       selfSignUpEnabled: true,
-      signInAliases: { email: true },
+      // Both email and preferred_username are accepted as sign-in identifiers.
+      // Cognito requires username:true when preferredUsername is enabled
+      // (the preferred_username acts as an alias on top of the primary username).
+      signInAliases: { username: true, email: true, preferredUsername: true },
       autoVerify: { email: true },
       standardAttributes: {
-        email: { required: true, mutable: true },
+        email:             { required: true, mutable: true },
+        givenName:         { required: true, mutable: true },
+        familyName:        { required: true, mutable: true },
+        // preferred_username is an alias — Cognito refuses values for alias
+        // attributes during signUp ("cannot be provided for unconfirmed
+        // account"). Marked NOT required so signUp succeeds; user picks it
+        // post-confirmation via updateUserAttributes on UsernameSetupPage.
+        preferredUsername: { required: false, mutable: true },
       },
       passwordPolicy: {
         minLength: 8,

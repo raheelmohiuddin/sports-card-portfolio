@@ -1,24 +1,60 @@
-import { useEffect, useRef, useState } from "react";
-import { getCards, deleteCard, getPortfolioValue, updateCardPrice } from "../services/api.js";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Link, useSearchParams } from "react-router-dom";
+import {
+  PieChart, Pie, Cell, Tooltip, ResponsiveContainer,
+  AreaChart, Area, XAxis, YAxis, CartesianGrid,
+} from "recharts";
+import {
+  getCards, deleteCard, getPortfolioValue, getPortfolioHistory,
+  updateCardPrice, updateCard,
+} from "../services/api.js";
 import CardModal from "../components/CardModal.jsx";
+import GhostIcon from "../components/GhostIcon.jsx";
+import { getRarityTier, TIER_LABELS, TIER_COLORS } from "../utils/rarity.js";
+import { gradients } from "../utils/theme.js";
 
+// Slice palette — gold-dominant with cool/jewel accents for variety.
+// Order matters: top categories get the gold tones first.
+const PALETTE = [
+  "#f59e0b", // gold
+  "#06b6d4", // cyan
+  "#fbbf24", // light gold
+  "#a78bfa", // purple
+  "#10b981", // emerald
+  "#f43f5e", // rose
+  "#d97706", // dark gold
+  "#94a3b8", // slate (overflow)
+];
+
+// ─── Helpers ────────────────────────────────────────────────────────────
+const fmtUsd = (n, opts = {}) =>
+  n != null
+    ? `$${parseFloat(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2, ...opts })}`
+    : "—";
+
+// Truthy when a card belongs to any rarity tier — used by hero count, filter chip, etc.
+function isRare(card) {
+  return getRarityTier(card) !== null;
+}
+
+// ─── Page ───────────────────────────────────────────────────────────────
 export default function PortfolioPage() {
-  const [cards, setCards] = useState([]);
-  const [totalValue, setTotalValue] = useState(null);
-  const [cardCount, setCardCount] = useState(0);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
+  const [cards, setCards]               = useState([]);
+  const [totalValue, setTotalValue]     = useState(null);
+  const [history, setHistory]           = useState([]);
+  const [loading, setLoading]           = useState(true);
+  const [error, setError]               = useState(null);
   const [selectedCard, setSelectedCard] = useState(null);
+  const [editingCard, setEditingCard]   = useState(null);
 
   useEffect(() => {
-    Promise.all([getCards(), getPortfolioValue()])
-      .then(([cardList, valueData]) => {
-        // Merge fresh pricing from getPortfolioValue into card list by ID
+    Promise.all([getCards(), getPortfolioValue(), getPortfolioHistory()])
+      .then(([cardList, valueData, historyData]) => {
         const pricingById = Object.fromEntries(valueData.cards.map((c) => [c.id, c]));
         const merged = cardList.map((card) => ({ ...card, ...pricingById[card.id] }));
         setCards(merged);
         setTotalValue(valueData.totalValue);
-        setCardCount(merged.length);
+        setHistory(historyData);
       })
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
@@ -31,204 +67,1160 @@ export default function PortfolioPage() {
       const next = prev.filter((c) => c.id !== id);
       const newTotal = next.reduce((sum, c) => sum + (c.estimatedValue ?? 0), 0);
       setTotalValue(Math.round(newTotal * 100) / 100);
-      setCardCount(next.length);
       return next;
     });
   }
 
-  if (loading) return <p style={{ color: "#6b7280", marginTop: "2rem" }}>Loading your portfolio…</p>;
-  if (error)   return <p style={{ color: "#dc2626" }}>Error: {error}</p>;
+  function handleCardUpdate(id, patch) {
+    setSelectedCard((prev) => (prev?.id === id ? { ...prev, ...patch } : prev));
+    setCards((prev) => {
+      const next = prev.map((c) => (c.id === id ? { ...c, ...patch } : c));
+      const newTotal = next.reduce((sum, c) => sum + (c.estimatedValue ?? 0), 0);
+      setTotalValue(Math.round(newTotal * 100) / 100);
+      return next;
+    });
+  }
+
+  const cardCount     = cards.length;
+  const rareCount     = useMemo(() => cards.filter(isRare).length, [cards]);
+  const ghostCount    = useMemo(
+    () => cards.filter((c) => getRarityTier(c) === "ghost").length,
+    [cards]
+  );
+  const avgValue      = cardCount > 0 && totalValue !== null ? totalValue / cardCount : null;
+  const totalInvested = useMemo(() => cards.reduce((s, c) => s + (c.myCost ?? 0), 0), [cards]);
+  const hasCost       = totalInvested > 0;
+  const pnl           = hasCost && totalValue !== null ? totalValue - totalInvested : null;
+  const pnlPct        = hasCost && pnl !== null ? (pnl / totalInvested) * 100 : null;
+  const alerts        = useMemo(() => cards.filter((c) => c.targetReached), [cards]);
+  const achievedMilestones = useMemo(
+    () => computeMilestones(totalValue, cardCount, rareCount, ghostCount),
+    [totalValue, cardCount, rareCount, ghostCount]
+  );
+
+  // Detect newly-achieved milestones (compare against localStorage record).
+  const [newMilestone, setNewMilestone] = useState(null);
+  useEffect(() => {
+    if (loading || achievedMilestones.length === 0) return;
+    const seen = new Set(JSON.parse(localStorage.getItem("scp.milestones") ?? "[]"));
+    const fresh = achievedMilestones.find((m) => !seen.has(m.id));
+    if (fresh) {
+      setNewMilestone(fresh);
+      const all = achievedMilestones.map((m) => m.id);
+      localStorage.setItem("scp.milestones", JSON.stringify(all));
+    }
+  }, [achievedMilestones, loading]);
+
+  // ── Sort, filter, view-mode state ──
+  const [sortBy, setSortBy] = useState("date-desc");
+  const [filters, setFilters] = useState({
+    sport: "", grade: "", cost: "all",
+    rare: false, targetHit: false,
+  });
+  const setFilter = (key, value) => setFilters((prev) => ({ ...prev, [key]: value }));
+  const clearFilters = () => setFilters({ sport: "", grade: "", cost: "all", rare: false, targetHit: false });
+  const filtersActive =
+    filters.sport || filters.grade || filters.cost !== "all" || filters.rare || filters.targetHit;
+
+  const [viewMode, setViewMode] = useState(() => {
+    if (typeof window === "undefined") return "grid";
+    return localStorage.getItem("scp.cardsView") === "list" ? "list" : "grid";
+  });
+  useEffect(() => {
+    localStorage.setItem("scp.cardsView", viewMode);
+  }, [viewMode]);
+
+  const uniqueSports = useMemo(
+    () => [...new Set(cards.map((c) => c.sport).filter(Boolean))].sort(),
+    [cards]
+  );
+  const uniqueGrades = useMemo(
+    () => [...new Set(cards.map((c) => c.grade).filter(Boolean))]
+      .sort((a, b) => parseGrade(b) - parseGrade(a)),
+    [cards]
+  );
+
+  const visibleCards = useMemo(() => {
+    let out = cards;
+    if (filters.sport)   out = out.filter((c) => c.sport === filters.sport);
+    if (filters.grade)   out = out.filter((c) => c.grade === filters.grade);
+    if (filters.rare)    out = out.filter(isRare);
+    if (filters.targetHit) out = out.filter((c) => c.targetReached);
+    if (filters.cost === "has") out = out.filter((c) => c.myCost != null);
+    if (filters.cost === "no")  out = out.filter((c) => c.myCost == null);
+    return sortCards(out, sortBy);
+  }, [cards, filters, sortBy]);
+
+  // ── Tab routing via URL search params ──
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tab = searchParams.get("tab") === "cards" ? "cards" : "dashboard";
+  const highlightId = searchParams.get("highlight");
+
+  function selectTab(next) {
+    setSearchParams((prev) => {
+      const np = new URLSearchParams(prev);
+      np.set("tab", next);
+      // Clearing highlight on a manual tab click feels right —
+      // it should only apply when the user arrived via a deep link.
+      if (next !== "cards") np.delete("highlight");
+      return np;
+    });
+  }
 
   return (
-    <div>
-      {/* Stats bar */}
-      <div style={styles.statsBar}>
-        <StatCard
-          label="Total Portfolio Value"
-          value={totalValue !== null ? `$${totalValue.toLocaleString("en-US", { minimumFractionDigits: 2 })}` : "—"}
-          highlight
-        />
-        <StatCard label="Cards" value={cardCount} />
-        <StatCard
-          label="Avg Card Value"
-          value={
-            cardCount > 0 && totalValue !== null
-              ? `$${(totalValue / cardCount).toLocaleString("en-US", { minimumFractionDigits: 2 })}`
-              : "—"
-          }
-        />
+    <div style={st.page}>
+      <div className="container" style={st.inner}>
+        {/* ── Tab bar ── */}
+        <nav style={st.tabBar}>
+          <TabButton label="Dashboard" active={tab === "dashboard"} onClick={() => selectTab("dashboard")} />
+          <TabButton label="My Cards" active={tab === "cards"}     onClick={() => selectTab("cards")}
+            badge={!loading ? cardCount : null} />
+        </nav>
+
+        {/* ── Dashboard ── */}
+        {tab === "dashboard" && (
+          <>
+            <HeroStats
+              totalValue={totalValue}
+              totalInvested={totalInvested}
+              pnl={pnl}
+              pnlPct={pnlPct}
+              hasCost={hasCost}
+              cardCount={cardCount}
+              avgValue={avgValue}
+              rareCount={rareCount}
+              loading={loading}
+              milestones={achievedMilestones}
+            />
+
+            {!loading && alerts.length > 0 && (
+              <AlertBanner alerts={alerts} onJump={() => selectTab("cards")} />
+            )}
+
+            {!loading && cards.length > 0 && (
+              <>
+                <AnalyticsPanel cards={cards} totalValue={totalValue} />
+                <InsightsRow cards={cards} />
+                <PriceHistoryChart history={history} />
+              </>
+            )}
+
+            {loading && <div style={st.stateMsg}>Loading your portfolio…</div>}
+            {error   && <div style={{ ...st.stateMsg, color: "#f87171" }}>Error: {error}</div>}
+            {!loading && !error && cards.length === 0 && <EmptyState />}
+          </>
+        )}
+
+        {/* ── My Cards ── */}
+        {tab === "cards" && (
+          <>
+            <div style={st.cardsBar}>
+              <div>
+                <p style={st.cardsBarLabel}>
+                  <span style={st.heroDot} /> My Cards
+                </p>
+                <p style={st.cardsBarSub}>
+                  {loading ? "Loading…" : cardCount === 0 ? "No cards yet" : `${cardCount} card${cardCount === 1 ? "" : "s"} in your portfolio`}
+                </p>
+              </div>
+              <Link to="/add-card" style={st.cardsAddBtn}>
+                <span style={st.cardsAddMark}>+</span> Add Card
+              </Link>
+            </div>
+
+            {!loading && !error && cards.length > 0 && (
+              <CardsToolbar
+                sortBy={sortBy} setSortBy={setSortBy}
+                filters={filters} setFilter={setFilter}
+                uniqueSports={uniqueSports} uniqueGrades={uniqueGrades}
+                viewMode={viewMode} setViewMode={setViewMode}
+                totalCount={cards.length} visibleCount={visibleCards.length}
+              />
+            )}
+
+            {loading ? (
+              <div style={st.stateMsg}>Loading your portfolio…</div>
+            ) : error ? (
+              <div style={{ ...st.stateMsg, color: "#f87171" }}>Error: {error}</div>
+            ) : cards.length === 0 ? (
+              <EmptyState />
+            ) : visibleCards.length === 0 ? (
+              <NoMatches onClear={clearFilters} />
+            ) : viewMode === "list" ? (
+              <CardListView
+                cards={visibleCards}
+                highlightId={highlightId}
+                onOpen={(c) => setSelectedCard(c)}
+                onEdit={(c) => setEditingCard(c)}
+                onDelete={(id) => handleDelete(id)}
+              />
+            ) : (
+              <div style={st.grid}>
+                {visibleCards.map((card, idx) => (
+                  <CardTile
+                    key={card.id}
+                    card={card}
+                    index={idx}
+                    highlighted={String(card.id) === String(highlightId)}
+                    onOpen={() => setSelectedCard(card)}
+                    onEdit={() => setEditingCard(card)}
+                    onDelete={() => handleDelete(card.id)}
+                    onCardUpdate={handleCardUpdate}
+                  />
+                ))}
+              </div>
+            )}
+          </>
+        )}
       </div>
 
-      {cards.length === 0 ? (
-        <p style={{ color: "#6b7280", marginTop: "2rem" }}>
-          No cards yet.{" "}
-          <a href="/add-card" style={{ color: "#4f46e5", fontWeight: 500 }}>Add your first card.</a>
-        </p>
-      ) : (
-        <div style={styles.grid}>
-          {cards.map((card) => (
-            <CardTile
-              key={card.id}
-              card={card}
-              onDelete={() => handleDelete(card.id)}
-              onOpen={() => setSelectedCard(card)}
-              onCardUpdate={(id, patch) => {
-                // Keep selectedCard in sync so the modal reflects the update
-                setSelectedCard((prev) => prev?.id === id ? { ...prev, ...patch } : prev);
-                setCards((prev) => {
-                  const next = prev.map((c) => c.id === id ? { ...c, ...patch } : c);
-                  const newTotal = next.reduce((sum, c) => sum + (c.estimatedValue ?? 0), 0);
-                  setTotalValue(Math.round(newTotal * 100) / 100);
-                  return next;
-                });
-              }}
-            />
+      {selectedCard && <CardModal card={selectedCard} onClose={() => setSelectedCard(null)} />}
+      {editingCard && (
+        <EditCostModal
+          card={editingCard}
+          onClose={() => setEditingCard(null)}
+          onSave={(patch) => {
+            handleCardUpdate(editingCard.id, patch);
+            setEditingCard(null);
+          }}
+        />
+      )}
+      {newMilestone && <MilestoneToast milestone={newMilestone} onDismiss={() => setNewMilestone(null)} />}
+    </div>
+  );
+}
+
+// ─── Hero stats bar ────────────────────────────────────────────────────
+function HeroStats({ totalValue, totalInvested, pnl, pnlPct, hasCost, cardCount, avgValue, rareCount, loading, milestones }) {
+  const positive = pnl != null && pnl >= 0;
+  const pnlColor = positive ? "#10b981" : "#f87171";
+
+  return (
+    <header style={st.hero}>
+      <div style={st.heroTopRow}>
+        <div style={st.heroLabel}>
+          <span style={st.heroDot} />
+          <span style={st.heroLabelText}>Your Portfolio</span>
+        </div>
+        <div style={st.heroAccent}>◆</div>
+      </div>
+
+      {milestones && milestones.length > 0 && (
+        <div style={st.milestoneRow}>
+          {milestones.slice(0, 8).map((m) => (
+            <span key={m.id} style={st.milestoneBadge} title={m.label}>
+              <span style={st.milestoneIcon}>✦</span> {m.label}
+            </span>
           ))}
         </div>
       )}
 
-      {selectedCard && (
-        <CardModal
-          card={selectedCard}
-          onClose={() => setSelectedCard(null)}
-        />
+      {/* When cost is set, P&L gets top billing — biggest typography in the panel,
+          color-coded green/red. Total value drops to a secondary metric below.
+          Without cost data, fall back to the total-value-as-hero layout. */}
+      {hasCost && pnl != null ? (
+        <>
+          <div style={st.heroPnlBlock}>
+            <div style={{ ...st.heroPnlValue, color: pnlColor }}>
+              {positive ? "+" : "−"}{fmtUsd(Math.abs(pnl))}
+            </div>
+            <div style={st.heroPnlMeta}>
+              <span style={{ ...st.heroPnlPct, color: pnlColor }}>
+                {positive ? "+" : "−"}{Math.abs(pnlPct).toFixed(2)}%
+              </span>
+              <span style={st.heroPnlLabel}>Total Return</span>
+            </div>
+          </div>
+
+          <div style={st.heroDivider} />
+
+          <div style={st.statsRow4}>
+            <Stat
+              label="Portfolio Value"
+              value={totalValue !== null ? fmtUsd(totalValue) : "—"}
+              accent
+            />
+            <Stat label="Invested" value={fmtUsd(totalInvested)} />
+            <Stat label="Cards" value={cardCount.toLocaleString()} />
+            <Stat label="Rare" value={rareCount} accent={rareCount > 0} />
+          </div>
+        </>
+      ) : (
+        <>
+          <div style={st.heroValue}>
+            {loading ? "—" : (totalValue !== null ? fmtUsd(totalValue) : "—")}
+          </div>
+          <div style={st.heroSubLabel}>Total Portfolio Value</div>
+
+          <div style={st.heroDivider} />
+
+          <div style={st.statsRow}>
+            <Stat label="Cards" value={loading ? "—" : cardCount.toLocaleString()} />
+            <Stat label="Avg Card Value" value={avgValue != null ? fmtUsd(avgValue) : "—"} />
+            <Stat label="Rare Cards" value={loading ? "—" : rareCount} accent={rareCount > 0} />
+          </div>
+        </>
       )}
+    </header>
+  );
+}
+
+function Stat({ label, value, accent }) {
+  return (
+    <div style={st.stat}>
+      <div style={{ ...st.statValue, ...(accent ? st.statValueAccent : {}) }}>{value}</div>
+      <div style={st.statLabel}>{label}</div>
     </div>
   );
 }
 
-function StatCard({ label, value, highlight }) {
+function PerfStat({ label, value, sub, tone }) {
+  const valueStyle =
+    tone === "positive" ? st.perfStatPositive
+    : tone === "negative" ? st.perfStatNegative
+    : st.perfStatNeutral;
   return (
-    <div style={{ ...styles.statCard, ...(highlight ? styles.statCardHighlight : {}) }}>
-      <div style={{ ...styles.statValue, ...(highlight ? styles.statValueHighlight : {}) }}>
-        {value}
+    <div style={st.perfStat}>
+      <div style={st.perfStatLabel}>{label}</div>
+      <div style={{ ...st.perfStatValue, ...valueStyle }}>{value}</div>
+      {sub && <div style={{ ...st.perfStatSub, ...valueStyle }}>{sub}</div>}
+    </div>
+  );
+}
+
+// ─── Analytics panel ──────────────────────────────────────────────────
+function computeAllocation(cards) {
+  const buckets = new Map();
+  cards.forEach((card) => {
+    const value = card.estimatedValue ?? 0;
+    if (!value || value <= 0) return;
+    const key = card.sport || "Uncategorized";
+    buckets.set(key, (buckets.get(key) ?? 0) + value);
+  });
+  const total = Array.from(buckets.values()).reduce((a, b) => a + b, 0);
+  if (total === 0) return [];
+  return Array.from(buckets.entries())
+    .map(([name, value]) => ({ name, value, percent: (value / total) * 100 }))
+    .sort((a, b) => b.value - a.value);
+}
+
+function AnalyticsPanel({ cards, totalValue }) {
+  const data = useMemo(() => computeAllocation(cards), [cards]);
+  const [activeIdx, setActiveIdx] = useState(null);
+
+  // Cost / P&L roll-ups across the whole portfolio.
+  const totalInvested = useMemo(
+    () => cards.reduce((sum, c) => sum + (c.myCost ?? 0), 0),
+    [cards]
+  );
+  const hasCost = totalInvested > 0;
+  const totalCurrent = totalValue ?? 0;
+  const pnl  = totalCurrent - totalInvested;
+  const pnlPct = totalInvested > 0 ? (pnl / totalInvested) * 100 : 0;
+  const pnlPositive = pnl >= 0;
+
+  if (data.length === 0) return null;
+
+  return (
+    <section style={st.analytics}>
+      <div style={st.analyticsHeader}>
+        <div>
+          <p style={st.analyticsEyebrow}>Portfolio Allocation</p>
+          <p style={st.analyticsSub}>
+            Distribution by category · {data.length} categor{data.length === 1 ? "y" : "ies"}
+          </p>
+        </div>
+        <span style={st.analyticsAccent}>◆</span>
       </div>
-      <div style={styles.statLabel}>{label}</div>
+
+      {/* Performance row — only renders when at least one card has a cost basis */}
+      {hasCost && (
+        <div style={st.perfRow}>
+          <PerfStat label="Invested"  value={fmtUsd(totalInvested)} />
+          <PerfStat label="Current"   value={fmtUsd(totalCurrent)} />
+          <PerfStat
+            label="Profit / Loss"
+            value={`${pnlPositive ? "+" : "−"}${fmtUsd(Math.abs(pnl))}`}
+            sub={`${pnlPositive ? "+" : "−"}${Math.abs(pnlPct).toFixed(1)}%`}
+            tone={pnlPositive ? "positive" : "negative"}
+          />
+        </div>
+      )}
+
+      <div style={st.analyticsBody}>
+        {/* ── Donut chart ── */}
+        <div style={st.chartWrap}>
+          <ResponsiveContainer width="100%" height={260}>
+            <PieChart>
+              <Pie
+                data={data}
+                dataKey="value"
+                nameKey="name"
+                cx="50%"
+                cy="50%"
+                innerRadius={72}
+                outerRadius={110}
+                paddingAngle={1.5}
+                stroke="#070a14"
+                strokeWidth={2}
+                onMouseEnter={(_, i) => setActiveIdx(i)}
+                onMouseLeave={() => setActiveIdx(null)}
+                isAnimationActive={true}
+                animationDuration={600}
+              >
+                {data.map((_, i) => (
+                  <Cell
+                    key={i}
+                    fill={PALETTE[i % PALETTE.length]}
+                    style={{
+                      transition: "opacity 0.2s",
+                      opacity: activeIdx === null || activeIdx === i ? 1 : 0.3,
+                      cursor: "pointer",
+                      filter: activeIdx === i ? "drop-shadow(0 0 12px currentColor)" : "none",
+                    }}
+                  />
+                ))}
+              </Pie>
+              <Tooltip content={<ChartTooltip />} cursor={false} />
+            </PieChart>
+          </ResponsiveContainer>
+
+          {/* Centre badge inside the donut */}
+          <div style={st.donutCenter}>
+            <div style={st.donutCenterLabel}>Total</div>
+            <div style={st.donutCenterValue}>
+              {totalValue != null ? fmtUsd(totalValue) : "—"}
+            </div>
+          </div>
+        </div>
+
+        {/* ── Legend ── */}
+        <div style={st.legend}>
+          {data.map((item, i) => {
+            const active = activeIdx === i;
+            const dim    = activeIdx !== null && !active;
+            return (
+              <div
+                key={item.name}
+                style={{
+                  ...st.legendRow,
+                  ...(active ? st.legendRowActive : {}),
+                  opacity: dim ? 0.4 : 1,
+                }}
+                onMouseEnter={() => setActiveIdx(i)}
+                onMouseLeave={() => setActiveIdx(null)}
+              >
+                <span style={{ ...st.legendDot, background: PALETTE[i % PALETTE.length] }} />
+                <span style={st.legendName}>{item.name}</span>
+                <span style={st.legendValue}>{fmtUsd(item.value)}</span>
+                <span style={st.legendPct}>{item.percent.toFixed(1)}%</span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function ChartTooltip({ active, payload }) {
+  if (!active || !payload?.length) return null;
+  const item = payload[0].payload;
+  return (
+    <div style={st.tooltip}>
+      <div style={st.tooltipName}>{item.name}</div>
+      <div style={st.tooltipValue}>{fmtUsd(item.value)}</div>
+      <div style={st.tooltipPct}>{item.percent.toFixed(1)}% of portfolio</div>
     </div>
   );
 }
 
-// A card is "rare" if nobody has been graded higher AND the total pop is ≤ 25
-function isRare(card) {
+// ─── Sort + filter helpers ────────────────────────────────────────────
+const SORT_OPTIONS = [
+  { value: "date-desc",  label: "Newest first" },
+  { value: "date-asc",   label: "Oldest first" },
+  { value: "name-asc",   label: "Player name (A–Z)" },
+  { value: "grade-desc", label: "Grade (PSA 10 first)" },
+  { value: "value-desc", label: "Value (high to low)" },
+  { value: "value-asc",  label: "Value (low to high)" },
+  { value: "pnl-desc",   label: "P/L (best first)" },
+  { value: "cost-desc",  label: "Cost (high to low)" },
+];
+
+function parseGrade(g) {
+  if (!g) return -1;
+  // PSA grades are typically "10", "9", "9.5", but some include text like "AUTO 10".
+  // Pull the first numeric run; fall back to -1 if none present.
+  const m = String(g).match(/\d+(?:\.\d+)?/);
+  return m ? parseFloat(m[0]) : -1;
+}
+
+function pnlOf(c) {
+  if (c.myCost == null || c.estimatedValue == null) return -Infinity;
+  return c.estimatedValue - c.myCost;
+}
+
+function sortCards(cards, sortBy) {
+  const out = [...cards];
+  switch (sortBy) {
+    case "name-asc":
+      return out.sort((a, b) => (a.playerName ?? "").localeCompare(b.playerName ?? ""));
+    case "grade-desc":
+      return out.sort((a, b) => parseGrade(b.grade) - parseGrade(a.grade));
+    case "value-desc":
+      return out.sort((a, b) => (b.estimatedValue ?? 0) - (a.estimatedValue ?? 0));
+    case "value-asc":
+      return out.sort((a, b) => (a.estimatedValue ?? 0) - (b.estimatedValue ?? 0));
+    case "pnl-desc":
+      return out.sort((a, b) => pnlOf(b) - pnlOf(a));
+    case "date-asc":
+      return out.sort((a, b) => new Date(a.addedAt ?? 0) - new Date(b.addedAt ?? 0));
+    case "cost-desc":
+      return out.sort((a, b) => (b.myCost ?? -Infinity) - (a.myCost ?? -Infinity));
+    case "date-desc":
+    default:
+      return out.sort((a, b) => new Date(b.addedAt ?? 0) - new Date(a.addedAt ?? 0));
+  }
+}
+
+// ─── Cards toolbar (sort + filters + view toggle) ─────────────────────
+function CardsToolbar({
+  sortBy, setSortBy, filters, setFilter,
+  uniqueSports, uniqueGrades,
+  viewMode, setViewMode,
+  totalCount, visibleCount,
+}) {
   return (
-    card.psaPopulationHigher === 0 &&
-    card.psaPopulation !== null &&
-    card.psaPopulation <= 25
+    <div style={st.toolbar}>
+      <ToolbarSelect
+        value={sortBy} onChange={setSortBy}
+        options={SORT_OPTIONS}
+      />
+      <ToolbarSelect
+        value={filters.sport} onChange={(v) => setFilter("sport", v)}
+        options={[{ value: "", label: "All Sports" }, ...uniqueSports.map((s) => ({ value: s, label: s }))]}
+      />
+      <ToolbarSelect
+        value={filters.grade} onChange={(v) => setFilter("grade", v)}
+        options={[{ value: "", label: "All Grades" }, ...uniqueGrades.map((g) => ({ value: g, label: `PSA ${g}` }))]}
+      />
+      <ToolbarSelect
+        value={filters.cost} onChange={(v) => setFilter("cost", v)}
+        options={[
+          { value: "all", label: "All Cards" },
+          { value: "has", label: "With Cost" },
+          { value: "no",  label: "No Cost" },
+        ]}
+      />
+      <TogglePill label="Rare"       active={filters.rare}      onChange={(v) => setFilter("rare", v)} />
+      <TogglePill label="Target Hit" active={filters.targetHit} onChange={(v) => setFilter("targetHit", v)} />
+
+      <span style={st.toolbarSpacer} />
+
+      <span style={st.toolbarCount}>
+        {visibleCount === totalCount
+          ? `${totalCount} card${totalCount === 1 ? "" : "s"}`
+          : `${visibleCount} of ${totalCount}`}
+      </span>
+
+      <ViewToggle mode={viewMode} setMode={setViewMode} />
+    </div>
   );
 }
 
-function CardTile({ card, onDelete, onOpen, onCardUpdate }) {
-  const [flipped, setFlipped]   = useState(false);
-  const [hovered, setHovered]   = useState(false);
-  const [frontErr, setFrontErr] = useState(false);
-  const [backErr, setBackErr]   = useState(false);
+function ToolbarSelect({ value, onChange, options }) {
+  const [focused, setFocused] = useState(false);
+  return (
+    <select
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      onFocus={() => setFocused(true)}
+      onBlur={() => setFocused(false)}
+      style={{ ...st.select, ...(focused ? st.selectFocused : {}) }}
+    >
+      {options.map((o) => (
+        <option key={o.value} value={o.value} style={st.selectOption}>{o.label}</option>
+      ))}
+    </select>
+  );
+}
 
-  const hasBack = !!card.backImageUrl && !backErr;
-  const rare    = isRare(card);
+function TogglePill({ label, active, onChange }) {
+  return (
+    <button
+      type="button"
+      onClick={() => onChange(!active)}
+      style={{ ...st.togglePill, ...(active ? st.togglePillActive : {}) }}
+    >
+      {active && <span style={st.toggleDot} />}
+      {label}
+    </button>
+  );
+}
+
+function ViewToggle({ mode, setMode }) {
+  return (
+    <div style={st.viewToggle}>
+      <button
+        type="button" onClick={() => setMode("grid")} title="Grid view"
+        style={{ ...st.viewBtn, ...(mode === "grid" ? st.viewBtnActive : {}) }}
+        aria-label="Grid view"
+      >
+        <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.6">
+          <rect x="1.5" y="1.5" width="5.5" height="5.5" />
+          <rect x="9"   y="1.5" width="5.5" height="5.5" />
+          <rect x="1.5" y="9"   width="5.5" height="5.5" />
+          <rect x="9"   y="9"   width="5.5" height="5.5" />
+        </svg>
+      </button>
+      <button
+        type="button" onClick={() => setMode("list")} title="List view"
+        style={{ ...st.viewBtn, ...(mode === "list" ? st.viewBtnActive : {}) }}
+        aria-label="List view"
+      >
+        <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round">
+          <line x1="2" y1="4"  x2="14" y2="4"  />
+          <line x1="2" y1="8"  x2="14" y2="8"  />
+          <line x1="2" y1="12" x2="14" y2="12" />
+        </svg>
+      </button>
+    </div>
+  );
+}
+
+function NoMatches({ onClear }) {
+  return (
+    <div style={st.noMatches}>
+      <div style={st.noMatchesIcon}>⌖</div>
+      <div style={st.noMatchesTitle}>No cards match these filters</div>
+      <button onClick={onClear} style={st.noMatchesBtn} type="button">Clear filters</button>
+    </div>
+  );
+}
+
+// ─── List view ────────────────────────────────────────────────────────
+function CardListView({ cards, highlightId, onOpen, onEdit, onDelete }) {
+  return (
+    <div style={st.listOuter}>
+      <div style={st.list}>
+        <div style={st.listHeader}>
+          <span /> {/* thumbnail column */}
+          <span style={st.listHeadCell}>Player</span>
+          <span style={st.listHeadCell}>Year</span>
+          <span style={st.listHeadCell}>Brand</span>
+          <span style={st.listHeadCell}>Grade</span>
+          <span style={{ ...st.listHeadCell, textAlign: "right" }}>Cost</span>
+          <span style={{ ...st.listHeadCell, textAlign: "right" }}>Value</span>
+          <span style={{ ...st.listHeadCell, textAlign: "right" }}>P/L</span>
+          <span />
+        </div>
+        {cards.map((card) => (
+          <CardListRow
+            key={card.id}
+            card={card}
+            highlighted={String(card.id) === String(highlightId)}
+            onOpen={() => onOpen(card)}
+            onEdit={() => onEdit(card)}
+            onDelete={() => onDelete(card.id)}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function CardListRow({ card, highlighted, onOpen, onEdit, onDelete }) {
+  const [hovered, setHovered] = useState(false);
+  const [pulsing, setPulsing] = useState(false);
+  const [imgErr, setImgErr]   = useState(false);
+  const rowRef = useRef(null);
+
+  useEffect(() => {
+    if (!highlighted || !rowRef.current) return;
+    rowRef.current.scrollIntoView({ behavior: "smooth", block: "center" });
+    setPulsing(true);
+    const t = setTimeout(() => setPulsing(false), 4500);
+    return () => clearTimeout(t);
+  }, [highlighted]);
+
+  const pnl = card.myCost != null && card.estimatedValue != null
+    ? card.estimatedValue - card.myCost
+    : null;
+  const pnlPositive = pnl != null && pnl >= 0;
+  const tier = getRarityTier(card);
 
   return (
     <div
+      ref={rowRef}
       style={{
-        ...styles.tile,
-        ...(rare    ? styles.tileRare    : {}),
-        ...(hovered ? styles.tileHovered : {}),
-        cursor: "pointer",
+        ...st.listRow,
+        ...(hovered ? st.listRowHovered : {}),
+        ...(pulsing ? st.listRowHighlight : {}),
       }}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       onClick={onOpen}
     >
-      {/* Flip rig */}
-      <div style={styles.flipper}>
-        <div style={{ ...styles.flipInner, ...(flipped ? styles.flipInnerFlipped : {}) }}>
-          <div style={{ ...styles.face, ...styles.faceFront }}>
-            <CardImage url={card.imageUrl}     hasError={frontErr} onError={() => setFrontErr(true)} alt="Front" />
-          </div>
-          <div style={{ ...styles.face, ...styles.faceBack }}>
-            <CardImage url={card.backImageUrl} hasError={backErr}  onError={() => setBackErr(true)}  alt="Back"  />
-          </div>
-        </div>
-
-        <div style={styles.gradeBadge}>PSA {card.grade}</div>
-
-        {hasBack && (
-          <button
-            style={{ ...styles.flipBtn, ...(hovered ? styles.btnVisible : {}) }}
-            onClick={(e) => { e.stopPropagation(); setFlipped((f) => !f); }}
-            title={flipped ? "Show front" : "Show back"}
-          >
-            {flipped ? "↩ Front" : "↪ Back"}
-          </button>
+      <div style={st.listThumbWrap}>
+        {card.imageUrl && !imgErr ? (
+          <img
+            src={card.imageUrl} alt=""
+            style={st.listThumb}
+            onError={() => setImgErr(true)}
+            draggable={false}
+          />
+        ) : (
+          <div style={st.listThumbEmpty}>🃏</div>
         )}
-
-        <button
-          style={{ ...styles.deleteBtn, ...(hovered ? styles.btnVisible : {}) }}
-          onClick={(e) => { e.stopPropagation(); onDelete(); }}
-          title="Remove card"
-        >✕</button>
       </div>
 
-      {/* Info + pricing */}
-      <div style={styles.info}>
-        <div style={styles.playerNameRow}>
-          <div style={styles.playerName}>{card.playerName ?? "Unknown Player"}</div>
-          {rare && <span style={styles.rareBadge}>RARE</span>}
+      <div style={st.listNameCell}>
+        <div style={st.listNameTop}>
+          <span style={st.listNameMain}>{card.playerName ?? "Unknown"}</span>
+          {tier && <TierFlag tier={tier} />}
+          {card.targetReached && <span style={st.listFlagTarget}>TARGET</span>}
         </div>
-        <div style={styles.meta}>{[card.year, card.brand].filter(Boolean).join(" · ")}</div>
-        {card.cardNumber && <div style={styles.meta}>#{card.cardNumber}</div>}
-        <div style={styles.certNumber}>Cert {card.certNumber}</div>
+        <div style={st.listNameMeta}>
+          {card.cardNumber ? `#${card.cardNumber} · ` : ""}Cert {card.certNumber}
+        </div>
+      </div>
 
-        <PopStats card={card} />
-        <PricingSection card={card} onCardUpdate={onCardUpdate} />
+      <div style={st.listCell}>{card.year ?? "—"}</div>
+      <div style={st.listCell}>{card.brand ?? "—"}</div>
+      <div><span style={st.listGradeBadge}>PSA {card.grade}</span></div>
+
+      <div style={{ ...st.listCell, ...st.listMoney, textAlign: "right" }}>
+        {card.myCost != null ? fmtUsd(card.myCost) : "—"}
+      </div>
+      <div style={{ ...st.listCell, ...st.listMoney, textAlign: "right", color: "#f59e0b", fontWeight: 700 }}>
+        {card.estimatedValue != null ? fmtUsd(card.estimatedValue) : "—"}
+      </div>
+      <div style={{ ...st.listCell, ...st.listMoney, textAlign: "right" }}>
+        {pnl != null ? (
+          <span style={{ color: pnlPositive ? "#10b981" : "#f87171", fontWeight: 800 }}>
+            {pnlPositive ? "+" : "−"}{fmtUsd(Math.abs(pnl))}
+          </span>
+        ) : <span style={{ color: "#475569" }}>—</span>}
+      </div>
+
+      <div style={st.listActions}>
+        <button
+          type="button"
+          onClick={(e) => { e.stopPropagation(); onEdit(); }}
+          style={st.listActionEdit}
+          title="Edit cost"
+          aria-label="Edit cost"
+        >✎</button>
+        <button
+          type="button"
+          onClick={(e) => { e.stopPropagation(); onDelete(); }}
+          style={st.listActionDel}
+          title="Remove card"
+          aria-label="Remove card"
+        >✕</button>
       </div>
     </div>
   );
 }
 
-function PopStats({ card }) {
-  if (card.psaPopulation === null && card.psaPopulationHigher === null) return null;
-  const rare = isRare(card);
+// ─── Tab button ───────────────────────────────────────────────────────
+function TabButton({ label, active, onClick, badge }) {
+  const [hovered, setHovered] = useState(false);
   return (
-    <div style={{ ...styles.popRow, ...(rare ? styles.popRowRare : {}) }}>
-      {card.psaPopulation !== null && (
-        <span>Pop {card.psaPopulation.toLocaleString()}</span>
+    <button
+      onClick={onClick}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      style={{
+        ...st.tab,
+        ...(active ? st.tabActive : (hovered ? st.tabHover : {})),
+      }}
+      type="button"
+    >
+      {label}
+      {badge != null && (
+        <span style={{ ...st.tabBadge, ...(active ? st.tabBadgeActive : {}) }}>{badge}</span>
       )}
-      {card.psaPopulation !== null && card.psaPopulationHigher !== null && (
-        <span style={styles.popDivider}>|</span>
-      )}
-      {card.psaPopulationHigher !== null && (
-        <span style={card.psaPopulationHigher === 0 ? styles.popHigherZero : {}}>
-          Higher {card.psaPopulationHigher.toLocaleString()}
+    </button>
+  );
+}
+
+// ─── Edit cost modal ──────────────────────────────────────────────────
+function EditCostModal({ card, onClose, onSave }) {
+  const [val, setVal]                 = useState(card.myCost != null ? String(card.myCost) : "");
+  const [targetVal, setTargetVal]     = useState(card.targetPrice != null ? String(card.targetPrice) : "");
+  const [focused, setFocused]         = useState(false);
+  const [targetFocused, setTargetFocused] = useState(false);
+  const [saving, setSaving]   = useState(false);
+  const [error, setError]     = useState(null);
+
+  useEffect(() => {
+    function onKey(e) { if (e.key === "Escape") onClose(); }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  useEffect(() => {
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => { document.body.style.overflow = prev; };
+  }, []);
+
+  async function handleSave(e) {
+    e.preventDefault();
+    setError(null);
+    const cost   = parseOptional(val);
+    const target = parseOptional(targetVal);
+    if (cost   === "INVALID") return setError("Cost must be a non-negative number");
+    if (target === "INVALID") return setError("Target price must be a non-negative number");
+
+    setSaving(true);
+    try {
+      const updated = await updateCard(card.id, { myCost: cost, targetPrice: target });
+      // Recompute targetReached locally so the tile updates immediately.
+      const reached = updated.targetPrice != null && card.estimatedValue != null
+        && card.estimatedValue >= updated.targetPrice;
+      onSave({ myCost: updated.myCost, targetPrice: updated.targetPrice, targetReached: reached });
+    } catch (err) {
+      setError(err.message);
+      setSaving(false);
+    }
+  }
+
+  function handleBackdrop(e) {
+    if (e.target === e.currentTarget) onClose();
+  }
+
+  // Live profit/loss preview as the user types
+  const pendingCost = val.trim() === "" ? null : parseFloat(val.trim());
+  const validPending = pendingCost !== null && !isNaN(pendingCost) && pendingCost >= 0;
+  const liveValue   = card.estimatedValue;
+  const livePnl     = validPending && liveValue != null ? liveValue - pendingCost : null;
+  const livePositive = livePnl != null && livePnl >= 0;
+
+  return (
+    <div style={st.editBackdrop} onClick={handleBackdrop}>
+      <form style={st.editModal} onSubmit={handleSave}>
+        <button type="button" style={st.editClose} onClick={onClose} aria-label="Close">✕</button>
+
+        <div style={st.editHeader}>
+          <p style={st.editEyebrow}>
+            <span style={st.eyebrowMark}>◆</span> Edit Cost
+          </p>
+          <h2 style={st.editTitle}>{card.playerName ?? "Card"}</h2>
+          <p style={st.editSub}>
+            {[card.year, card.brand, `PSA ${card.grade}`].filter(Boolean).join(" · ")}
+          </p>
+        </div>
+
+        <div style={st.editDivider} />
+
+        <label style={st.editFieldLabel}>Your Cost</label>
+        <div style={{ ...st.costInputWrap, ...(focused ? st.costInputWrapFocused : {}) }}>
+          <span style={st.costDollarLg}>$</span>
+          <input
+            type="number"
+            min="0"
+            step="0.01"
+            inputMode="decimal"
+            placeholder="0.00"
+            value={val}
+            onChange={(e) => setVal(e.target.value)}
+            onFocus={() => setFocused(true)}
+            onBlur={() => setFocused(false)}
+            disabled={saving}
+            autoFocus
+            style={st.costInputLg}
+          />
+        </div>
+        <p style={st.editHint}>
+          Leave blank to clear your cost basis.
+        </p>
+
+        <label style={{ ...st.editFieldLabel, marginTop: "1.25rem" }}>Target Price</label>
+        <div style={{ ...st.costInputWrap, ...(targetFocused ? st.costInputWrapFocused : {}) }}>
+          <span style={st.costDollarLg}>$</span>
+          <input
+            type="number"
+            min="0"
+            step="0.01"
+            inputMode="decimal"
+            placeholder="0.00"
+            value={targetVal}
+            onChange={(e) => setTargetVal(e.target.value)}
+            onFocus={() => setTargetFocused(true)}
+            onBlur={() => setTargetFocused(false)}
+            disabled={saving}
+            style={st.costInputLg}
+          />
+        </div>
+        <p style={st.editHint}>
+          Get a notification when the card's market value reaches this price.
+        </p>
+
+        {/* Live P&L preview */}
+        {validPending && livePnl != null && (
+          <div style={{
+            ...st.editPreview,
+            color: livePositive ? "#10b981" : "#f87171",
+            borderColor: livePositive ? "rgba(16,185,129,0.3)" : "rgba(248,113,113,0.3)",
+          }}>
+            <span style={st.editPreviewLabel}>Projected P/L</span>
+            <span style={st.editPreviewValue}>
+              {livePositive ? "+" : "−"}{fmtUsd(Math.abs(livePnl))}
+            </span>
+          </div>
+        )}
+
+        {error && <div style={st.editError}>{error}</div>}
+
+        <div style={st.editFooter}>
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={saving}
+            style={st.editCancel}
+          >
+            Cancel
+          </button>
+          <button type="submit" disabled={saving} style={st.editSave}>
+            {saving ? "Saving…" : "Save Changes"}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+// ─── Empty state ──────────────────────────────────────────────────────
+function EmptyState() {
+  return (
+    <div style={st.empty}>
+      <div style={st.emptyIcon}>◆</div>
+      <h2 style={st.emptyTitle}>Your collection is empty</h2>
+      <p style={st.emptySub}>Add your first PSA-graded card to start tracking your portfolio.</p>
+      <Link to="/add-card" style={st.emptyCta}>+ Add Your First Card</Link>
+    </div>
+  );
+}
+
+// ─── Tier badges ──────────────────────────────────────────────────────
+// Grid-tile ribbon. Ghost renders as a bare floating icon (no pill); the
+// other two tiers use a text pill in their tier colour.
+function TierRibbon({ tier }) {
+  if (tier === "ghost") {
+    return (
+      <div style={st.ghostBadgeTile}>
+        <GhostIcon size={32} />
+      </div>
+    );
+  }
+  const variant = tier === "ultra_rare" ? st.tierRibbonUltraRare : st.tierRibbonRare;
+  return <div style={{ ...st.tierRibbonBase, ...variant }}>{TIER_LABELS[tier]}</div>;
+}
+
+// Inline flag used in list rows + performer rows. Ghost is icon-only here too.
+function TierFlag({ tier }) {
+  if (tier === "ghost") {
+    return (
+      <span style={st.ghostBadgeInline}>
+        <GhostIcon size={16} />
+      </span>
+    );
+  }
+  const variant = tier === "ultra_rare" ? st.tierFlagUltraRare : st.tierFlagRare;
+  return <span style={{ ...st.tierFlagBase, ...variant }}>{TIER_LABELS[tier]}</span>;
+}
+
+// Border-tint applied to tiles per tier — keeps the rest of the tile styling
+// consistent and just nudges the border colour to match the badge.
+function tileTierStyle(tier) {
+  const c = TIER_COLORS[tier];
+  if (!c) return {};
+  // Convert hex → rgba with low alpha for a subtle tinted border
+  return { borderColor: tier === "ultra_rare" ? "rgba(245,158,11,0.4)"
+            : tier === "ghost" ? "rgba(255,255,255,0.32)"
+            : "rgba(147,197,253,0.4)" };
+}
+
+// ─── Card tile ────────────────────────────────────────────────────────
+function CardTile({ card, index, highlighted, onOpen, onEdit, onDelete, onCardUpdate }) {
+  const [hovered, setHovered] = useState(false);
+  const [imgErr, setImgErr]   = useState(false);
+  const [pulsing, setPulsing] = useState(false);
+  const tileRef = useRef(null);
+  const tier = getRarityTier(card);
+
+  // Scroll into view + run a temporary gold pulse when this tile is the
+  // target of a deep-link highlight (e.g. duplicate-cert detection redirect).
+  useEffect(() => {
+    if (!highlighted || !tileRef.current) return;
+    tileRef.current.scrollIntoView({ behavior: "smooth", block: "center" });
+    setPulsing(true);
+    const t = setTimeout(() => setPulsing(false), 4500);
+    return () => clearTimeout(t);
+  }, [highlighted]);
+
+  return (
+    <div
+      ref={tileRef}
+      style={{
+        ...st.tile,
+        ...(tier ? tileTierStyle(tier) : {}),
+        ...(hovered ? st.tileHovered : {}),
+        ...(pulsing ? st.tileHighlight : {}),
+        animationDelay: `${Math.min(index * 35, 600)}ms`,
+      }}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      onClick={onOpen}
+    >
+      {/* Image area */}
+      <div style={st.imageWrap}>
+        {card.imageUrl && !imgErr ? (
+          <img
+            src={card.imageUrl}
+            alt={card.playerName ?? "Card"}
+            style={st.image}
+            onError={() => setImgErr(true)}
+            draggable={false}
+          />
+        ) : (
+          <div style={st.imageFallback}>
+            <span style={st.imageFallbackIcon}>🃏</span>
+            <span style={st.imageFallbackText}>No image</span>
+          </div>
+        )}
+
+        {/* Top-right hover overlay: edit + delete */}
+        <div style={{ ...st.tileActions, opacity: hovered ? 1 : 0 }}>
+          <button
+            style={st.editBtn}
+            onClick={(e) => { e.stopPropagation(); onEdit(); }}
+            title="Edit cost"
+            aria-label="Edit cost"
+          >✎</button>
+          <button
+            style={st.deleteBtn}
+            onClick={(e) => { e.stopPropagation(); onDelete(); }}
+            title="Remove card"
+            aria-label="Remove card"
+          >✕</button>
+        </div>
+
+        {/* Bottom-left grade badge — PSA logo + grade */}
+        <div style={st.gradeBadge}>
+          <img src="/psa.avif" alt="PSA" style={st.gradeBadgeLogo} />
+          <span style={st.gradeBadgeValue}>{card.grade}</span>
+        </div>
+
+        {/* Rarity ribbon — Ghost / Ultra Rare / Rare */}
+        {tier && <TierRibbon tier={tier} />}
+
+        {/* Target-reached pulsing badge */}
+        {card.targetReached && (
+          <div style={st.targetBadge} title={`Target hit · $${card.targetPrice}`}>
+            <span style={st.targetBadgeDot} />
+            TARGET HIT
+          </div>
+        )}
+
+        {/* Subtle gradient overlay for image polish */}
+        <div style={st.imageGradient} />
+      </div>
+
+      {/* Slim info bar */}
+      <div style={st.infoBar}>
+        <div style={st.infoTopRow}>
+          <div style={st.playerName} title={card.playerName ?? ""}>
+            {card.playerName ?? "Unknown Player"}
+          </div>
+          <div style={st.metaRight}>
+            {[card.year, card.brand].filter(Boolean).join(" · ") || "—"}
+          </div>
+        </div>
+        <div style={st.infoBottomRow}>
+          <PricingValue card={card} onCardUpdate={onCardUpdate} />
+          <PopBadge card={card} />
+        </div>
+        <CostLine card={card} />
+      </div>
+    </div>
+  );
+}
+
+// Slim P&L line under the value — only renders when myCost is set.
+function CostLine({ card }) {
+  if (card.myCost == null) return null;
+  const value = card.estimatedValue;
+  const hasValue = value != null;
+  const pnl     = hasValue ? value - card.myCost : null;
+  const positive = pnl != null && pnl >= 0;
+  const arrow    = positive ? "↑" : "↓";
+  return (
+    <div style={st.costLine}>
+      <span style={st.costLineLabel}>Cost</span>
+      <span style={st.costLineValue}>{fmtUsd(card.myCost)}</span>
+      {pnl != null && (
+        <span style={{
+          ...st.costLinePnl,
+          color: positive ? "#10b981" : "#f87171",
+        }}>
+          {arrow} {fmtUsd(Math.abs(pnl))}
         </span>
       )}
     </div>
   );
 }
 
-function PricingSection({ card, onCardUpdate }) {
-  const [editing, setEditing]   = useState(false);
-  const [inputVal, setInputVal] = useState("");
-  const [saving, setSaving]     = useState(false);
+// ─── Population badge (compact, in-tile) ──────────────────────────────
+function PopBadge({ card }) {
+  if (card.psaPopulation == null && card.psaPopulationHigher == null) return null;
+  const higherZero = card.psaPopulationHigher === 0;
+  return (
+    <div style={st.popBadge} title="PSA population data">
+      {card.psaPopulation != null && (
+        <span>Pop {card.psaPopulation.toLocaleString()}</span>
+      )}
+      {card.psaPopulationHigher != null && (
+        <>
+          <span style={st.popBadgeDot}>·</span>
+          <span style={higherZero ? st.popBadgeHigherZero : {}}>
+            {higherZero ? "Highest Graded" : `+${card.psaPopulationHigher.toLocaleString()}`}
+          </span>
+        </>
+      )}
+    </div>
+  );
+}
+
+// ─── Pricing value with inline edit ───────────────────────────────────
+function PricingValue({ card, onCardUpdate }) {
+  const [editing, setEditing] = useState(false);
+  const [val, setVal]         = useState("");
+  const [saving, setSaving]   = useState(false);
   const inputRef = useRef(null);
 
   function startEdit(e) {
-    e?.stopPropagation();
-    const current = card.manualPrice ?? card.estimatedValue ?? "";
-    setInputVal(current !== "" ? String(parseFloat(current).toFixed(2)) : "");
+    e.stopPropagation();
+    const cur = card.manualPrice ?? card.estimatedValue ?? "";
+    setVal(cur !== "" ? String(parseFloat(cur).toFixed(2)) : "");
     setEditing(true);
     setTimeout(() => inputRef.current?.select(), 0);
   }
 
-  function cancelEdit() {
+  function cancel(e) {
+    e?.stopPropagation();
     setEditing(false);
-    setInputVal("");
+    setVal("");
   }
 
-  async function commitEdit() {
-    const trimmed = inputVal.trim();
-    if (trimmed === "") { cancelEdit(); return; }
+  async function commit(e) {
+    e?.stopPropagation();
+    const trimmed = val.trim();
+    if (trimmed === "") return cancel();
     const n = parseFloat(trimmed);
-    if (isNaN(n) || n < 0) { cancelEdit(); return; }
+    if (isNaN(n) || n < 0) return cancel();
     setSaving(true);
     try {
       await updateCardPrice(card.id, n);
@@ -239,309 +1231,1654 @@ function PricingSection({ card, onCardUpdate }) {
     }
   }
 
-  async function clearManual(e) {
-    e?.stopPropagation();
-    setSaving(true);
-    try {
-      await updateCardPrice(card.id, null);
-      onCardUpdate(card.id, {
-        manualPrice: null,
-        estimatedValue: card.avgSalePrice,
-        priceSource: card.numSales != null ? "mock" : null,
-      });
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  const fmt = (n) =>
-    n != null ? `$${parseFloat(n).toLocaleString("en-US", { minimumFractionDigits: 2 })}` : "—";
-
-  const displayValue = card.estimatedValue ?? card.avgSalePrice;
-  const isManual     = card.priceSource === "manual";
+  const display = card.estimatedValue ?? card.avgSalePrice;
 
   if (editing) {
     return (
-      <div style={styles.pricingBlock} onClick={(e) => e.stopPropagation()}>
-        <div style={styles.editRow}>
-          <span style={styles.dollarSign}>$</span>
-          <input
-            ref={inputRef}
-            style={styles.priceInput}
-            type="number"
-            min="0"
-            step="0.01"
-            value={inputVal}
-            onChange={(e) => setInputVal(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") commitEdit();
-              if (e.key === "Escape") cancelEdit();
-            }}
-            disabled={saving}
-            autoFocus
-          />
-          <button style={styles.editConfirm} onClick={commitEdit} disabled={saving} title="Save">✓</button>
-          <button style={styles.editCancel} onClick={cancelEdit} disabled={saving} title="Cancel">✕</button>
-        </div>
-        <p style={styles.editHint}>Enter to save · Esc to cancel</p>
+      <div style={st.editBlock} onClick={(e) => e.stopPropagation()}>
+        <span style={st.editDollar}>$</span>
+        <input
+          ref={inputRef}
+          type="number"
+          min="0"
+          step="0.01"
+          value={val}
+          onChange={(e) => setVal(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") commit(e);
+            if (e.key === "Escape") cancel(e);
+          }}
+          disabled={saving}
+          style={st.editInput}
+          autoFocus
+        />
+        <button onClick={commit} disabled={saving} style={st.editOk} title="Save">✓</button>
+        <button onClick={cancel} disabled={saving} style={st.editX}  title="Cancel">✕</button>
       </div>
     );
   }
 
   return (
-    <div style={styles.pricingBlock}>
-      {/* Clickable value */}
-      <div style={styles.valueRow}>
-        {displayValue != null ? (
-          <ValueButton onClick={startEdit} disabled={saving} title="Click to set manual price">
-            {fmt(displayValue)}
-          </ValueButton>
-        ) : (
-          <ValueButton onClick={startEdit} disabled={saving} empty>
-            Set price
-          </ValueButton>
-        )}
-
-        {/* Clear override */}
-        {isManual && (
-          <button
-            style={styles.clearBtn}
-            onClick={clearManual}
-            disabled={saving}
-            title="Clear manual override"
-          >✕</button>
-        )}
-      </div>
-
-      {/* Sale details — hidden when manual */}
-      {!isManual && (card.numSales != null || card.lastSalePrice != null) && (
-        <div style={styles.saleDetail}>
-          {card.numSales != null && <span>{card.numSales} sale{card.numSales !== 1 ? "s" : ""}</span>}
-          {card.numSales != null && card.lastSalePrice != null && <span style={styles.dot}>·</span>}
-          {card.lastSalePrice != null && <span>last {fmt(card.lastSalePrice)}</span>}
-        </div>
-      )}
-
-      {/* Source badge */}
-      {card.priceSource && (
-        <span style={{ ...styles.sourceBadge, ...sourceBadgeStyle(card.priceSource) }}>
-          {badgeLabel(card.priceSource)}
-        </span>
-      )}
-    </div>
-  );
-}
-
-function badgeLabel(source) {
-  if (source === "manual") return "manual";
-  if (source === "ebay")   return "eBay";
-  return "est.";
-}
-
-function sourceBadgeStyle(source) {
-  if (source === "manual") return styles.sourceBadgeManual;
-  if (source === "ebay")   return styles.sourceBadgeEbay;
-  return styles.sourceBadgeMock;
-}
-
-function ValueButton({ children, onClick, disabled, empty, title }) {
-  const [hov, setHov] = useState(false);
-  return (
     <button
-      style={{ ...styles.valueBtn, ...(empty ? styles.valueBtnEmpty : {}) }}
-      onClick={onClick}
-      disabled={disabled}
-      title={title}
-      onMouseEnter={() => setHov(true)}
-      onMouseLeave={() => setHov(false)}
+      onClick={startEdit}
+      style={display != null ? st.priceBtn : st.priceBtnEmpty}
+      title="Click to set price"
     >
-      {children}
-      <span style={{ ...styles.editIcon, opacity: hov ? 1 : 0 }}>✎</span>
+      {display != null ? fmtUsd(display) : "Set price"}
     </button>
   );
 }
 
-function CardImage({ url, hasError, onError, alt }) {
-  if (url && !hasError) {
-    return <img src={url} alt={alt} style={styles.cardImg} onError={onError} />;
-  }
+// ─── Helpers for new features ─────────────────────────────────────────
+function parseOptional(raw) {
+  const trimmed = (raw ?? "").trim();
+  if (trimmed === "") return null;
+  const n = parseFloat(trimmed);
+  if (isNaN(n) || n < 0) return "INVALID";
+  return n;
+}
+
+// ─── Alert banner — target prices reached ─────────────────────────────
+function AlertBanner({ alerts, onJump }) {
   return (
-    <div style={styles.noImage}>
-      <span style={styles.noImageIcon}>🃏</span>
-      <span style={styles.noImageText}>{alt} — No Image</span>
+    <section style={st.alertBanner}>
+      <div style={st.alertHeader}>
+        <span style={st.alertDot} />
+        <span style={st.alertEyebrow}>Target Price Reached</span>
+        <span style={st.alertCount}>{alerts.length}</span>
+        {onJump && (
+          <button onClick={onJump} style={st.alertJump} type="button">
+            View cards →
+          </button>
+        )}
+      </div>
+      <div style={st.alertList}>
+        {alerts.slice(0, 6).map((c) => (
+          <div key={c.id} style={st.alertItem}>
+            <span style={st.alertItemName}>{c.playerName ?? "Unknown"}</span>
+            <span style={st.alertItemMeta}>PSA {c.grade}</span>
+            <span style={st.alertItemValue}>
+              {fmtUsd(c.estimatedValue)} <span style={st.alertItemArrow}>≥</span> {fmtUsd(c.targetPrice)}
+            </span>
+          </div>
+        ))}
+        {alerts.length > 6 && (
+          <div style={st.alertMore}>+{alerts.length - 6} more</div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+// ─── Insights row — diversification + performers ──────────────────────
+function InsightsRow({ cards }) {
+  return (
+    <section style={st.insightsRow}>
+      <DiversificationPanel cards={cards} />
+      <PerformersPanel cards={cards} />
+    </section>
+  );
+}
+
+// ─── Diversification score ────────────────────────────────────────────
+function DiversificationPanel({ cards }) {
+  const score = useMemo(() => diversificationScore(cards), [cards]);
+  const label =
+    score >= 70 ? "Well Diversified"
+    : score >= 40 ? "Moderately Diversified"
+    : score >= 1  ? "Concentrated"
+    : "—";
+  const color =
+    score >= 70 ? "#10b981"
+    : score >= 40 ? "#f59e0b"
+    : "#f87171";
+
+  // SVG circular gauge
+  const radius = 56;
+  const stroke = 8;
+  const circumference = 2 * Math.PI * radius;
+  const offset = circumference - (score / 100) * circumference;
+
+  return (
+    <div style={st.insightsCol}>
+      <div style={st.insightsHeader}>
+        <p style={st.insightsEyebrow}>Diversification</p>
+        <span style={st.analyticsAccent}>◆</span>
+      </div>
+      <div style={st.divBody}>
+        <svg width={140} height={140} style={{ flexShrink: 0 }}>
+          <circle
+            cx={70} cy={70} r={radius}
+            fill="none"
+            stroke="rgba(255,255,255,0.06)"
+            strokeWidth={stroke}
+          />
+          <circle
+            cx={70} cy={70} r={radius}
+            fill="none"
+            stroke={color}
+            strokeWidth={stroke}
+            strokeDasharray={circumference}
+            strokeDashoffset={offset}
+            strokeLinecap="round"
+            transform="rotate(-90 70 70)"
+            style={{
+              transition: "stroke-dashoffset 0.6s ease, stroke 0.3s ease",
+              filter: `drop-shadow(0 0 12px ${color})`,
+            }}
+          />
+          <text
+            x={70} y={70}
+            textAnchor="middle" dy="0.35em"
+            fill={color}
+            fontSize={32} fontWeight={800}
+            style={{ fontVariantNumeric: "tabular-nums", letterSpacing: "-0.02em" }}
+          >
+            {score}
+          </text>
+        </svg>
+        <div style={st.divDetails}>
+          <div style={{ ...st.divLabel, color }}>{label}</div>
+          <div style={st.divDescription}>
+            Spread across sports, grades, and years. Higher scores reflect
+            broader exposure across categories.
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
 
-const styles = {
-  statsBar: {
-    display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))",
-    gap: "1rem",
-    marginBottom: "1.75rem",
-  },
-  statCard: {
-    background: "#fff",
-    border: "1px solid #e5e7eb",
-    borderRadius: 10,
-    padding: "1rem 1.25rem",
-  },
-  statCardHighlight: {
-    background: "#eef2ff",
-    border: "1px solid #c7d2fe",
-  },
-  statValue: {
-    fontSize: "1.5rem",
-    fontWeight: 700,
-    color: "#111827",
-    lineHeight: 1.2,
-  },
-  statValueHighlight: { color: "#3730a3" },
-  statLabel: { fontSize: "0.78rem", color: "#6b7280", marginTop: "0.2rem" },
+function diversificationScore(cards) {
+  if (cards.length < 2) return 0;
+  const dimensions = [
+    groupCount(cards, (c) => c.sport ?? "—"),
+    groupCount(cards, (c) => c.year  ?? "—"),
+    groupCount(cards, (c) => c.grade ?? "—"),
+    // Rarity tier counts as a fourth dimension; non-tier cards bucket as "common"
+    // so the dimension is meaningful even before any rare cards are owned.
+    groupCount(cards, (c) => getRarityTier(c) ?? "common"),
+  ];
+  const dimScores = dimensions.map((groups) => {
+    const counts = Object.values(groups);
+    const total  = counts.reduce((s, v) => s + v, 0);
+    if (total === 0 || counts.length < 2) return 0;
+    // Normalised Shannon entropy
+    const entropy = -counts.reduce((s, v) => {
+      const p = v / total;
+      return s + (p > 0 ? p * Math.log2(p) : 0);
+    }, 0);
+    const maxEntropy = Math.log2(counts.length);
+    const evenness   = entropy / maxEntropy; // 0..1
+    // Penalise too-few categories — full credit only at 5+ unique buckets
+    const breadth = Math.min(1, counts.length / 5);
+    return evenness * breadth;
+  });
+  return Math.round((dimScores.reduce((s, v) => s + v, 0) / dimScores.length) * 100);
+}
 
+function groupCount(items, keyFn) {
+  return items.reduce((acc, item) => {
+    const k = keyFn(item);
+    acc[k] = (acc[k] ?? 0) + 1;
+    return acc;
+  }, {});
+}
+
+// ─── Top / bottom performers ──────────────────────────────────────────
+function PerformersPanel({ cards }) {
+  const tracked = useMemo(() => {
+    return cards
+      .filter((c) => c.myCost != null && c.estimatedValue != null)
+      .map((c) => ({ ...c, pnl: c.estimatedValue - c.myCost }));
+  }, [cards]);
+
+  // Hide the whole panel if no cards have a cost basis yet
+  if (tracked.length === 0) return null;
+
+  // Partition by sign first, then sort each side and take 3.
+  // Break-even cards (pnl === 0) appear in neither column by design.
+  const gainers = tracked
+    .filter((c) => c.pnl > 0)
+    .sort((a, b) => b.pnl - a.pnl) // descending — biggest gain first
+    .slice(0, 3);
+  const losers = tracked
+    .filter((c) => c.pnl < 0)
+    .sort((a, b) => a.pnl - b.pnl) // ascending — most-negative first
+    .slice(0, 3);
+
+  return (
+    <div style={st.insightsCol}>
+      <div style={st.insightsHeader}>
+        <p style={st.insightsEyebrow}>Performers</p>
+        <span style={st.analyticsAccent}>◆</span>
+      </div>
+      <div style={st.perfGrid}>
+        <PerformerColumn title="Top Gainers" cards={gainers} positive emptyMessage="No gainers yet" />
+        <PerformerColumn title="Top Losers"  cards={losers}  positive={false} emptyMessage="No losses yet" />
+      </div>
+    </div>
+  );
+}
+
+function PerformerColumn({ title, cards, positive, emptyMessage }) {
+  const color = positive ? "#10b981" : "#f87171";
+  return (
+    <div>
+      <div style={{ ...st.perfHeading, color }}>{title}</div>
+      {cards.length === 0 ? (
+        <div style={st.perfEmpty}>{emptyMessage}</div>
+      ) : (
+        <div style={st.perfList}>
+          {cards.map((c) => {
+            const tier = getRarityTier(c);
+            return (
+            <div key={c.id} style={st.perfItem}>
+              <div style={st.perfItemMain}>
+                <div style={st.perfItemName}>
+                  {c.playerName ?? "Unknown"}
+                  {tier && <TierFlag tier={tier} />}
+                </div>
+                <div style={st.perfItemMeta}>PSA {c.grade}{c.year ? ` · ${c.year}` : ""}</div>
+              </div>
+              <div style={st.perfItemNumbers}>
+                <div style={{ ...st.perfItemPnl, color }}>
+                  {c.pnl >= 0 ? "+" : "−"}{fmtUsd(Math.abs(c.pnl))}
+                </div>
+                <div style={st.perfItemBasis}>
+                  {fmtUsd(c.myCost)} → {fmtUsd(c.estimatedValue)}
+                </div>
+              </div>
+            </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Price history line chart ─────────────────────────────────────────
+function PriceHistoryChart({ history }) {
+  if (!history || history.length < 2) {
+    return (
+      <section style={st.historyPanel}>
+        <div style={st.insightsHeader}>
+          <p style={st.insightsEyebrow}>Portfolio History</p>
+          <span style={st.analyticsAccent}>◆</span>
+        </div>
+        <div style={st.historyEmpty}>
+          Tracking begins after a few snapshots — keep checking back.
+          Your portfolio is recorded automatically when this page loads.
+        </div>
+      </section>
+    );
+  }
+
+  const chartData = history.map((h) => ({
+    ts: new Date(h.timestamp).getTime(),
+    value: h.totalValue,
+    label: new Date(h.timestamp).toLocaleString(),
+  }));
+
+  const first = chartData[0].value;
+  const last  = chartData[chartData.length - 1].value;
+  const delta = last - first;
+  const deltaPct = first > 0 ? (delta / first) * 100 : 0;
+  const positive = delta >= 0;
+  const color = positive ? "#10b981" : "#f87171";
+
+  return (
+    <section style={st.historyPanel}>
+      <div style={st.historyHeader}>
+        <div>
+          <p style={st.insightsEyebrow}>Portfolio History</p>
+          <p style={st.analyticsSub}>{history.length} snapshots tracked</p>
+        </div>
+        <div style={st.historyDelta}>
+          <span style={{ ...st.historyDeltaValue, color }}>
+            {positive ? "+" : "−"}{fmtUsd(Math.abs(delta))}
+          </span>
+          <span style={{ ...st.historyDeltaPct, color }}>
+            {positive ? "+" : "−"}{Math.abs(deltaPct).toFixed(1)}%
+          </span>
+          <span style={st.historyDeltaLabel}>since first snapshot</span>
+        </div>
+      </div>
+
+      <ResponsiveContainer width="100%" height={240}>
+        <AreaChart data={chartData} margin={{ top: 10, right: 12, left: 0, bottom: 0 }}>
+          <defs>
+            <linearGradient id="historyGradient" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%"   stopColor="#f59e0b" stopOpacity={0.45} />
+              <stop offset="100%" stopColor="#f59e0b" stopOpacity={0} />
+            </linearGradient>
+          </defs>
+          <CartesianGrid stroke="rgba(255,255,255,0.04)" strokeDasharray="2 4" />
+          <XAxis
+            dataKey="ts"
+            type="number" domain={["dataMin", "dataMax"]}
+            tickFormatter={(t) => new Date(t).toLocaleDateString(undefined, { month: "short", day: "numeric" })}
+            tick={{ fill: "#64748b", fontSize: 11 }}
+            stroke="rgba(255,255,255,0.08)"
+          />
+          <YAxis
+            tickFormatter={(v) => `$${Math.round(v).toLocaleString()}`}
+            tick={{ fill: "#64748b", fontSize: 11 }}
+            stroke="rgba(255,255,255,0.08)"
+            width={68}
+          />
+          <Tooltip content={<HistoryTooltip />} cursor={{ stroke: "rgba(245,158,11,0.4)", strokeWidth: 1 }} />
+          <Area
+            type="monotone"
+            dataKey="value"
+            stroke="#f59e0b"
+            strokeWidth={2.5}
+            fill="url(#historyGradient)"
+            isAnimationActive
+            animationDuration={800}
+          />
+        </AreaChart>
+      </ResponsiveContainer>
+    </section>
+  );
+}
+
+function HistoryTooltip({ active, payload }) {
+  if (!active || !payload?.length) return null;
+  const p = payload[0].payload;
+  return (
+    <div style={st.tooltip}>
+      <div style={st.tooltipName}>{new Date(p.ts).toLocaleString()}</div>
+      <div style={st.tooltipValue}>{fmtUsd(p.value)}</div>
+    </div>
+  );
+}
+
+// ─── Milestones ───────────────────────────────────────────────────────
+const MILESTONE_DEFS = {
+  value: [1000, 5000, 10000, 25000, 50000, 100000],
+  cards: [10, 25, 50, 100],
+  rare:  [1, 5, 10, 25], // any tier (ghost / ultra rare / rare)
+  ghost: [1, 3],         // ghost-tier specifically — top-pop ≤ 5
+};
+function computeMilestones(totalValue, cardCount, rareCount, ghostCount) {
+  const out = [];
+  for (const v of MILESTONE_DEFS.value) {
+    if ((totalValue ?? 0) >= v) {
+      out.push({ id: `value-${v}`, kind: "value", label: `$${(v / 1000).toFixed(0)}k Value` });
+    }
+  }
+  for (const n of MILESTONE_DEFS.cards) {
+    if (cardCount >= n) out.push({ id: `cards-${n}`, kind: "cards", label: `${n} Cards` });
+  }
+  for (const n of MILESTONE_DEFS.rare) {
+    if (rareCount >= n) {
+      out.push({ id: `rare-${n}`, kind: "rare", label: `${n} Rare` });
+    }
+  }
+  for (const n of MILESTONE_DEFS.ghost) {
+    if (ghostCount >= n) {
+      out.push({ id: `ghost-${n}`, kind: "ghost", label: `${n} Ghost` });
+    }
+  }
+  return out;
+}
+
+function MilestoneToast({ milestone, onDismiss }) {
+  useEffect(() => {
+    const t = setTimeout(onDismiss, 6000);
+    return () => clearTimeout(t);
+  }, [onDismiss]);
+
+  return (
+    <div style={st.toastWrap} onClick={onDismiss}>
+      <div style={st.toast}>
+        <span style={st.toastBurst}>✦</span>
+        <div>
+          <div style={st.toastTitle}>Milestone Achieved</div>
+          <div style={st.toastBody}>{milestone.label}</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Styles ───────────────────────────────────────────────────────────
+const st = {
+  // Full-bleed dark wrapper — breaks out of the protected route's container
+  page: {
+    background: gradients.pageDark,
+    minHeight: "calc(100vh - 60px)",
+    marginLeft: "calc(50% - 50vw)",
+    marginRight: "calc(50% - 50vw)",
+    marginTop: "-2rem",
+    marginBottom: "-2rem",
+    padding: "3.5rem 0 5rem",
+    color: "#e2e8f0",
+  },
+  inner: {},
+
+  // ─── Tabs ───
+  tabBar: {
+    display: "flex", alignItems: "center", gap: "0.25rem",
+    marginBottom: "2.25rem",
+    borderBottom: "1px solid rgba(255,255,255,0.06)",
+  },
+  tab: {
+    background: "transparent",
+    border: "none",
+    color: "#64748b",
+    fontSize: "0.92rem", fontWeight: 600,
+    padding: "0.85rem 1.25rem",
+    cursor: "pointer",
+    letterSpacing: "0.01em",
+    position: "relative",
+    display: "flex", alignItems: "center", gap: "0.5rem",
+    transition: "color 0.15s",
+    // Faux underline that toggles on active — uses border for crisp 1-pixel
+    borderBottom: "2px solid transparent",
+    marginBottom: "-1px", // overlap the parent's 1px bottom border
+  },
+  tabHover: { color: "#cbd5e1" },
+  tabActive: {
+    color: "#f59e0b",
+    borderBottom: "2px solid #f59e0b",
+    textShadow: "0 0 24px rgba(245,158,11,0.4)",
+  },
+  tabBadge: {
+    display: "inline-flex", alignItems: "center", justifyContent: "center",
+    minWidth: 22, height: 22,
+    padding: "0 0.45rem",
+    background: "rgba(255,255,255,0.06)",
+    color: "#94a3b8",
+    fontSize: "0.7rem", fontWeight: 800,
+    borderRadius: 999,
+    fontVariantNumeric: "tabular-nums",
+    transition: "background 0.15s, color 0.15s",
+  },
+  tabBadgeActive: {
+    background: "rgba(245,158,11,0.18)",
+    color: "#fbbf24",
+  },
+
+  // ─── My Cards header bar (above the grid) ───
+  cardsBar: {
+    display: "flex", alignItems: "center",
+    justifyContent: "space-between", gap: "1rem",
+    flexWrap: "wrap",
+    marginBottom: "1.75rem",
+    padding: "1.25rem 1.5rem",
+    background: gradients.goldPanelSimple,
+    border: "1px solid rgba(255,255,255,0.06)",
+    borderRadius: 14,
+  },
+  cardsBarLabel: {
+    display: "flex", alignItems: "center", gap: "0.55rem",
+    fontSize: "0.7rem", fontWeight: 700,
+    letterSpacing: "0.18em", textTransform: "uppercase",
+    color: "#94a3b8", margin: 0,
+  },
+  cardsBarSub: {
+    color: "#64748b", fontSize: "0.85rem",
+    margin: "0.4rem 0 0",
+  },
+  cardsAddBtn: {
+    display: "inline-flex", alignItems: "center", gap: "0.5rem",
+    background: "linear-gradient(135deg, #f59e0b 0%, #d97706 100%)",
+    color: "#0f172a",
+    fontWeight: 800, fontSize: "0.92rem",
+    padding: "0.75rem 1.5rem",
+    borderRadius: 999,
+    textDecoration: "none",
+    letterSpacing: "0.01em",
+    boxShadow: "0 6px 20px rgba(245,158,11,0.25), 0 0 0 1px rgba(245,158,11,0.4)",
+    transition: "transform 0.1s",
+  },
+  cardsAddMark: { fontSize: "1.1rem", fontWeight: 700 },
+
+  // ─── Toolbar (sort/filter/view) ───
+  toolbar: {
+    display: "flex", alignItems: "center", gap: "0.5rem",
+    flexWrap: "wrap",
+    marginBottom: "1.25rem",
+  },
+  toolbarSpacer: { flex: 1, minWidth: 0 },
+  toolbarCount: {
+    fontSize: "0.72rem", fontWeight: 600,
+    letterSpacing: "0.12em", textTransform: "uppercase",
+    color: "#64748b",
+    fontVariantNumeric: "tabular-nums",
+  },
+
+  // Native <select> styled as a dark pill with a custom gold-aware chevron.
+  // Inline SVG data URI keeps everything self-contained; #94a3b8 = slate-400.
+  select: {
+    appearance: "none", WebkitAppearance: "none", MozAppearance: "none",
+    background: "rgba(15,23,42,0.7)",
+    border: "1px solid rgba(255,255,255,0.08)",
+    color: "#e2e8f0",
+    fontSize: "0.82rem", fontWeight: 600,
+    padding: "0.5rem 2.25rem 0.5rem 0.95rem",
+    borderRadius: 999,
+    cursor: "pointer",
+    outline: "none",
+    transition: "border-color 0.2s, background 0.2s, box-shadow 0.2s",
+    backgroundImage:
+      "url(\"data:image/svg+xml;charset=UTF-8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'/></svg>\")",
+    backgroundRepeat: "no-repeat",
+    backgroundPosition: "right 0.75rem center",
+    backgroundSize: "12px",
+    fontVariantNumeric: "tabular-nums",
+  },
+  selectFocused: {
+    borderColor: "rgba(245,158,11,0.65)",
+    background: "rgba(15,23,42,0.95)",
+    boxShadow: "0 0 0 3px rgba(245,158,11,0.12)",
+  },
+  // Native <option>s ignore most CSS in most browsers — set bg/color anyway
+  // so Firefox renders a sensible dropdown.
+  selectOption: { background: "#0f172a", color: "#e2e8f0" },
+
+  togglePill: {
+    display: "inline-flex", alignItems: "center", gap: "0.4rem",
+    background: "rgba(15,23,42,0.7)",
+    border: "1px solid rgba(255,255,255,0.08)",
+    color: "#94a3b8",
+    fontSize: "0.78rem", fontWeight: 600,
+    padding: "0.4rem 0.95rem",
+    borderRadius: 999,
+    cursor: "pointer",
+    letterSpacing: "0.01em",
+    transition: "border-color 0.2s, background 0.2s, color 0.2s",
+  },
+  togglePillActive: {
+    background: "rgba(245,158,11,0.12)",
+    border: "1px solid rgba(245,158,11,0.55)",
+    color: "#fbbf24",
+    boxShadow: "0 0 0 1px rgba(245,158,11,0.15), 0 0 16px rgba(245,158,11,0.12)",
+  },
+  toggleDot: {
+    width: 6, height: 6, borderRadius: "50%",
+    background: "#f59e0b",
+  },
+
+  viewToggle: {
+    display: "inline-flex",
+    background: "rgba(15,23,42,0.7)",
+    border: "1px solid rgba(255,255,255,0.08)",
+    borderRadius: 999,
+    padding: 3,
+  },
+  viewBtn: {
+    background: "transparent",
+    border: "none",
+    color: "#64748b",
+    width: 32, height: 28,
+    display: "flex", alignItems: "center", justifyContent: "center",
+    cursor: "pointer",
+    borderRadius: 999,
+    transition: "background 0.15s, color 0.15s",
+  },
+  viewBtnActive: {
+    background: "rgba(245,158,11,0.18)",
+    color: "#f59e0b",
+  },
+
+  // ─── No-matches state ───
+  noMatches: {
+    textAlign: "center", padding: "3.5rem 1rem",
+    background: "rgba(255,255,255,0.02)",
+    border: "1px dashed rgba(255,255,255,0.08)",
+    borderRadius: 14,
+    color: "#64748b",
+  },
+  noMatchesIcon: {
+    fontSize: "1.8rem", color: "#475569",
+    marginBottom: "0.85rem",
+  },
+  noMatchesTitle: {
+    fontSize: "0.95rem", fontWeight: 600, color: "#cbd5e1",
+    marginBottom: "1rem",
+  },
+  noMatchesBtn: {
+    background: "transparent",
+    border: "1px solid rgba(245,158,11,0.4)",
+    color: "#fbbf24",
+    fontSize: "0.78rem", fontWeight: 700,
+    padding: "0.45rem 1.15rem", borderRadius: 999,
+    cursor: "pointer", letterSpacing: "0.01em",
+  },
+
+  // ─── List view ───
+  // Outer wrapper provides horizontal scroll for narrow viewports without
+  // breaking the column alignment.
+  listOuter: { width: "100%", overflowX: "auto", paddingBottom: "0.25rem" },
+  list: {
+    minWidth: 880,
+    border: "1px solid rgba(255,255,255,0.06)",
+    borderRadius: 14,
+    overflow: "hidden",
+    background: "rgba(15,23,42,0.4)",
+  },
+  listHeader: {
+    display: "grid",
+    gridTemplateColumns: "56px minmax(180px, 1.6fr) 64px 110px 86px 100px 100px 110px 76px",
+    alignItems: "center",
+    gap: "0.85rem",
+    padding: "0.65rem 1rem",
+    fontSize: "0.62rem", fontWeight: 700,
+    letterSpacing: "0.16em", textTransform: "uppercase",
+    color: "#64748b",
+    background: "rgba(15,23,42,0.6)",
+    borderBottom: "1px solid rgba(255,255,255,0.06)",
+  },
+  listHeadCell: {},
+  listRow: {
+    display: "grid",
+    gridTemplateColumns: "56px minmax(180px, 1.6fr) 64px 110px 86px 100px 100px 110px 76px",
+    alignItems: "center",
+    gap: "0.85rem",
+    padding: "0.7rem 1rem",
+    cursor: "pointer",
+    borderBottom: "1px solid rgba(255,255,255,0.04)",
+    transition: "background 0.15s, box-shadow 0.15s",
+  },
+  listRowHovered: {
+    background: "rgba(245,158,11,0.045)",
+    boxShadow: "inset 3px 0 0 rgba(245,158,11,0.7)",
+  },
+  listRowHighlight: {
+    animation: "goldPulse 1.5s ease-in-out 3",
+    background: "rgba(245,158,11,0.06)",
+  },
+
+  listThumbWrap: {
+    width: 40, height: 56,
+    borderRadius: 4, overflow: "hidden",
+    background: "#06090f",
+    flexShrink: 0,
+  },
+  listThumb: { width: "100%", height: "100%", objectFit: "cover", display: "block" },
+  listThumbEmpty: {
+    width: "100%", height: "100%",
+    display: "flex", alignItems: "center", justifyContent: "center",
+    fontSize: "1.1rem", opacity: 0.4,
+  },
+
+  listNameCell: { minWidth: 0 },
+  listNameTop: { display: "flex", alignItems: "center", gap: "0.4rem" },
+  listNameMain: {
+    fontSize: "0.92rem", fontWeight: 600, color: "#f1f5f9",
+    overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+  },
+  listNameMeta: {
+    fontSize: "0.7rem", color: "#64748b",
+    marginTop: "0.2rem",
+    overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+  },
+  listFlagTarget: {
+    flexShrink: 0,
+    fontSize: "0.55rem", fontWeight: 800, letterSpacing: "0.1em",
+    color: "#fbbf24",
+    background: "rgba(245,158,11,0.12)",
+    border: "1px solid rgba(245,158,11,0.5)",
+    padding: "0.05rem 0.3rem", borderRadius: 3,
+  },
+  listCell: {
+    fontSize: "0.82rem", color: "#cbd5e1",
+    overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+  },
+  listMoney: { fontVariantNumeric: "tabular-nums", letterSpacing: "-0.01em" },
+  listGradeBadge: {
+    display: "inline-flex", alignItems: "center",
+    fontSize: "0.7rem", fontWeight: 800,
+    color: "#f59e0b",
+    background: "rgba(15,23,42,0.85)",
+    border: "1px solid rgba(245,158,11,0.4)",
+    padding: "0.2rem 0.5rem",
+    borderRadius: 4,
+    letterSpacing: "0.04em",
+  },
+
+  listActions: {
+    display: "flex", justifyContent: "flex-end", gap: "0.35rem",
+  },
+  listActionEdit: {
+    background: "rgba(15,23,42,0.85)",
+    border: "1px solid rgba(245,158,11,0.4)",
+    color: "#f59e0b",
+    width: 28, height: 28, fontSize: "0.78rem", fontWeight: 700,
+    borderRadius: "50%",
+    display: "flex", alignItems: "center", justifyContent: "center",
+    cursor: "pointer",
+  },
+  listActionDel: {
+    background: "rgba(15,23,42,0.85)",
+    border: "1px solid rgba(255,255,255,0.1)",
+    color: "#cbd5e1",
+    width: 28, height: 28, fontSize: "0.7rem",
+    borderRadius: "50%",
+    display: "flex", alignItems: "center", justifyContent: "center",
+    cursor: "pointer",
+  },
+
+  stateMsg: {
+    color: "#64748b",
+    fontSize: "0.9rem",
+    textAlign: "center",
+    padding: "4rem 0",
+  },
+
+  // ── Hero stats ──
+  hero: {
+    background: gradients.goldPanel,
+    border: "1px solid rgba(255,255,255,0.06)",
+    borderRadius: 16,
+    padding: "2rem 2.25rem 1.75rem",
+    marginBottom: "2.5rem",
+    position: "relative",
+    overflow: "hidden",
+  },
+  heroTopRow: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "1rem" },
+  heroLabel: { display: "flex", alignItems: "center", gap: "0.55rem" },
+  heroDot: {
+    width: 8, height: 8, borderRadius: "50%",
+    background: "#10b981",
+    animation: "livePulse 2.4s ease-in-out infinite",
+  },
+  heroLabelText: {
+    fontSize: "0.7rem", fontWeight: 700,
+    letterSpacing: "0.18em", textTransform: "uppercase",
+    color: "#94a3b8",
+  },
+  heroAccent: { color: "#f59e0b", fontSize: "1rem", opacity: 0.6 },
+
+  heroValue: {
+    fontSize: "clamp(2.4rem, 6vw, 4.2rem)",
+    fontWeight: 800,
+    color: "#f59e0b",
+    letterSpacing: "-0.03em",
+    lineHeight: 1,
+    fontVariantNumeric: "tabular-nums",
+    textShadow: "0 0 40px rgba(245,158,11,0.15)",
+  },
+  heroSubLabel: {
+    fontSize: "0.72rem", fontWeight: 600,
+    letterSpacing: "0.18em", textTransform: "uppercase",
+    color: "#64748b",
+    marginTop: "0.65rem",
+  },
+
+  // ── P&L hero block (the most prominent stat when cost is set) ──
+  heroPnlBlock: { /* container for the P&L value + meta */ },
+  heroPnlValue: {
+    fontSize: "clamp(2.8rem, 7vw, 5rem)",
+    fontWeight: 800,
+    letterSpacing: "-0.03em",
+    lineHeight: 1,
+    fontVariantNumeric: "tabular-nums",
+    // Soft glow that picks up the green/red colour applied inline
+    textShadow: "0 0 40px currentColor",
+    filter: "saturate(0.85)",
+  },
+  heroPnlMeta: {
+    display: "flex", alignItems: "baseline", gap: "0.85rem",
+    marginTop: "0.85rem",
+  },
+  heroPnlPct: {
+    fontSize: "1.5rem", fontWeight: 800,
+    fontVariantNumeric: "tabular-nums",
+    letterSpacing: "-0.01em",
+  },
+  heroPnlLabel: {
+    fontSize: "0.72rem", fontWeight: 600,
+    letterSpacing: "0.18em", textTransform: "uppercase",
+    color: "#64748b",
+  },
+  statsRow4: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
+    gap: "1rem",
+  },
+  heroDivider: {
+    height: 1,
+    background: "linear-gradient(90deg, transparent, rgba(255,255,255,0.08), transparent)",
+    margin: "1.5rem 0 1.25rem",
+  },
+  statsRow: {
+    display: "grid",
+    gridTemplateColumns: "repeat(3, 1fr)",
+    gap: "1rem",
+  },
+  stat: {},
+  statValue: {
+    fontSize: "1.4rem", fontWeight: 700,
+    color: "#f1f5f9", lineHeight: 1.1,
+    letterSpacing: "-0.01em",
+    fontVariantNumeric: "tabular-nums",
+  },
+  statValueAccent: { color: "#f59e0b" },
+  statLabel: {
+    fontSize: "0.66rem", fontWeight: 600,
+    letterSpacing: "0.16em", textTransform: "uppercase",
+    color: "#64748b", marginTop: "0.3rem",
+  },
+
+  // ── Analytics panel ──
+  analytics: {
+    background: gradients.goldPanel,
+    border: "1px solid rgba(255,255,255,0.06)",
+    borderRadius: 16,
+    padding: "1.75rem 2.25rem 2rem",
+    marginBottom: "2.5rem",
+  },
+  analyticsHeader: {
+    display: "flex", alignItems: "flex-start",
+    justifyContent: "space-between", gap: "1rem",
+    marginBottom: "0.5rem",
+  },
+  analyticsEyebrow: {
+    fontSize: "0.7rem", fontWeight: 700,
+    letterSpacing: "0.18em", textTransform: "uppercase",
+    color: "#94a3b8", margin: 0,
+  },
+  analyticsSub: {
+    fontSize: "0.78rem", color: "#64748b",
+    margin: "0.25rem 0 0", letterSpacing: "0.02em",
+  },
+  analyticsAccent: { color: "#f59e0b", fontSize: "1rem", opacity: 0.6 },
+
+  analyticsBody: {
+    display: "flex", flexWrap: "wrap",
+    gap: "2.5rem", alignItems: "center",
+    marginTop: "1.25rem",
+  },
+
+  // ── Performance row inside analytics ──
+  perfRow: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
+    gap: "1.5rem",
+    marginTop: "1.5rem",
+    padding: "1.25rem 1.5rem",
+    background: "rgba(255,255,255,0.025)",
+    border: "1px solid rgba(255,255,255,0.05)",
+    borderRadius: 12,
+  },
+  perfStat: {},
+  perfStatLabel: {
+    fontSize: "0.62rem", fontWeight: 700,
+    letterSpacing: "0.16em", textTransform: "uppercase",
+    color: "#64748b", marginBottom: "0.4rem",
+  },
+  perfStatValue: {
+    fontSize: "1.5rem", fontWeight: 800,
+    lineHeight: 1, letterSpacing: "-0.02em",
+    fontVariantNumeric: "tabular-nums",
+  },
+  perfStatSub: {
+    fontSize: "0.78rem", fontWeight: 600,
+    marginTop: "0.3rem",
+    fontVariantNumeric: "tabular-nums",
+    opacity: 0.85,
+  },
+  perfStatNeutral:  { color: "#f1f5f9" },
+  perfStatPositive: { color: "#10b981" },
+  perfStatNegative: { color: "#f87171" },
+
+  // ── Donut chart ──
+  chartWrap: {
+    position: "relative",
+    flex: "0 0 280px",
+    minWidth: 240, height: 260,
+  },
+  donutCenter: {
+    position: "absolute", inset: 0,
+    display: "flex", flexDirection: "column",
+    alignItems: "center", justifyContent: "center",
+    pointerEvents: "none",
+  },
+  donutCenterLabel: {
+    fontSize: "0.6rem", fontWeight: 700,
+    letterSpacing: "0.18em", textTransform: "uppercase",
+    color: "#64748b",
+  },
+  donutCenterValue: {
+    fontSize: "1.15rem", fontWeight: 800,
+    color: "#f59e0b", marginTop: "0.3rem",
+    fontVariantNumeric: "tabular-nums",
+    letterSpacing: "-0.01em",
+  },
+
+  // ── Legend ──
+  legend: {
+    flex: 1, minWidth: 240,
+    display: "flex", flexDirection: "column",
+    gap: "0.25rem",
+  },
+  legendRow: {
+    display: "grid",
+    gridTemplateColumns: "16px 1fr auto auto",
+    alignItems: "center",
+    gap: "0.85rem",
+    padding: "0.7rem 0.85rem",
+    borderRadius: 8,
+    transition: "background 0.15s, opacity 0.15s",
+    cursor: "default",
+    borderBottom: "1px solid rgba(255,255,255,0.04)",
+  },
+  legendRowActive: {
+    background: "rgba(245,158,11,0.06)",
+  },
+  legendDot: {
+    width: 10, height: 10, borderRadius: "50%",
+    boxShadow: "0 0 0 3px rgba(0,0,0,0.3)",
+  },
+  legendName: {
+    fontSize: "0.88rem", color: "#e2e8f0", fontWeight: 500,
+    overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+  },
+  legendValue: {
+    fontSize: "0.88rem", color: "#f1f5f9", fontWeight: 700,
+    fontVariantNumeric: "tabular-nums",
+    letterSpacing: "-0.01em",
+  },
+  legendPct: {
+    fontSize: "0.75rem", color: "#94a3b8", fontWeight: 600,
+    fontVariantNumeric: "tabular-nums",
+    minWidth: 50, textAlign: "right",
+  },
+
+  // ── Tooltip ──
+  tooltip: {
+    background: "rgba(15,23,42,0.96)",
+    border: "1px solid rgba(245,158,11,0.4)",
+    borderRadius: 8,
+    padding: "0.7rem 0.95rem",
+    boxShadow: "0 8px 24px rgba(0,0,0,0.5)",
+    backdropFilter: "blur(8px)",
+  },
+  tooltipName: {
+    fontSize: "0.7rem", fontWeight: 700,
+    letterSpacing: "0.12em", textTransform: "uppercase",
+    color: "#94a3b8", marginBottom: "0.4rem",
+  },
+  tooltipValue: {
+    fontSize: "1.1rem", fontWeight: 800,
+    color: "#f59e0b",
+    fontVariantNumeric: "tabular-nums",
+    letterSpacing: "-0.01em",
+  },
+  tooltipPct: {
+    fontSize: "0.72rem", color: "#cbd5e1",
+    marginTop: "0.2rem",
+  },
+
+  // ── Grid ──
   grid: {
     display: "grid",
-    gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))",
-    gap: "1.25rem",
+    gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))",
+    gap: "1.5rem",
   },
+
+  // ── Tile ──
   tile: {
-    background: "#fff",
-    borderRadius: 12,
-    boxShadow: "0 1px 4px rgba(0,0,0,0.08)",
+    background: "#0f172a",
+    border: "1px solid rgba(255,255,255,0.05)",
+    borderRadius: 14,
     overflow: "hidden",
-    transition: "box-shadow 0.15s, transform 0.15s",
+    cursor: "pointer",
+    transition: "transform 0.25s ease, border-color 0.25s ease, box-shadow 0.25s ease, background 0.25s ease",
+    animation: "fadeInUp 0.5s ease-out backwards",
+    position: "relative",
   },
   tileHovered: {
-    boxShadow: "0 6px 20px rgba(0,0,0,0.13)",
-    transform: "translateY(-2px)",
+    transform: "translateY(-3px)",
+    borderColor: "rgba(245,158,11,0.45)",
+    background: "#111c33",
+    boxShadow:
+      "0 0 0 1px rgba(245,158,11,0.15), 0 12px 28px rgba(0,0,0,0.5), 0 0 32px rgba(245,158,11,0.12)",
+  },
+  tileRare: {
+    borderColor: "rgba(245,158,11,0.25)",
+  },
+  tileHighlight: {
+    // Triggered when the tile is the target of a deep-link highlight.
+    // Three pulses (1.5s × 3) then style is removed by the timeout in CardTile.
+    animation: "fadeInUp 0.5s ease-out backwards, goldPulse 1.5s ease-in-out 3",
+    borderColor: "rgba(245,158,11,0.75)",
   },
 
-  flipper: { position: "relative", width: "100%", paddingTop: "140%", perspective: "1000px" },
-  flipInner: {
-    position: "absolute", inset: 0,
-    transformStyle: "preserve-3d",
-    transition: "transform 0.5s cubic-bezier(0.4,0,0.2,1)",
+  // ── Image ──
+  imageWrap: {
+    position: "relative",
+    width: "100%",
+    aspectRatio: "5 / 7", // standard trading card ratio
+    background: "#06090f",
+    overflow: "hidden",
   },
-  flipInnerFlipped: { transform: "rotateY(180deg)" },
-  face: {
+  image: { width: "100%", height: "100%", objectFit: "cover", display: "block" },
+  imageGradient: {
     position: "absolute", inset: 0,
-    backfaceVisibility: "hidden", WebkitBackfaceVisibility: "hidden",
-    overflow: "hidden", background: "#f3f4f6",
+    background: "linear-gradient(to bottom, transparent 60%, rgba(0,0,0,0.35) 100%)",
+    pointerEvents: "none",
   },
-  faceFront: {},
-  faceBack:  { transform: "rotateY(180deg)" },
-  cardImg:   { width: "100%", height: "100%", objectFit: "cover", display: "block" },
-  noImage: {
+  imageFallback: {
     width: "100%", height: "100%",
     display: "flex", flexDirection: "column",
-    alignItems: "center", justifyContent: "center", gap: "0.4rem",
+    alignItems: "center", justifyContent: "center",
+    gap: "0.5rem", color: "#334155",
   },
-  noImageIcon: { fontSize: "2.5rem", opacity: 0.25 },
-  noImageText: { fontSize: "0.72rem", color: "#9ca3af" },
+  imageFallbackIcon: { fontSize: "2.5rem", opacity: 0.5 },
+  imageFallbackText: { fontSize: "0.7rem", letterSpacing: "0.08em", textTransform: "uppercase" },
 
-  gradeBadge: {
-    position: "absolute", bottom: 8, left: 8,
-    background: "rgba(0,0,0,0.6)", color: "#fff",
-    fontSize: "0.72rem", fontWeight: 700,
-    padding: "0.2rem 0.5rem", borderRadius: 4,
-    backdropFilter: "blur(4px)", pointerEvents: "none",
+  tileActions: {
+    position: "absolute", top: 10, right: 10,
+    display: "flex", gap: "0.4rem",
+    transition: "opacity 0.15s",
+    zIndex: 2,
   },
-  flipBtn: {
-    position: "absolute", bottom: 8, right: 8,
-    background: "rgba(0,0,0,0.6)", color: "#fff", border: "none",
-    borderRadius: 4, fontSize: "0.72rem", fontWeight: 600,
-    padding: "0.25rem 0.5rem", cursor: "pointer",
-    opacity: 0, transition: "opacity 0.15s", backdropFilter: "blur(4px)",
+  editBtn: {
+    background: "rgba(15,23,42,0.85)",
+    border: "1px solid rgba(245,158,11,0.4)",
+    color: "#f59e0b",
+    borderRadius: "50%",
+    width: 28, height: 28, fontSize: "0.78rem",
+    cursor: "pointer",
+    display: "flex", alignItems: "center", justifyContent: "center",
+    backdropFilter: "blur(8px)",
+    fontWeight: 700,
   },
   deleteBtn: {
-    position: "absolute", top: 6, right: 6,
-    background: "rgba(0,0,0,0.5)", color: "#fff", border: "none",
-    borderRadius: "50%", width: 24, height: 24, fontSize: "0.7rem",
-    cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
-    opacity: 0, transition: "opacity 0.15s",
+    background: "rgba(15,23,42,0.85)",
+    border: "1px solid rgba(255,255,255,0.1)",
+    color: "#cbd5e1",
+    borderRadius: "50%",
+    width: 28, height: 28, fontSize: "0.7rem",
+    cursor: "pointer",
+    display: "flex", alignItems: "center", justifyContent: "center",
+    backdropFilter: "blur(8px)",
   },
-  btnVisible: { opacity: 1 },
 
-  info:       { padding: "0.75rem" },
-  playerNameRow: { display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "0.4rem", marginBottom: "0.2rem" },
-  playerName: { fontWeight: 600, fontSize: "0.9rem", lineHeight: 1.3, flex: 1 },
-  rareBadge: {
-    flexShrink: 0,
-    fontSize: "0.6rem", fontWeight: 800, letterSpacing: "0.06em",
+  gradeBadge: {
+    position: "absolute", bottom: 10, left: 10,
+    display: "flex", alignItems: "center", gap: "0.35rem",
+    background: "rgba(15,23,42,0.88)",
+    border: "1px solid rgba(245,158,11,0.4)",
+    borderRadius: 4,
+    padding: "2px 0.5rem 2px 2px",
+    backdropFilter: "blur(8px)",
+    pointerEvents: "none",
+    zIndex: 2,
+  },
+  // White-stickered PSA logo. White bg shows through the AVIF's transparent
+  // areas so the dark PSA marks stay legible on the dark tile background.
+  gradeBadgeLogo: {
+    height: 20,
+    width: "auto",
+    display: "block",
+    background: "#fff",
+    padding: "1px 3px",
+    borderRadius: 2,
+  },
+  gradeBadgeValue: {
+    fontSize: "0.85rem", fontWeight: 800,
+    color: "#f59e0b", lineHeight: 1,
+    fontVariantNumeric: "tabular-nums",
+    letterSpacing: "-0.01em",
+  },
+
+  // ─── Tier ribbon (top-left of grid tile) ───
+  tierRibbonBase: {
+    position: "absolute", top: 10, left: 10,
+    fontSize: "0.6rem", fontWeight: 800, letterSpacing: "0.12em",
+    padding: "0.25rem 0.5rem", borderRadius: 3,
+    zIndex: 2,
+  },
+  tierRibbonUltraRare: {
     background: "linear-gradient(135deg, #f59e0b, #d97706)",
-    color: "#fff",
-    padding: "0.15rem 0.4rem", borderRadius: 3,
-    boxShadow: "0 1px 3px rgba(217,119,6,0.4)",
-    alignSelf: "center",
+    color: "#0f172a",
+    boxShadow: "0 2px 10px rgba(245,158,11,0.4)",
   },
-  meta:       { fontSize: "0.76rem", color: "#6b7280", lineHeight: 1.4 },
-  certNumber: { fontSize: "0.72rem", color: "#9ca3af", marginTop: "0.2rem" },
-  valueUnknown: { fontSize: "0.8rem", color: "#9ca3af", marginTop: "0.5rem" },
+  tierRibbonRare: {
+    background: "linear-gradient(135deg, rgba(147,197,253,0.18), rgba(99,102,241,0.12))",
+    color: "#bfdbfe",
+    border: "1px solid rgba(147,197,253,0.6)",
+    backdropFilter: "blur(6px)",
+    boxShadow: "0 2px 12px rgba(147,197,253,0.25)",
+  },
+  // Ghost wraps the icon component directly — no pill. The icon itself
+  // carries the float+sway animation and a built-in glow. zIndex 4 keeps it
+  // above the target-reached badge (3), grade badge (default), and image.
+  // Lives in the bottom-right opposite the bottom-left grade badge; opacity
+  // 0.85 keeps it visible while letting the card image still read through.
+  ghostBadgeTile: {
+    position: "absolute", bottom: 8, right: 8,
+    opacity: 0.85,
+    zIndex: 4,
+  },
+  ghostBadgeInline: {
+    display: "inline-flex", alignItems: "center",
+    flexShrink: 0,
+  },
 
-  // Rarity tile highlight
-  tileRare: {
-    boxShadow: "0 0 0 2px #f59e0b, 0 1px 4px rgba(0,0,0,0.08)",
+  // ─── Tier flag (small inline label) ───
+  tierFlagBase: {
+    flexShrink: 0,
+    display: "inline-block",
+    fontSize: "0.55rem", fontWeight: 800, letterSpacing: "0.1em",
+    padding: "0.1rem 0.35rem", borderRadius: 3,
+    lineHeight: 1.4,
+  },
+  tierFlagUltraRare: {
+    background: "linear-gradient(135deg, #f59e0b, #d97706)",
+    color: "#0f172a",
+  },
+  tierFlagRare: {
+    background: "rgba(147,197,253,0.12)",
+    color: "#bfdbfe",
+    border: "1px solid rgba(147,197,253,0.55)",
   },
 
-  // Population stats
-  popRow: {
-    display: "flex", alignItems: "center", gap: "0.3rem",
-    fontSize: "0.72rem", color: "#6b7280",
-    marginTop: "0.35rem",
+  // ── Info bar ──
+  infoBar: {
+    padding: "0.85rem 1rem",
+    borderTop: "1px solid rgba(255,255,255,0.04)",
+    background: "linear-gradient(180deg, transparent, rgba(0,0,0,0.15))",
   },
-  popRowRare: { color: "#d97706", fontWeight: 600 },
-  popDivider: { color: "#d1d5db" },
-  popHigherZero: { color: "#059669", fontWeight: 700 },
+  infoTopRow: {
+    display: "flex", alignItems: "baseline",
+    justifyContent: "space-between", gap: "0.5rem",
+    marginBottom: "0.4rem",
+  },
+  playerName: {
+    fontSize: "0.88rem", fontWeight: 600, color: "#f1f5f9",
+    overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+    flex: 1, minWidth: 0,
+  },
+  metaRight: {
+    fontSize: "0.65rem", color: "#64748b",
+    letterSpacing: "0.04em",
+    flexShrink: 0,
+  },
+  infoBottomRow: {
+    display: "flex", alignItems: "center",
+    justifyContent: "space-between", gap: "0.5rem",
+  },
+  costLine: {
+    display: "flex", alignItems: "center", gap: "0.5rem",
+    fontSize: "0.7rem",
+    color: "#64748b",
+    marginTop: "0.4rem",
+    paddingTop: "0.4rem",
+    borderTop: "1px solid rgba(255,255,255,0.04)",
+    fontVariantNumeric: "tabular-nums",
+  },
+  costLineLabel: {
+    fontSize: "0.6rem", fontWeight: 700,
+    letterSpacing: "0.12em", textTransform: "uppercase",
+    color: "#475569",
+  },
+  costLineValue: { color: "#cbd5e1", fontWeight: 600 },
+  costLinePnl: { marginLeft: "auto", fontWeight: 700 },
 
-  pricingBlock: { marginTop: "0.5rem" },
-  mainValue: { fontWeight: 700, fontSize: "1.1rem", color: "#111827" },
-  saleDetail: {
-    display: "flex", alignItems: "center", gap: "0.3rem",
-    fontSize: "0.72rem", color: "#6b7280", marginTop: "0.15rem",
-  },
-  dot: { color: "#d1d5db" },
-  sourceBadge: {
-    display: "inline-block", marginTop: "0.3rem",
-    fontSize: "0.65rem", fontWeight: 600,
-    padding: "0.1rem 0.4rem", borderRadius: 3,
-    textTransform: "uppercase", letterSpacing: "0.04em",
-  },
-  sourceBadgeMock:   { background: "#f3f4f6", color: "#9ca3af" },
-  sourceBadgeEbay:   { background: "#fef3c7", color: "#92400e" },
-  sourceBadgeManual: { background: "#ede9fe", color: "#5b21b6" },
-
-  // Inline price editor
-  valueRow: { display: "flex", alignItems: "center", gap: "0.3rem", marginTop: "0.5rem" },
-  valueBtn: {
-    display: "flex", alignItems: "center", gap: "0.3rem",
+  // ── Price button (in-tile) ──
+  priceBtn: {
     background: "none", border: "none", padding: 0,
-    fontWeight: 700, fontSize: "1.1rem", color: "#111827",
-    cursor: "pointer", lineHeight: 1,
+    fontSize: "1.1rem", fontWeight: 700,
+    color: "#f59e0b", cursor: "pointer",
+    fontVariantNumeric: "tabular-nums",
+    letterSpacing: "-0.01em",
+    transition: "opacity 0.15s",
   },
-  valueBtnEmpty: { fontSize: "0.82rem", color: "#9ca3af", fontWeight: 500 },
-  editIcon: { fontSize: "0.75rem", color: "#9ca3af", opacity: 0, transition: "opacity 0.1s" },
-  clearBtn: {
-    background: "none", border: "none", color: "#9ca3af",
-    fontSize: "0.72rem", cursor: "pointer", padding: "0 0.1rem", lineHeight: 1,
+  priceBtnEmpty: {
+    background: "none", border: "1px dashed rgba(245,158,11,0.4)",
+    padding: "0.2rem 0.55rem", borderRadius: 4,
+    fontSize: "0.72rem", fontWeight: 600,
+    color: "#94a3b8", cursor: "pointer",
+    letterSpacing: "0.04em",
   },
-  editRow: { display: "flex", alignItems: "center", gap: "0.25rem", marginTop: "0.5rem" },
-  dollarSign: { fontSize: "0.9rem", color: "#6b7280", fontWeight: 600 },
-  priceInput: {
-    width: 72, padding: "0.25rem 0.35rem",
-    border: "1px solid #a5b4fc", borderRadius: 4,
-    fontSize: "0.9rem", fontWeight: 600,
-    outline: "none",
+
+  // ── Inline editor ──
+  editBlock: {
+    display: "flex", alignItems: "center", gap: "0.25rem",
+    background: "rgba(245,158,11,0.08)",
+    border: "1px solid rgba(245,158,11,0.4)",
+    borderRadius: 6, padding: "0.15rem 0.35rem",
+  },
+  editDollar: { fontSize: "0.85rem", color: "#f59e0b", fontWeight: 700 },
+  editInput: {
+    width: 70, background: "transparent", border: "none", outline: "none",
+    fontSize: "0.9rem", fontWeight: 700, color: "#f1f5f9",
+    fontVariantNumeric: "tabular-nums",
+  },
+  editOk: {
+    background: "#f59e0b", color: "#0f172a", border: "none",
+    borderRadius: 4, width: 22, height: 22, fontSize: "0.7rem",
+    cursor: "pointer", fontWeight: 800,
+    display: "flex", alignItems: "center", justifyContent: "center",
+  },
+  editX: {
+    background: "transparent", color: "#94a3b8",
+    border: "1px solid rgba(255,255,255,0.1)",
+    borderRadius: 4, width: 22, height: 22, fontSize: "0.7rem",
+    cursor: "pointer",
+    display: "flex", alignItems: "center", justifyContent: "center",
+  },
+
+  // ── Pop badge ──
+  popBadge: {
+    fontSize: "0.62rem", color: "#64748b",
+    letterSpacing: "0.04em",
+    display: "flex", alignItems: "center", gap: "0.3rem",
+    flexShrink: 0,
+  },
+  popBadgeDot: { color: "#334155" },
+  popBadgeHigherZero: { color: "#10b981", fontWeight: 700 },
+
+  // ── Empty state ──
+  empty: {
+    textAlign: "center", padding: "5rem 1rem",
+    background: "rgba(255,255,255,0.02)",
+    border: "1px solid rgba(255,255,255,0.05)",
+    borderRadius: 16,
+  },
+  emptyIcon: { fontSize: "2.5rem", color: "#f59e0b", opacity: 0.5, marginBottom: "1rem" },
+  emptyTitle: {
+    fontSize: "1.4rem", fontWeight: 700, color: "#f1f5f9",
+    margin: "0 0 0.5rem", letterSpacing: "-0.02em",
+  },
+  emptySub: { color: "#64748b", fontSize: "0.92rem", marginBottom: "2rem" },
+  emptyCta: {
+    display: "inline-block",
+    background: "#f59e0b", color: "#0f172a",
+    fontSize: "0.85rem", fontWeight: 800,
+    padding: "0.7rem 1.5rem", borderRadius: 8,
+    textDecoration: "none", letterSpacing: "0.01em",
+  },
+
+  // ─── Edit cost modal ───
+  editBackdrop: {
+    position: "fixed", inset: 0, zIndex: 1500,
+    background: "rgba(5,8,17,0.85)",
+    backdropFilter: "blur(6px)",
+    display: "flex", alignItems: "center", justifyContent: "center",
+    padding: "2rem 1rem",
+  },
+  editModal: {
+    position: "relative",
+    width: "100%", maxWidth: 460,
+    background: "linear-gradient(160deg, #0f172a 0%, #0a0f1f 100%)",
+    border: "1px solid rgba(245,158,11,0.18)",
+    borderRadius: 16,
+    boxShadow: "0 24px 60px rgba(0,0,0,0.6), 0 0 0 1px rgba(245,158,11,0.08), 0 0 80px rgba(245,158,11,0.06)",
+    padding: "2rem 2rem 1.5rem",
+    color: "#e2e8f0",
+  },
+  editClose: {
+    position: "absolute", top: 14, right: 14,
+    background: "rgba(255,255,255,0.05)",
+    border: "1px solid rgba(255,255,255,0.08)",
+    color: "#94a3b8", borderRadius: "50%",
+    width: 30, height: 30, fontSize: "0.78rem",
+    cursor: "pointer",
+    display: "flex", alignItems: "center", justifyContent: "center",
+  },
+  editHeader: {},
+  editEyebrow: {
+    fontSize: "0.7rem", fontWeight: 700,
+    letterSpacing: "0.18em", textTransform: "uppercase",
+    color: "#f59e0b", margin: "0 0 0.85rem",
+  },
+  editTitle: {
+    fontSize: "1.5rem", fontWeight: 800, color: "#f1f5f9",
+    letterSpacing: "-0.02em", margin: 0, lineHeight: 1.2,
+  },
+  editSub: {
+    fontSize: "0.82rem", color: "#94a3b8",
+    margin: "0.35rem 0 0", letterSpacing: "0.02em",
+  },
+  editDivider: {
+    height: 1,
+    background: "linear-gradient(90deg, transparent, rgba(255,255,255,0.08), transparent)",
+    margin: "1.5rem 0 1.25rem",
+  },
+  editFieldLabel: {
+    display: "block",
+    fontSize: "0.7rem", fontWeight: 600,
+    letterSpacing: "0.16em", textTransform: "uppercase",
+    color: "#64748b", marginBottom: "0.65rem",
+  },
+  costInputWrap: {
+    display: "flex", alignItems: "center",
+    background: "rgba(15,23,42,0.7)",
+    border: "1px solid rgba(255,255,255,0.08)",
+    borderRadius: 999,
+    padding: "0 1.25rem",
+    transition: "border-color 0.2s, background 0.2s, box-shadow 0.2s",
+  },
+  costInputWrapFocused: {
+    borderColor: "rgba(245,158,11,0.65)",
+    background: "rgba(15,23,42,0.95)",
+    boxShadow: "0 0 0 3px rgba(245,158,11,0.12)",
+  },
+  costDollarLg: {
+    color: "#f59e0b", fontSize: "1.4rem", fontWeight: 800,
+    marginRight: "0.6rem",
+  },
+  costInputLg: {
+    flex: 1,
+    background: "transparent",
+    border: "none", outline: "none",
+    color: "#f1f5f9",
+    fontSize: "1.4rem", fontWeight: 700,
+    padding: "0.95rem 0",
+    fontVariantNumeric: "tabular-nums",
     MozAppearance: "textfield",
+    letterSpacing: "-0.01em",
   },
-  editConfirm: {
-    background: "#4f46e5", color: "#fff", border: "none",
-    borderRadius: 4, width: 22, height: 22, fontSize: "0.75rem",
-    cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
+  editHint: {
+    fontSize: "0.72rem", color: "#64748b",
+    margin: "0.55rem 0 0", letterSpacing: "0.02em",
+  },
+  editPreview: {
+    display: "flex", alignItems: "center", justifyContent: "space-between",
+    background: "rgba(255,255,255,0.02)",
+    border: "1px solid",
+    borderRadius: 8,
+    padding: "0.7rem 1rem",
+    marginTop: "1rem",
+    fontVariantNumeric: "tabular-nums",
+  },
+  editPreviewLabel: {
+    fontSize: "0.6rem", fontWeight: 700,
+    letterSpacing: "0.16em", textTransform: "uppercase",
+    opacity: 0.85,
+  },
+  editPreviewValue: {
+    fontSize: "1.15rem", fontWeight: 800,
+    letterSpacing: "-0.01em",
+  },
+  editError: {
+    background: "rgba(248,113,113,0.08)",
+    border: "1px solid rgba(248,113,113,0.25)",
+    color: "#fca5a5",
+    fontSize: "0.82rem",
+    padding: "0.6rem 0.9rem",
+    borderRadius: 6,
+    marginTop: "1rem",
+  },
+  editFooter: {
+    display: "flex", justifyContent: "flex-end", gap: "0.75rem",
+    marginTop: "1.75rem",
   },
   editCancel: {
-    background: "#f3f4f6", color: "#6b7280", border: "none",
-    borderRadius: 4, width: 22, height: 22, fontSize: "0.72rem",
-    cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
+    background: "transparent",
+    border: "1px solid rgba(255,255,255,0.1)",
+    color: "#94a3b8",
+    fontSize: "0.85rem", fontWeight: 600,
+    padding: "0.7rem 1.25rem", borderRadius: 8,
+    cursor: "pointer",
+    letterSpacing: "0.01em",
   },
-  editHint: { fontSize: "0.65rem", color: "#9ca3af", marginTop: "0.25rem" },
+  editSave: {
+    background: "linear-gradient(135deg, #f59e0b 0%, #d97706 100%)",
+    border: "none",
+    color: "#0f172a",
+    fontSize: "0.9rem", fontWeight: 800,
+    padding: "0.7rem 1.5rem", borderRadius: 8,
+    cursor: "pointer",
+    letterSpacing: "0.01em",
+    boxShadow: "0 4px 16px rgba(245,158,11,0.25), 0 0 0 1px rgba(245,158,11,0.4)",
+  },
+  eyebrowMark: { marginRight: "0.4rem" },
+
+  // ─── Milestones in hero ───
+  milestoneRow: {
+    display: "flex", flexWrap: "wrap", gap: "0.4rem",
+    marginTop: "0.6rem", marginBottom: "1rem",
+  },
+  milestoneBadge: {
+    display: "inline-flex", alignItems: "center", gap: "0.3rem",
+    background: "rgba(245,158,11,0.08)",
+    border: "1px solid rgba(245,158,11,0.3)",
+    color: "#fbbf24",
+    fontSize: "0.65rem", fontWeight: 700,
+    padding: "0.25rem 0.55rem",
+    borderRadius: 999,
+    letterSpacing: "0.04em",
+  },
+  milestoneIcon: { fontSize: "0.65rem" },
+
+  // ─── Alert banner ───
+  alertBanner: {
+    background: "linear-gradient(135deg, rgba(245,158,11,0.12), rgba(217,119,6,0.06))",
+    border: "1px solid rgba(245,158,11,0.4)",
+    borderRadius: 14,
+    padding: "1.25rem 1.5rem",
+    marginBottom: "2rem",
+    boxShadow: "0 0 0 1px rgba(245,158,11,0.1), 0 0 32px rgba(245,158,11,0.08)",
+  },
+  alertHeader: {
+    display: "flex", alignItems: "center", gap: "0.6rem",
+    marginBottom: "0.85rem",
+  },
+  alertDot: {
+    width: 10, height: 10, borderRadius: "50%",
+    background: "#f59e0b",
+    animation: "livePulse 1.6s ease-in-out infinite",
+  },
+  alertEyebrow: {
+    fontSize: "0.72rem", fontWeight: 700,
+    letterSpacing: "0.18em", textTransform: "uppercase",
+    color: "#fbbf24",
+  },
+  alertCount: {
+    background: "#f59e0b", color: "#0f172a",
+    fontSize: "0.7rem", fontWeight: 800,
+    padding: "0.1rem 0.5rem", borderRadius: 999,
+  },
+  alertJump: {
+    marginLeft: "auto",
+    background: "transparent",
+    border: "1px solid rgba(245,158,11,0.4)",
+    color: "#fbbf24",
+    fontSize: "0.78rem", fontWeight: 700,
+    padding: "0.3rem 0.8rem", borderRadius: 999,
+    cursor: "pointer", letterSpacing: "0.01em",
+  },
+  alertList: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))",
+    gap: "0.5rem 1rem",
+  },
+  alertItem: {
+    display: "flex", alignItems: "center", gap: "0.6rem",
+    fontSize: "0.85rem", color: "#e2e8f0",
+    padding: "0.35rem 0",
+    borderBottom: "1px solid rgba(245,158,11,0.1)",
+  },
+  alertItemName: { fontWeight: 600, color: "#f1f5f9", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
+  alertItemMeta: {
+    fontSize: "0.65rem", color: "#94a3b8",
+    background: "rgba(15,23,42,0.6)",
+    border: "1px solid rgba(245,158,11,0.2)",
+    padding: "0.1rem 0.35rem", borderRadius: 3,
+    fontWeight: 700, letterSpacing: "0.06em",
+  },
+  alertItemValue: {
+    fontSize: "0.78rem", color: "#fbbf24", fontWeight: 700,
+    fontVariantNumeric: "tabular-nums",
+  },
+  alertItemArrow: { color: "#64748b", margin: "0 0.2rem" },
+  alertMore: { fontSize: "0.72rem", color: "#64748b", fontStyle: "italic", padding: "0.4rem 0" },
+
+  // ─── Target-reached badge on tile ───
+  // Lives in the bottom-left, stacked above the grade badge. The slimmer
+  // PSA-logo grade pill is ~26px tall now, so 42px clears it with breathing room.
+  targetBadge: {
+    position: "absolute", bottom: 42, left: 10,
+    display: "flex", alignItems: "center", gap: "0.3rem",
+    background: "rgba(15,23,42,0.92)",
+    border: "1px solid rgba(245,158,11,0.6)",
+    borderRadius: 999,
+    padding: "0.25rem 0.55rem",
+    fontSize: "0.6rem", fontWeight: 800,
+    color: "#fbbf24",
+    letterSpacing: "0.12em",
+    backdropFilter: "blur(8px)",
+    boxShadow: "0 0 12px rgba(245,158,11,0.4)",
+    animation: "livePulse 2s ease-in-out infinite",
+    zIndex: 3,
+  },
+  targetBadgeDot: {
+    width: 6, height: 6, borderRadius: "50%",
+    background: "#f59e0b",
+  },
+
+  // ─── Insights row (diversification + performers) ───
+  insightsRow: {
+    display: "grid",
+    gridTemplateColumns: "minmax(260px, 1fr) minmax(320px, 1.4fr)",
+    gap: "1.25rem",
+    marginBottom: "2.5rem",
+  },
+  insightsCol: {
+    background: gradients.goldPanel,
+    border: "1px solid rgba(255,255,255,0.06)",
+    borderRadius: 16,
+    padding: "1.5rem 1.75rem",
+  },
+  insightsHeader: {
+    display: "flex", alignItems: "flex-start",
+    justifyContent: "space-between", marginBottom: "1.25rem",
+  },
+  insightsEyebrow: {
+    fontSize: "0.7rem", fontWeight: 700,
+    letterSpacing: "0.18em", textTransform: "uppercase",
+    color: "#94a3b8", margin: 0,
+  },
+
+  // ─── Diversification ───
+  divBody: {
+    display: "flex", alignItems: "center", gap: "1.25rem",
+    flexWrap: "wrap",
+  },
+  divDetails: { flex: 1, minWidth: 140 },
+  divLabel: {
+    fontSize: "1.1rem", fontWeight: 800,
+    letterSpacing: "-0.01em", marginBottom: "0.5rem",
+  },
+  divDescription: {
+    fontSize: "0.78rem", color: "#64748b",
+    lineHeight: 1.6,
+  },
+
+  // ─── Performers ───
+  perfGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+    gap: "1.25rem 1.5rem",
+  },
+  perfHeading: {
+    fontSize: "0.65rem", fontWeight: 700,
+    letterSpacing: "0.16em", textTransform: "uppercase",
+    marginBottom: "0.75rem",
+  },
+  perfList: { display: "flex", flexDirection: "column", gap: "0.5rem" },
+  perfEmpty: {
+    fontSize: "0.78rem", color: "#475569",
+    fontStyle: "italic", padding: "0.85rem 0",
+    letterSpacing: "0.02em",
+  },
+  perfItem: {
+    display: "flex", alignItems: "center",
+    justifyContent: "space-between", gap: "0.75rem",
+    padding: "0.55rem 0",
+    borderBottom: "1px solid rgba(255,255,255,0.04)",
+  },
+  perfItemMain: { flex: 1, minWidth: 0 },
+  perfItemName: {
+    fontSize: "0.85rem", fontWeight: 600, color: "#f1f5f9",
+    overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+  },
+  perfItemMeta: { fontSize: "0.7rem", color: "#64748b", marginTop: "0.1rem" },
+  perfItemNumbers: { textAlign: "right", flexShrink: 0 },
+  perfItemPnl: {
+    fontSize: "0.95rem", fontWeight: 800,
+    fontVariantNumeric: "tabular-nums",
+    letterSpacing: "-0.01em",
+  },
+  perfItemBasis: {
+    fontSize: "0.66rem", color: "#475569",
+    fontVariantNumeric: "tabular-nums", marginTop: "0.15rem",
+  },
+
+  // ─── Price history chart ───
+  historyPanel: {
+    background: gradients.goldPanel,
+    border: "1px solid rgba(255,255,255,0.06)",
+    borderRadius: 16,
+    padding: "1.75rem 2rem 1rem",
+    marginBottom: "2.5rem",
+  },
+  historyHeader: {
+    display: "flex", alignItems: "flex-start",
+    justifyContent: "space-between", flexWrap: "wrap",
+    gap: "1rem", marginBottom: "1.25rem",
+  },
+  historyDelta: { textAlign: "right" },
+  historyDeltaValue: {
+    fontSize: "1.4rem", fontWeight: 800,
+    fontVariantNumeric: "tabular-nums",
+    letterSpacing: "-0.02em",
+  },
+  historyDeltaPct: {
+    fontSize: "0.85rem", fontWeight: 700,
+    marginLeft: "0.6rem",
+    fontVariantNumeric: "tabular-nums",
+  },
+  historyDeltaLabel: {
+    display: "block",
+    fontSize: "0.62rem", fontWeight: 600,
+    letterSpacing: "0.16em", textTransform: "uppercase",
+    color: "#64748b", marginTop: "0.2rem",
+  },
+  historyEmpty: {
+    color: "#64748b", fontSize: "0.85rem",
+    textAlign: "center", padding: "2.5rem 1rem",
+    fontStyle: "italic",
+  },
+
+  // ─── Milestone toast ───
+  toastWrap: {
+    position: "fixed", top: 80, right: 24, zIndex: 2000,
+    pointerEvents: "auto",
+    cursor: "pointer",
+  },
+  toast: {
+    display: "flex", alignItems: "center", gap: "0.85rem",
+    background: "linear-gradient(135deg, #f59e0b 0%, #d97706 100%)",
+    color: "#0f172a",
+    padding: "1rem 1.5rem 1rem 1.25rem",
+    borderRadius: 12,
+    boxShadow: "0 12px 40px rgba(245,158,11,0.4), 0 0 0 1px rgba(245,158,11,0.6), 0 0 60px rgba(245,158,11,0.3)",
+    animation: "fadeInUp 0.4s ease-out",
+    minWidth: 240,
+  },
+  toastBurst: {
+    fontSize: "1.6rem",
+    animation: "pulse 1.6s ease-in-out infinite",
+  },
+  toastTitle: {
+    fontSize: "0.65rem", fontWeight: 800,
+    letterSpacing: "0.16em", textTransform: "uppercase",
+    opacity: 0.7,
+  },
+  toastBody: {
+    fontSize: "1rem", fontWeight: 800,
+    marginTop: "0.15rem",
+    letterSpacing: "-0.01em",
+  },
 };

@@ -82,5 +82,27 @@ exports.handler = async (event) => {
     };
   });
 
-  return json(200, { totalValue: Math.round(totalValue * 100) / 100, cards });
+  const finalTotal = Math.round(totalValue * 100) / 100;
+
+  // Write a portfolio_snapshots row at most once per 30 minutes per user.
+  // Wrapped in try/catch so a snapshot failure never breaks the response.
+  try {
+    const last = await db.query(
+      "SELECT snapshot_at FROM portfolio_snapshots WHERE user_id = $1 ORDER BY snapshot_at DESC LIMIT 1",
+      [userId]
+    );
+    const minutesSince = last.rows[0]
+      ? (Date.now() - new Date(last.rows[0].snapshot_at).getTime()) / 60000
+      : Infinity;
+    if (minutesSince > 30) {
+      await db.query(
+        "INSERT INTO portfolio_snapshots (user_id, total_value, card_count) VALUES ($1, $2, $3)",
+        [userId, finalTotal, cards.length]
+      );
+    }
+  } catch (err) {
+    console.warn("Snapshot write failed:", err.message);
+  }
+
+  return json(200, { totalValue: finalTotal, cards });
 };

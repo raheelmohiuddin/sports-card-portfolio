@@ -5,6 +5,9 @@ import NavHeader from "./components/Layout.jsx";
 import HomePage from "./pages/HomePage.jsx";
 import AboutPage from "./pages/AboutPage.jsx";
 import SignInPage from "./pages/SignInPage.jsx";
+import UsernameSetupPage from "./pages/UsernameSetupPage.jsx";
+import ProfilePage from "./pages/ProfilePage.jsx";
+import SettingsPage from "./pages/SettingsPage.jsx";
 import PortfolioPage from "./pages/PortfolioPage.jsx";
 import AddCardPage from "./pages/AddCardPage.jsx";
 
@@ -36,8 +39,14 @@ export default function App() {
           <Route path="/" element={<HomePage />} />
           <Route path="/about" element={<AboutPage />} />
           <Route path="/signin" element={<SignInPage />} />
+          {/* setup-username has its own full-bleed layout, so it isn't wrapped
+              by ProtectedRoute's container. The page itself redirects to
+              /signin when unauthenticated and /portfolio when already set. */}
+          <Route path="/setup-username" element={<UsernameSetupPage />} />
           <Route path="/portfolio" element={<ProtectedRoute><PortfolioPage /></ProtectedRoute>} />
-          <Route path="/add-card" element={<ProtectedRoute><AddCardPage /></ProtectedRoute>} />
+          <Route path="/add-card"  element={<ProtectedRoute><AddCardPage /></ProtectedRoute>} />
+          <Route path="/profile"   element={<ProtectedRoute><ProfilePage /></ProtectedRoute>} />
+          <Route path="/settings"  element={<ProtectedRoute><SettingsPage /></ProtectedRoute>} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </BrowserRouter>

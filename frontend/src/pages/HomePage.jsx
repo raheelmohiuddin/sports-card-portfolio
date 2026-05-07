@@ -1,26 +1,27 @@
+import { useMemo } from "react";
 import { Link } from "react-router-dom";
 import { useAuthenticator } from "@aws-amplify/ui-react";
 
 const FEATURES = [
   {
-    icon: "🏷️",
-    title: "PSA Cert Lookup",
-    desc: "Instantly retrieve card details, grade, and images for any PSA-certified card by certificate number.",
-  },
-  {
     icon: "📊",
     title: "Portfolio Valuation",
-    desc: "See the real-time market value of your entire collection in one place, updated from recent eBay sales.",
+    desc: "Know exactly what your collection is worth. Real-time market estimates across every card in your portfolio, updated automatically.",
   },
   {
-    icon: "🃏",
-    title: "3D Card Viewer",
-    desc: "Inspect every card in an immersive Three.js 3D renderer with a magnifying glass zoom on the full-screen view.",
+    icon: "📈",
+    title: "Price History",
+    desc: "Watch your portfolio grow. Track how your total collection value changes over time with detailed historical charts.",
+  },
+  {
+    icon: "💰",
+    title: "P&L Tracking",
+    desc: "Know your numbers. See your cost basis, current market value, and profit or loss on every single card at a glance.",
   },
   {
     icon: "✦",
-    title: "Population Data",
-    desc: "PSA population reports surface rare cards — low-pop gems are highlighted so you know exactly what you hold.",
+    title: "Rarity Tiers",
+    desc: "Discover what you really own. Cards are automatically classified into Ghost, Ultra Rare, and Rare tiers based on PSA population data.",
   },
 ];
 
@@ -33,18 +34,19 @@ export default function HomePage() {
       {/* ── Hero ── */}
       <section style={st.hero}>
         <div style={st.heroNoise} aria-hidden />
+        <FloatingCards />
         <div className="container" style={st.heroInner}>
           <p style={st.eyebrow}>
             <span style={st.eyebrowMark}>◆</span> Collector's Reserve
           </p>
           <h1 style={st.heroTitle}>
-            See Your Collection as<br />
-            <span style={st.heroAccent}>a True Portfolio.</span>
+            Every Card Has a Story.<br />
+            <span style={st.heroAccent}>Now It Has a Value.</span>
           </h1>
           <p style={st.heroSub}>
-            Professional portfolio management for sports cards and TCG —
-            track grades, market values, and population data across your
-            entire graded collection in one place.
+            The only platform built for serious Sports Cards and TCG collectors.
+            Rely on professional industry experience to help guide, source, and
+            fund some of the world's most elusive cards.
           </p>
           <div style={st.heroCtas}>
             {isAuth ? (
@@ -56,6 +58,17 @@ export default function HomePage() {
               </>
             )}
           </div>
+        </div>
+      </section>
+
+      {/* ── Partnership banner ── */}
+      <section style={st.partner}>
+        <div className="container" style={st.partnerInner}>
+          <span style={st.partnerEyebrow}>Exclusive Partner</span>
+          <img src="/fanatics-collectibles.png" alt="Fanatics Collectibles" style={st.partnerLogo} />
+          <span style={st.partnerSub}>
+            Access the world's largest collectibles marketplace
+          </span>
         </div>
       </section>
 
@@ -106,7 +119,124 @@ export default function HomePage() {
   );
 }
 
+// ─── Floating cards background ───────────────────────────────────────
+const DRIFT_PATTERNS = ["driftA", "driftB", "driftC", "driftD"];
+// One card per image — keeps every collection piece on screen exactly once.
+const CARD_COUNT = 6;
+
+// 6 collection images cycled across the 14 floating cards (i % 6) so each
+// image appears at least twice. Add/remove entries to change the rotation.
+const CARD_IMAGES = [
+  "/cards/Jordan.jpg",
+  "/cards/Ohtani_Gold_10.jfif",
+  "/cards/Alcaraz_PSA_10.jfif",
+  "/cards/Alcaraz_9_5.jfif",
+  "/cards/Ohtani_Refractor_MBA_Black_Diamond.jfif",
+  "/cards/Luffy_ST01_MBA_Gold.jfif",
+];
+
+function FloatingCards() {
+  // Randomise once on mount — useMemo with empty deps gives a stable layout
+  // for the lifetime of the page, so cards don't reshuffle on re-render.
+  const cards = useMemo(() => (
+    Array.from({ length: CARD_COUNT }, (_, i) => {
+      const size = 130 + Math.random() * 110; // 130–240 px wide (× 1.4 tall)
+      return {
+        size,
+        image: CARD_IMAGES[i % CARD_IMAGES.length],
+        left: Math.random() * 80,                   // keep some right margin so
+        top:  Math.random() * 75,                   // larger cards don't clip
+        drift:          DRIFT_PATTERNS[i % DRIFT_PATTERNS.length],
+        driftDuration:  26 + Math.random() * 24,   // 26–50 s
+        driftDelay:     -Math.random() * 30,       // negative → mid-cycle start
+        rotateDuration: 90 + Math.random() * 120,  // 90–210 s
+        rotateDelay:    -Math.random() * 60,
+        rotateDir:      Math.random() > 0.5 ? "normal" : "reverse",
+        opacity:        0.75 + Math.random() * 0.25, // 0.75–1.0 — vivid
+        shimmer:        Math.random() > 0.4,         // ~60% have shimmer
+        shimmerDelay:   -Math.random() * 7,
+      };
+    })
+  ), []);
+
+  return (
+    <div style={st.cardsLayer} aria-hidden>
+      {cards.map((c, i) => <FloatingCard key={i} card={c} />)}
+    </div>
+  );
+}
+
+function FloatingCard({ card }) {
+  // Outer wrapper handles drift; inner wrapper handles rotation. Stacking the
+  // animations on different elements keeps each transform single-purpose.
+  return (
+    <div style={{
+      position: "absolute",
+      left: `${card.left}%`,
+      top:  `${card.top}%`,
+      animation: `${card.drift} ${card.driftDuration}s ease-in-out ${card.driftDelay}s infinite`,
+      willChange: "transform",
+    }}>
+      <div style={{
+        width:  card.size,
+        height: card.size * 1.4, // 5:7 trading-card aspect
+        animation: `cardRotate ${card.rotateDuration}s linear ${card.rotateDelay}s infinite ${card.rotateDir}`,
+        willChange: "transform",
+      }}>
+        <div style={{
+          position: "relative",
+          width: "100%", height: "100%",
+          background: "transparent",
+          border: "none",
+          boxShadow: "none",
+          opacity: card.opacity,
+        }}>
+          <img
+            src={card.image}
+            alt=""
+            style={{
+              width: "100%", height: "100%",
+              objectFit: "contain",
+              display: "block",
+              border: "none",
+              background: "transparent",
+              // `screen` blends each pixel as 255-(255-top)(255-bottom)/255,
+              // which makes black pixels (0) effectively pass-through (the
+              // hero background shows through), while keeping bright card
+              // colours mostly intact. If colours wash out too much, swap
+              // to `multiply` instead — that keeps colour saturation but
+              // doesn't actually remove black, just blends it into the dark
+              // background visually (only works against a dark backdrop).
+              mixBlendMode: "screen",
+            }}
+            draggable={false}
+          />
+          {card.shimmer && (
+            <div style={{
+              position: "absolute", inset: 0,
+              background: "linear-gradient(120deg, transparent 30%, rgba(245,158,11,0.32) 48%, rgba(255,255,255,0.28) 52%, rgba(245,158,11,0.32) 56%, transparent 75%)",
+              backgroundSize: "300% 100%",
+              animation: `cardShimmer 7s ease-in-out ${card.shimmerDelay}s infinite`,
+              mixBlendMode: "screen",
+              pointerEvents: "none",
+            }} />
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 const st = {
+  // Floating-cards layer — sits between the radial-gradient noise and
+  // the hero text. zIndex 1 puts it above the noise; heroInner is zIndex 2.
+  cardsLayer: {
+    position: "absolute", inset: 0,
+    zIndex: 1,
+    pointerEvents: "none",
+    overflow: "hidden",
+  },
+
   // Hero
   hero: {
     position: "relative",
@@ -118,7 +248,7 @@ const st = {
     position: "absolute", inset: 0, pointerEvents: "none",
     backgroundImage: "radial-gradient(circle at 70% 20%, rgba(245,158,11,0.08) 0%, transparent 60%), radial-gradient(circle at 20% 80%, rgba(99,102,241,0.06) 0%, transparent 50%)",
   },
-  heroInner: { position: "relative", textAlign: "center" },
+  heroInner: { position: "relative", textAlign: "center", zIndex: 2 },
   eyebrow: {
     color: "#f59e0b", fontSize: "0.8rem", fontWeight: 700,
     letterSpacing: "0.12em", textTransform: "uppercase",
@@ -149,6 +279,41 @@ const st = {
     padding: "0.75rem 1.75rem", borderRadius: 8,
     textDecoration: "none", border: "1px solid rgba(255,255,255,0.12)",
     display: "inline-block",
+  },
+
+  // Partnership banner — sits between hero (dark) and features (white).
+  // Subtle gold borders on top + bottom; semi-transparent navy lets the
+  // edge between sections feel like a continuation rather than a hard cut.
+  partner: {
+    background: "rgba(15,23,42,0.8)",
+    borderTop:    "1px solid rgba(245,158,11,0.25)",
+    borderBottom: "1px solid rgba(245,158,11,0.25)",
+    padding: "24px 0",
+  },
+  // Grid layout: 1fr | auto | 1fr keeps the logo dead-centre regardless of
+  // the side text widths. Equal column gaps give even visual spacing.
+  partnerInner: {
+    display: "grid",
+    gridTemplateColumns: "1fr auto 1fr",
+    alignItems: "center",
+    gap: "2.5rem",
+  },
+  partnerEyebrow: {
+    color: "#f59e0b",
+    fontSize: "0.72rem", fontWeight: 700,
+    letterSpacing: "0.18em", textTransform: "uppercase",
+    textAlign: "right",
+  },
+  partnerLogo: {
+    height: 120, width: "auto",
+    display: "block",
+    borderRadius: 6,
+  },
+  partnerSub: {
+    color: "#94a3b8",
+    fontSize: "0.85rem",
+    textAlign: "left",
+    letterSpacing: "0.01em",
   },
 
   // Features

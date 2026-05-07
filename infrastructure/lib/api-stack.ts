@@ -106,10 +106,40 @@ export class ApiStack extends Construct {
       entry: path.join(functionsDir, "portfolio/get-value.js"),
     });
 
+    const portfolioHistoryFn = new NodejsFunction(this, "PortfolioHistory", {
+      ...sharedNodejsProps,
+      functionName: "scp-portfolio-history",
+      entry: path.join(functionsDir, "portfolio/get-history.js"),
+    });
+
+    const cardSalesFn = new NodejsFunction(this, "CardSales", {
+      ...sharedNodejsProps,
+      functionName: "scp-card-sales",
+      entry: path.join(functionsDir, "portfolio/get-card-sales.js"),
+    });
+
+    const avatarUploadUrlFn = new NodejsFunction(this, "AvatarUploadUrl", {
+      ...sharedNodejsProps,
+      functionName: "scp-avatar-upload-url",
+      entry: path.join(functionsDir, "profile/get-avatar-upload-url.js"),
+    });
+
+    const avatarViewUrlFn = new NodejsFunction(this, "AvatarViewUrl", {
+      ...sharedNodejsProps,
+      functionName: "scp-avatar-view-url",
+      entry: path.join(functionsDir, "profile/get-avatar-view-url.js"),
+    });
+
     const updatePriceFn = new NodejsFunction(this, "UpdatePrice", {
       ...sharedNodejsProps,
       functionName: "scp-update-price",
       entry: path.join(functionsDir, "cards/update-price.js"),
+    });
+
+    const updateCardFn = new NodejsFunction(this, "UpdateCard", {
+      ...sharedNodejsProps,
+      functionName: "scp-update-card",
+      entry: path.join(functionsDir, "cards/update-card.js"),
     });
 
     // Edge texture uses Anthropic vision — no DB or S3 access needed.
@@ -128,8 +158,24 @@ export class ApiStack extends Construct {
       })
     );
 
+    // One-off migration Lambda — invoke manually after deploy. Idempotent.
+    const migrationAddMyCostFn = new NodejsFunction(this, "MigrationAddMyCost", {
+      ...sharedNodejsProps,
+      functionName: "scp-migration-add-my-cost",
+      entry: path.join(functionsDir, "_migrations/add-my-cost.js"),
+    });
+    props.dbSecret.grantRead(migrationAddMyCostFn);
+
+    // Migration: target_price column + portfolio_snapshots table.
+    const migrationPortfolioFeaturesFn = new NodejsFunction(this, "MigrationAddPortfolioFeatures", {
+      ...sharedNodejsProps,
+      functionName: "scp-migration-add-portfolio-features",
+      entry: path.join(functionsDir, "_migrations/add-portfolio-features.js"),
+    });
+    props.dbSecret.grantRead(migrationPortfolioFeaturesFn);
+
     // Grant permissions
-    for (const fn of [addCardFn, getCardsFn, getCardFn, deleteCardFn, psaLookupFn, portfolioValueFn, updatePriceFn]) {
+    for (const fn of [addCardFn, getCardsFn, getCardFn, deleteCardFn, psaLookupFn, portfolioValueFn, portfolioHistoryFn, cardSalesFn, updatePriceFn, updateCardFn, avatarUploadUrlFn, avatarViewUrlFn]) {
       props.dbSecret.grantRead(fn);
       props.cardImagesBucket.grantReadWrite(fn);
       fn.addToRolePolicy(
@@ -212,9 +258,44 @@ export class ApiStack extends Construct {
     });
 
     api.addRoutes({
+      path: "/portfolio/history",
+      methods: [apigwv2.HttpMethod.GET],
+      integration: new apigwv2integrations.HttpLambdaIntegration("PortfolioHistory", portfolioHistoryFn),
+      ...authRoute,
+    });
+
+    api.addRoutes({
+      path: "/cards/{id}/sales",
+      methods: [apigwv2.HttpMethod.GET],
+      integration: new apigwv2integrations.HttpLambdaIntegration("CardSales", cardSalesFn),
+      ...authRoute,
+    });
+
+    api.addRoutes({
+      path: "/profile/avatar-upload-url",
+      methods: [apigwv2.HttpMethod.POST],
+      integration: new apigwv2integrations.HttpLambdaIntegration("AvatarUploadUrl", avatarUploadUrlFn),
+      ...authRoute,
+    });
+
+    api.addRoutes({
+      path: "/profile/avatar-view-url",
+      methods: [apigwv2.HttpMethod.GET],
+      integration: new apigwv2integrations.HttpLambdaIntegration("AvatarViewUrl", avatarViewUrlFn),
+      ...authRoute,
+    });
+
+    api.addRoutes({
       path: "/cards/{id}/price",
       methods: [apigwv2.HttpMethod.PATCH],
       integration: new apigwv2integrations.HttpLambdaIntegration("UpdatePrice", updatePriceFn),
+      ...authRoute,
+    });
+
+    api.addRoutes({
+      path: "/cards/{id}",
+      methods: [apigwv2.HttpMethod.PUT],
+      integration: new apigwv2integrations.HttpLambdaIntegration("UpdateCard", updateCardFn),
       ...authRoute,
     });
 
