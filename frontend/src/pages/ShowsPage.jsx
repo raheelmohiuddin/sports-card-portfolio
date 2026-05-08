@@ -342,12 +342,12 @@ function spanPillStyle(s) {
 // Stacked WEEKDAY / DAY / MONTH pill — restored from the first
 // ShowsPage commit (673b333). Used for both start and end dates so the
 // two pills are visually identical in multi-day shows.
-function DatePill({ d }) {
+function DatePill({ date }) {
   return (
     <div style={st.dateBox}>
-      <div style={st.dateWeekday}>{d ? weekday(d).toUpperCase() : "—"}</div>
-      <div style={st.dateDay}>{d ? d.getDate() : "—"}</div>
-      <div style={st.dateMonth}>{d ? shortMonth(d) : ""}</div>
+      <div style={st.dateWeekday}>{date ? weekday(date).toUpperCase() : "—"}</div>
+      <div style={st.dateDay}>{date ? date.getDate() : "—"}</div>
+      <div style={st.dateMonth}>{date ? shortMonth(date) : ""}</div>
     </div>
   );
 }
@@ -415,11 +415,11 @@ function FilterBar({
 
 // ─── Show card ───────────────────────────────────────────────────────
 function ShowCard({ show, onToggle }) {
-  const date    = show.date ? new Date(`${show.date}T00:00:00`) : null;
-  const endDate = show.endDate && show.endDate !== show.date
+  const startDate = show.date ? new Date(`${show.date}T00:00:00`) : null;
+  const endDate   = show.endDate && show.endDate !== show.date
     ? new Date(`${show.endDate}T00:00:00`)
     : null;
-  const days = date ? daysFromToday(date) : null;
+  const days = startDate ? daysFromToday(startDate) : null;
   const countdown =
     days == null    ? null :
     days  <  0      ? null :
@@ -437,15 +437,16 @@ function ShowCard({ show, onToggle }) {
         </div>
       )}
 
-      {/* Date header — restored to the original stacked WEEKDAY / DAY /
-          MONTH pill style. Multi-day adds a gold arrow + a matching pill
-          for the end date; single-day renders only the start pill. */}
-      <div style={st.dateRow}>
-        <DatePill d={date} />
+      {/* Date header — `space-between` anchors the pills to the far
+          edges of the row; the arrow is `flex: 1` with `text-align:
+          center` so it occupies the entire middle gap and centers
+          itself between the two pills regardless of pill width. */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%" }}>
+        <DatePill date={startDate} />
         {endDate && (
           <>
-            <div style={st.dateArrow} aria-hidden>→</div>
-            <DatePill d={endDate} />
+            <span style={{ color: "#f59e0b", fontSize: "1.2rem", fontWeight: 700, flex: 1, textAlign: "center" }}>→</span>
+            <DatePill date={endDate} />
           </>
         )}
       </div>
