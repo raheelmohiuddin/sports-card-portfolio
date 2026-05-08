@@ -48,11 +48,16 @@ export default function AdminConsignmentsPage() {
     return () => { cancelled = true; };
   }, []);
 
+  // Returns the underlying request promise so the editable cells in the
+  // row can chain on it (flash a success indicator on resolve, stay in
+  // edit mode on error). Optimistic state update happens immediately;
+  // failure path refetches to re-sync.
   function patchRow(id, patch) {
     setRows((prev) => prev.map((r) => r.id === id ? { ...r, ...patch } : r));
-    updateAdminConsignment(id, patch).catch((e) => {
+    return updateAdminConsignment(id, patch).catch((e) => {
       setError(e?.message ?? "Update failed");
       getAdminConsignments().then(setRows).catch(() => {});
+      throw e;
     });
   }
 
@@ -181,26 +186,16 @@ function FilterDropdown({ label, value, onChange, options }) {
 }
 
 function ConsignmentRow({ row, onPatch }) {
-  const [notes, setNotes]         = useState(row.internalNotes ?? "");
-  const [soldInput, setSoldInput] = useState(row.soldPrice != null ? String(row.soldPrice) : "");
+  const [notes, setNotes] = useState(row.internalNotes ?? "");
   const cardLabel = [row.card.year, row.card.brand, row.card.playerName].filter(Boolean).join(" ") || "—";
 
-  // Resync local input when the row prop changes (e.g. refetch after error).
-  useEffect(() => {
-    setNotes(row.internalNotes ?? "");
-    setSoldInput(row.soldPrice != null ? String(row.soldPrice) : "");
-  }, [row.id, row.internalNotes, row.soldPrice]);
+  // Resync the notes textarea when the row prop changes (e.g. refetch
+  // after an error rolls back state).
+  useEffect(() => { setNotes(row.internalNotes ?? ""); }, [row.id, row.internalNotes]);
 
   function commitNotes() {
     if ((notes ?? "") === (row.internalNotes ?? "")) return;
     onPatch(row.id, { internalNotes: notes });
-  }
-  function commitSoldPrice() {
-    const trimmed = soldInput.trim();
-    const next = trimmed === "" ? null : parseFloat(trimmed);
-    if (next != null && (Number.isNaN(next) || next < 0)) return;
-    if (next === (row.soldPrice ?? null)) return;
-    onPatch(row.id, { soldPrice: next });
   }
 
   return (
@@ -216,34 +211,21 @@ function ConsignmentRow({ row, onPatch }) {
       <td style={{ ...st.td, ...st.tdRight }}>{row.card.grade ?? "—"}</td>
       <td style={{ ...st.td, ...st.tdRight }}>{fmt(row.card.estimatedValue)}</td>
       <td style={{ ...st.td, ...st.tdRight, ...st.tdValue }}>{fmt(row.askingPrice)}</td>
-      {/* Sold Price — editable only when status is "sold". Other statuses
-          show "—" so the column lines up but isn't actionable. */}
+      {/* Sold Price — editable only when status is "sold". Click-to-edit
+          pattern with confirm/cancel buttons; non-sold rows render "—". */}
       <td style={{ ...st.td, ...st.tdRight }}>
-        {row.status === "sold" ? (
-          <input
-            type="number" min="0" step="0.01" inputMode="decimal"
-            value={soldInput}
-            onChange={(e) => setSoldInput(e.target.value)}
-            onBlur={commitSoldPrice}
-            onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
-            placeholder="—"
-            style={st.soldInput}
-          />
-        ) : (
-          <span style={st.tdMuted}>—</span>
-        )}
+        <EditableSoldPrice
+          value={row.soldPrice}
+          enabled={row.status === "sold"}
+          onSave={(next) => onPatch(row.id, { soldPrice: next })}
+        />
       </td>
       <td style={st.td}>{TYPE_LABEL[row.type] ?? row.type}</td>
       <td style={st.td}>
-        <select
+        <EditableStatus
           value={row.status}
-          onChange={(e) => onPatch(row.id, { status: e.target.value })}
-          style={{ ...st.select, ...statusStyle(row.status) }}
-        >
-          {STATUSES.map((s) => (
-            <option key={s.value} value={s.value} style={{ color: "#0f172a" }}>{s.label}</option>
-          ))}
-        </select>
+          onSave={(next) => onPatch(row.id, { status: next })}
+        />
       </td>
       <td style={st.td}>
         <textarea
@@ -256,6 +238,175 @@ function ConsignmentRow({ row, onPatch }) {
         />
       </td>
     </tr>
+  );
+}
+
+// ─── Editable status (display chip → select + ✓/✗) ───────────────────
+const STATUS_LABEL = Object.fromEntries(STATUSES.map((s) => [s.value, s.label]));
+
+function EditableStatus({ value, onSave }) {
+  const [mode, setMode]   = useState("display"); // display | edit | saving | success
+  const [draft, setDraft] = useState(value);
+
+  // Resync draft when value changes from the outside while in display mode.
+  useEffect(() => {
+    if (mode === "display") setDraft(value);
+  }, [value, mode]);
+
+  // Auto-clear success flash after a short beat.
+  useEffect(() => {
+    if (mode !== "success") return;
+    const t = setTimeout(() => setMode("display"), 1200);
+    return () => clearTimeout(t);
+  }, [mode]);
+
+  if (mode === "display" || mode === "success") {
+    return (
+      <button
+        type="button"
+        onClick={() => setMode("edit")}
+        style={{ ...st.statusChip, ...statusStyle(value) }}
+        title="Click to edit"
+      >
+        <span>{STATUS_LABEL[value] ?? value}</span>
+        {mode === "success" ? <span style={st.successFlash}>✓</span> : <span style={st.editHint}>✎</span>}
+      </button>
+    );
+  }
+
+  const busy = mode === "saving";
+
+  async function confirm() {
+    if (draft === value) { setMode("display"); return; }
+    setMode("saving");
+    try {
+      await onSave(draft);
+      setMode("success");
+    } catch {
+      setMode("edit");
+    }
+  }
+  function cancel() { setDraft(value); setMode("display"); }
+
+  return (
+    <div style={st.editWrap}>
+      <select
+        autoFocus
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        disabled={busy}
+        style={{ ...st.select, ...statusStyle(draft) }}
+      >
+        {STATUSES.map((s) => (
+          <option key={s.value} value={s.value} style={{ color: "#0f172a" }}>{s.label}</option>
+        ))}
+      </select>
+      <ConfirmCancel busy={busy} onConfirm={confirm} onCancel={cancel} />
+    </div>
+  );
+}
+
+// ─── Editable sold price (formatted display → input + ✓/✗) ────────────
+function EditableSoldPrice({ value, enabled, onSave }) {
+  const [mode, setMode]   = useState("display");
+  const [draft, setDraft] = useState(value != null ? String(value) : "");
+
+  useEffect(() => {
+    if (mode === "display") setDraft(value != null ? String(value) : "");
+  }, [value, mode]);
+
+  useEffect(() => {
+    if (mode !== "success") return;
+    const t = setTimeout(() => setMode("display"), 1200);
+    return () => clearTimeout(t);
+  }, [mode]);
+
+  // Sold-price column is only meaningful when status is "sold". Show "—"
+  // and don't make it interactive otherwise.
+  if (!enabled) return <span style={st.tdMuted}>—</span>;
+
+  if (mode === "display" || mode === "success") {
+    return (
+      <button
+        type="button"
+        onClick={() => setMode("edit")}
+        style={{ ...st.priceDisplay, ...(value == null ? st.priceDisplayEmpty : {}) }}
+        title="Click to edit"
+      >
+        <span>{value != null ? fmt(value) : "Set price"}</span>
+        {mode === "success" ? <span style={st.successFlash}>✓</span> : <span style={st.editHint}>✎</span>}
+      </button>
+    );
+  }
+
+  const busy = mode === "saving";
+
+  async function confirm() {
+    const trimmed = draft.trim();
+    const next = trimmed === "" ? null : parseFloat(trimmed);
+    if (next != null && (Number.isNaN(next) || next < 0)) return;
+    if (next === (value ?? null)) { setMode("display"); return; }
+    setMode("saving");
+    try {
+      await onSave(next);
+      setMode("success");
+    } catch {
+      setMode("edit");
+    }
+  }
+  function cancel() {
+    setDraft(value != null ? String(value) : "");
+    setMode("display");
+  }
+
+  return (
+    <div style={st.editWrap}>
+      <div style={st.priceInputWrap}>
+        <span style={st.priceInputDollar}>$</span>
+        <input
+          autoFocus
+          type="number" min="0" step="0.01" inputMode="decimal"
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter")  confirm();
+            if (e.key === "Escape") cancel();
+          }}
+          disabled={busy}
+          placeholder="0.00"
+          style={st.priceInput}
+        />
+      </div>
+      <ConfirmCancel busy={busy} onConfirm={confirm} onCancel={cancel} />
+    </div>
+  );
+}
+
+// ─── Shared confirm / cancel button pair ──────────────────────────────
+function ConfirmCancel({ busy, onConfirm, onCancel }) {
+  return (
+    <>
+      <button
+        type="button"
+        onClick={onConfirm}
+        disabled={busy}
+        style={{ ...st.iconBtn, ...st.iconBtnConfirm, ...(busy ? st.iconBtnBusy : {}) }}
+        aria-label="Save"
+        title="Save"
+      >
+        {busy ? "…" : "✓"}
+      </button>
+      <button
+        type="button"
+        onClick={onCancel}
+        disabled={busy}
+        style={{ ...st.iconBtn, ...st.iconBtnCancel, ...(busy ? st.iconBtnBusy : {}) }}
+        aria-label="Cancel"
+        title="Cancel"
+      >
+        ✕
+      </button>
+    </>
   );
 }
 
@@ -394,17 +545,120 @@ const st = {
     fontFamily: "inherit",
     letterSpacing: "0.04em", textTransform: "uppercase",
   },
-  soldInput: {
-    width: 100,
-    background: "rgba(245,158,11,0.06)",
-    color: "#fbbf24",
-    border: "1px solid rgba(245,158,11,0.3)",
+
+  // ── Editable cells (status / sold price) ──
+  // Common wrapper while in edit mode — input/select sits next to the
+  // confirm/cancel button pair, all on one line.
+  editWrap: {
+    display: "inline-flex", alignItems: "center",
+    gap: "0.3rem",
+  },
+  // Display-mode status chip — visually identical to the status select
+  // (same colors per status), but a button so the click target is obvious
+  // and an explicit pencil hint shows it's actionable.
+  statusChip: {
+    display: "inline-flex", alignItems: "center", gap: "0.4rem",
+    fontSize: "0.78rem", fontWeight: 700,
+    padding: "0.3rem 0.6rem",
     borderRadius: 6,
-    padding: "0.3rem 0.5rem",
-    fontSize: "0.84rem", fontWeight: 700,
+    border: "1px solid",
+    cursor: "pointer",
+    fontFamily: "inherit",
+    letterSpacing: "0.04em", textTransform: "uppercase",
+  },
+  // Display-mode sold price — gold realized number, dashed placeholder
+  // when no price has been entered yet.
+  priceDisplay: {
+    display: "inline-flex", alignItems: "center", gap: "0.4rem",
+    background: "rgba(245,158,11,0.08)",
+    border: "1px solid rgba(245,158,11,0.32)",
+    borderRadius: 6,
+    padding: "0.3rem 0.6rem",
+    fontSize: "0.86rem", fontWeight: 800,
+    color: "#fbbf24",
+    fontFamily: "inherit",
+    fontVariantNumeric: "tabular-nums",
+    cursor: "pointer",
+  },
+  priceDisplayEmpty: {
+    background: "transparent",
+    border: "1px dashed rgba(245,158,11,0.45)",
+    color: "#94a3b8",
+    fontWeight: 600,
+    fontSize: "0.76rem",
+    letterSpacing: "0.04em",
+  },
+  // Hint icon next to a display-mode value — only shows on hover via
+  // opacity transition would be ideal, but inline styles can't do :hover,
+  // so a low-opacity always-on glyph is good enough.
+  editHint: {
+    color: "rgba(255,255,255,0.35)",
+    fontSize: "0.7rem",
+    marginLeft: "0.15rem",
+  },
+  // Brief success flash after a successful save.
+  successFlash: {
+    color: "#10b981",
+    fontWeight: 900,
+    fontSize: "0.85rem",
+  },
+
+  // ── Dollar-prefix input (edit mode for sold price) ──
+  priceInputWrap: {
+    display: "inline-flex", alignItems: "center",
+    background: "rgba(245,158,11,0.08)",
+    border: "1px solid rgba(245,158,11,0.45)",
+    borderRadius: 6,
+    paddingLeft: "0.5rem",
+    overflow: "hidden",
+  },
+  priceInputDollar: {
+    color: "#fbbf24",
+    fontSize: "0.84rem",
+    fontWeight: 800,
+    marginRight: "0.15rem",
+  },
+  priceInput: {
+    width: 90,
+    background: "transparent",
+    color: "#fbbf24",
+    border: "none",
+    outline: "none",
+    padding: "0.3rem 0.5rem 0.3rem 0",
+    fontSize: "0.86rem", fontWeight: 700,
     fontFamily: "inherit",
     fontVariantNumeric: "tabular-nums",
     textAlign: "right",
+  },
+
+  // ── Confirm (✓) / Cancel (✕) icon buttons ──
+  // Square-ish 26px buttons that read as "save" / "discard" — green for
+  // confirm, red for cancel, both on subtle tinted backgrounds so they
+  // sit comfortably on the dark page.
+  iconBtn: {
+    width: 26, height: 26,
+    display: "inline-flex", alignItems: "center", justifyContent: "center",
+    border: "1px solid",
+    borderRadius: 6,
+    cursor: "pointer",
+    fontFamily: "inherit",
+    fontSize: "0.78rem", fontWeight: 800,
+    padding: 0,
+    transition: "background 0.12s, border-color 0.12s, transform 0.05s",
+  },
+  iconBtnConfirm: {
+    color: "#6ee7b7",
+    background: "rgba(16,185,129,0.12)",
+    borderColor: "rgba(16,185,129,0.45)",
+  },
+  iconBtnCancel: {
+    color: "#fca5a5",
+    background: "rgba(248,113,113,0.10)",
+    borderColor: "rgba(248,113,113,0.45)",
+  },
+  iconBtnBusy: {
+    opacity: 0.6,
+    cursor: "wait",
   },
   notes: {
     width: 220,
