@@ -209,6 +209,27 @@ a { color: inherit; text-decoration: none; }
   opacity: 1;
 }
 
+/* /shows calendar — month-transition slide animation. The outgoing
+   month is positioned absolutely (so the container's height is driven
+   by the incoming month, no layout jump) and animates out; the
+   incoming month animates in. 300ms ease-in-out matches the user spec. */
+@keyframes scp-cal-slide-in-right {
+  from { transform: translateX(100%);  opacity: 0; }
+  to   { transform: translateX(0);     opacity: 1; }
+}
+@keyframes scp-cal-slide-in-left {
+  from { transform: translateX(-100%); opacity: 0; }
+  to   { transform: translateX(0);     opacity: 1; }
+}
+@keyframes scp-cal-slide-out-left {
+  from { transform: translateX(0);     opacity: 1; }
+  to   { transform: translateX(-100%); opacity: 0; }
+}
+@keyframes scp-cal-slide-out-right {
+  from { transform: translateX(0);     opacity: 1; }
+  to   { transform: translateX(100%);  opacity: 0; }
+}
+
 /* Hide number input spinners */
 input[type="number"]::-webkit-outer-spin-button,
 input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }

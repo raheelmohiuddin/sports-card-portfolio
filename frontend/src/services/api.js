@@ -182,12 +182,12 @@ export async function getAdminConsignments() {
 }
 
 // ─── Card shows ───────────────────────────────────────────────────────
-// state, from, to, q are all optional. Server defaults from to today and
-// returns an `attending` flag per show joined to user_shows.
-export async function getShows({ state, from, to, q } = {}) {
+// states is an array of 2-letter codes (e.g. ["PA","NY"]). Empty array
+// or missing → no state filter. Other params are unchanged.
+export async function getShows({ states, from, to, q } = {}) {
   const headers = await authHeaders();
   const params = new URLSearchParams();
-  if (state) params.set("state", state);
+  if (states && states.length) params.set("state", states.join(","));
   if (from)  params.set("from",  from);
   if (to)    params.set("to",    to);
   if (q)     params.set("q",     q);

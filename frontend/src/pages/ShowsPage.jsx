@@ -37,7 +37,9 @@ export default function ShowsPage() {
   const [loading, setLoading]       = useState(true);
   const [error, setError]           = useState(null);
   // Filters — q is debounced into qApplied which is what the API sees.
-  const [state, setStateFilter]     = useState("");
+  // states is now an array (multi-select). The API accepts a comma-
+  // separated list and uses ANY($::text[]) to fan out the WHERE clause.
+  const [states, setStates]         = useState([]);
   const [fromDate, setFromDate]     = useState("");
   const [toDate, setToDate]         = useState("");
   const [q, setQ]                   = useState("");
@@ -49,13 +51,17 @@ export default function ShowsPage() {
     return () => clearTimeout(id);
   }, [q]);
 
+  // Stable serialised key so the fetch effect only fires when the
+  // selected set really changes, not on every array identity change.
+  const statesKey = states.slice().sort().join(",");
+
   // Fetch shows on filter change.
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
     setError(null);
     getShows({
-      state:    state || undefined,
+      states:   states.length ? states : undefined,
       from:     fromDate || undefined,
       to:       toDate   || undefined,
       q:        qApplied || undefined,
@@ -64,7 +70,16 @@ export default function ShowsPage() {
       .catch((e)   => { if (!cancelled) setError(e?.message ?? "Failed to load shows"); })
       .finally(()  => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [state, fromDate, toDate, qApplied]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [statesKey, fromDate, toDate, qApplied]);
+
+  function toggleState(code) {
+    setStates((prev) => prev.includes(code) ? prev.filter((s) => s !== code) : [...prev, code]);
+  }
+  function removeState(code) {
+    setStates((prev) => prev.filter((s) => s !== code));
+  }
+  function clearStates() { setStates([]); }
 
   // Optimistic attending toggle. Updates the local list immediately, then
   // reconciles via the API call. Reverts on failure.
@@ -81,19 +96,19 @@ export default function ShowsPage() {
   }
 
   function applyNearMe() {
-    const stored = localStorage.getItem(NEAR_ME_KEY);
-    if (stored && STATE_NAME[stored]) {
-      setStateFilter(stored);
-      return;
+    let code = localStorage.getItem(NEAR_ME_KEY);
+    if (!code || !STATE_NAME[code]) {
+      const input = window.prompt(
+        "Pick your state (2-letter code, e.g. PA, NY, CA) — we'll remember this for next time:"
+      );
+      if (!input) return;
+      code = input.trim().toUpperCase();
+      if (!STATE_NAME[code]) { window.alert(`"${code}" isn't a valid US state code.`); return; }
+      localStorage.setItem(NEAR_ME_KEY, code);
     }
-    const input = window.prompt(
-      "Pick your state (2-letter code, e.g. PA, NY, CA) — we'll remember this for next time:"
-    );
-    if (!input) return;
-    const code = input.trim().toUpperCase();
-    if (!STATE_NAME[code]) { window.alert(`"${code}" isn't a valid US state code.`); return; }
-    localStorage.setItem(NEAR_ME_KEY, code);
-    setStateFilter(code);
+    // Replace the current selection with just the user's local state —
+    // matches the "show me what's nearby" intent better than appending.
+    setStates([code]);
   }
 
   const attending = useMemo(() => shows.filter((s) => s.attending), [shows]);
@@ -114,7 +129,8 @@ export default function ShowsPage() {
 
         {/* ── Browse + filter ── */}
         <FilterBar
-          state={state}      setStateFilter={setStateFilter}
+          states={states}     onToggleState={toggleState}
+          onRemoveState={removeState} onClearStates={clearStates}
           fromDate={fromDate} setFromDate={setFromDate}
           toDate={toDate}     setToDate={setToDate}
           q={q}               setQ={setQ}
@@ -173,6 +189,22 @@ function CalendarPanel({ attending }) {
     return m;
   }, [attending]);
 
+  // Slide animation: when cursor changes via prev/next, capture the
+  // outgoing month so we can render both simultaneously during the
+  // 300ms transition. The "Today" button skips animation by direct
+  // jump (would otherwise look weird if many months distant).
+  const [transition, setTransition] = useState(null);
+  const prevCursorRef = useRef(cursor);
+  useEffect(() => {
+    if (prevCursorRef.current.getTime() === cursor.getTime()) return;
+    const direction = cursor > prevCursorRef.current ? "next" : "prev";
+    const oldCursor = prevCursorRef.current;
+    prevCursorRef.current = cursor;
+    setTransition({ direction, oldCursor });
+    const t = setTimeout(() => setTransition(null), 320);
+    return () => clearTimeout(t);
+  }, [cursor]);
+
   function shiftMonth(delta) {
     setCursor(new Date(cursor.getFullYear(), cursor.getMonth() + delta, 1));
     setExpandedDate(null);
@@ -181,19 +213,6 @@ function CalendarPanel({ attending }) {
     setCursor(startOfMonth(new Date()));
     setExpandedDate(toIsoDate(new Date()));
   }
-
-  // Build the 6-week grid (always 42 cells: from prev-month leadin to
-  // next-month padout).
-  const cells = useMemo(() => {
-    const monthStart = startOfMonth(cursor);
-    const start = new Date(monthStart);
-    start.setDate(start.getDate() - start.getDay()); // back to Sunday
-    return Array.from({ length: 42 }, (_, i) => {
-      const d = new Date(start);
-      d.setDate(start.getDate() + i);
-      return d;
-    });
-  }, [cursor]);
 
   const expandedShows = expandedDate ? (byDate.get(expandedDate) ?? []) : [];
 
@@ -219,49 +238,50 @@ function CalendarPanel({ attending }) {
           <div style={st.weekRow}>
             {DAY_LABELS.map((d) => <div key={d} style={st.weekLabel}>{d}</div>)}
           </div>
-          <div style={st.monthGrid}>
-            {cells.map((d) => {
-              const iso = toIsoDate(d);
-              const inMonth = d.getMonth() === cursor.getMonth();
-              const isToday = sameDay(d, today);
-              const isExpanded = iso === expandedDate;
-              const dayShows = byDate.get(iso) ?? [];
-              return (
-                <button
-                  key={iso}
-                  type="button"
-                  onClick={() => setExpandedDate(isExpanded ? null : iso)}
-                  style={{
-                    ...st.dayCell,
-                    ...(inMonth ? {} : st.dayCellMuted),
-                    ...(isToday ? st.dayCellToday : {}),
-                    ...(isExpanded ? st.dayCellExpanded : {}),
-                  }}
-                >
-                  <div style={st.dayNumber}>{d.getDate()}</div>
-                  <div style={st.dayPills}>
-                    {dayShows.slice(0, 2).map((s) => (
-                      <div
-                        key={s.id}
-                        style={{ ...st.dayPill, ...spanPillStyle(s) }}
-                        title={s.endDate && s.endDate !== s.date
-                          ? `${s.name} (${s.date} – ${s.endDate})`
-                          : s.name}
-                      >
-                        {/* Only render the label on the first day so a
-                            multi-day pill reads as one continuous block.
-                            Other days show an empty pill of matching
-                            colour/height for the visual span. */}
-                        {s._isStart ? s.name : " "}
-                      </div>
-                    ))}
-                    {dayShows.length > 2 && (
-                      <div style={st.dayPillMore}>+{dayShows.length - 2}</div>
-                    )}
-                  </div>
-                </button>
-              );
-            })}
+          {/* Slide-transition wrapper. Incoming month is in normal flow
+              (drives container height — no jump). Outgoing month is
+              absolutely positioned over it during the 300ms transition.
+              Keyframes live in index.css. */}
+          <div style={st.monthGridWrap}>
+            <div
+              key={`grid-${cursor.getTime()}`}
+              style={{
+                ...st.monthGridIn,
+                animation: transition
+                  ? (transition.direction === "next"
+                      ? "scp-cal-slide-in-right 300ms ease-in-out"
+                      : "scp-cal-slide-in-left  300ms ease-in-out")
+                  : "none",
+              }}
+            >
+              <MonthGrid
+                cursor={cursor}
+                today={today}
+                byDate={byDate}
+                expandedDate={expandedDate}
+                onToggleExpand={(iso) => setExpandedDate(iso === expandedDate ? null : iso)}
+              />
+            </div>
+            {transition && (
+              <div
+                key={`grid-out-${transition.oldCursor.getTime()}`}
+                style={{
+                  ...st.monthGridOut,
+                  animation: transition.direction === "next"
+                    ? "scp-cal-slide-out-left  300ms ease-in-out forwards"
+                    : "scp-cal-slide-out-right 300ms ease-in-out forwards",
+                }}
+                aria-hidden
+              >
+                <MonthGrid
+                  cursor={transition.oldCursor}
+                  today={today}
+                  byDate={byDate}
+                  expandedDate={null}
+                  onToggleExpand={() => {}}
+                />
+              </div>
+            )}
           </div>
 
           {expandedDate && expandedShows.length > 0 && (
@@ -321,6 +341,96 @@ function ExpandedShowRow({ show, compact }) {
   );
 }
 
+// ─── Month grid (used twice during a month-slide transition) ────────
+function MonthGrid({ cursor, today, byDate, expandedDate, onToggleExpand }) {
+  // 6-week (42-cell) grid, Sunday-anchored.
+  const cells = useMemo(() => {
+    const monthStart = startOfMonth(cursor);
+    const start = new Date(monthStart);
+    start.setDate(start.getDate() - start.getDay());
+    return Array.from({ length: 42 }, (_, i) => {
+      const d = new Date(start);
+      d.setDate(start.getDate() + i);
+      return d;
+    });
+  }, [cursor]);
+
+  return (
+    <div style={st.monthGrid}>
+      {cells.map((d) => {
+        const iso = toIsoDate(d);
+        const inMonth = d.getMonth() === cursor.getMonth();
+        const isToday = sameDay(d, today);
+        const isExpanded = iso === expandedDate;
+        const dayShows = byDate.get(iso) ?? [];
+        return (
+          <button
+            key={iso}
+            type="button"
+            onClick={() => onToggleExpand(iso)}
+            style={{
+              ...st.dayCell,
+              ...(inMonth ? {} : st.dayCellMuted),
+              ...(isToday ? st.dayCellToday : {}),
+              ...(isExpanded ? st.dayCellExpanded : {}),
+            }}
+          >
+            <div style={st.dayNumber}>{d.getDate()}</div>
+            <div style={st.dayPills}>
+              {dayShows.slice(0, 2).map((s) => (
+                <DayPill key={s.id} show={s} />
+              ))}
+              {dayShows.length > 2 && (
+                <div style={st.dayPillMore}>+{dayShows.length - 2}</div>
+              )}
+            </div>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+// ─── Day pill — fixed-size + hover popover ───────────────────────────
+// Pill size is locked (height + font + ellipsis) so toggling attending
+// status anywhere can't reflow the day cell. The popover renders only
+// on the start day of a multi-day run so a single tooltip serves the
+// whole range, and uses pointer-events:none so it doesn't block the
+// underlying day-cell click.
+function DayPill({ show }) {
+  const [hover, setHover] = useState(false);
+  return (
+    <div
+      style={{ ...st.dayPill, ...spanPillStyle(show) }}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+    >
+      <span style={st.dayPillLabel}>
+        {show._isStart ? show.name : " "}
+      </span>
+      {hover && show._isStart && (
+        <div style={st.dayPillPopover} role="tooltip">
+          <div style={st.popoverName}>{show.name}</div>
+          {show.venue && <div style={st.popoverLine}>{show.venue}</div>}
+          <div style={st.popoverLine}>
+            {show.city ? `${show.city}, ${show.state}` : show.state}
+          </div>
+          {show.startTime && (
+            <div style={st.popoverLine}>
+              {formatTimeRange(show.startTime, show.endTime)}
+            </div>
+          )}
+          {show.endDate && show.endDate !== show.date && (
+            <div style={st.popoverLine}>
+              {`${show.date} – ${show.endDate}`}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // Shape per-day pill corners so a multi-day pill connects visually:
 // only the first day rounds its left edge and the last day rounds its
 // right edge; middle days have square inner edges.
@@ -366,7 +476,7 @@ function ToggleBtn({ active, onClick, children }) {
 
 // ─── Filter bar ──────────────────────────────────────────────────────
 function FilterBar({
-  state, setStateFilter,
+  states, onToggleState, onRemoveState, onClearStates,
   fromDate, setFromDate, toDate, setToDate,
   q, setQ, onNearMe,
   loading, totalCount, attendingCount,
@@ -375,13 +485,8 @@ function FilterBar({
     <section style={st.filterBar}>
       <div style={st.filterRow}>
         <div style={st.filterField}>
-          <label style={st.filterLabel}>State</label>
-          <select value={state} onChange={(e) => setStateFilter(e.target.value)} style={st.select}>
-            <option value="">All states</option>
-            {STATES.map(([code, name]) => (
-              <option key={code} value={code} style={{ color: "#0f172a" }}>{name}</option>
-            ))}
-          </select>
+          <label style={st.filterLabel}>States</label>
+          <MultiStateDropdown selected={states} onToggle={onToggleState} />
         </div>
         <div style={st.filterField}>
           <label style={st.filterLabel}>From</label>
@@ -405,11 +510,95 @@ function FilterBar({
           📍 Near Me
         </button>
       </div>
+
+      {/* Selected-state pills + Clear all. Renders only when any state
+          is selected so the empty case has no extra spacing. */}
+      {states.length > 0 && (
+        <div style={st.pillRow}>
+          {states.map((code) => (
+            <button
+              key={code}
+              type="button"
+              onClick={() => onRemoveState(code)}
+              style={st.statePill}
+              title={`Remove ${STATE_NAME[code] ?? code}`}
+            >
+              <span>{STATE_NAME[code] ?? code}</span>
+              <span style={st.statePillX}>×</span>
+            </button>
+          ))}
+          <button type="button" onClick={onClearStates} style={st.clearAllBtn}>
+            Clear all
+          </button>
+        </div>
+      )}
+
       <div style={st.filterMeta}>
         {loading ? "Loading…" : `${totalCount} show${totalCount === 1 ? "" : "s"}`}
         {attendingCount > 0 && ` · ${attendingCount} attending`}
       </div>
     </section>
+  );
+}
+
+// ─── Multi-state dropdown ────────────────────────────────────────────
+// Custom panel because <select multiple> is clunky and doesn't fit the
+// dark aesthetic. Click the trigger to open; click rows to toggle;
+// click outside to close.
+function MultiStateDropdown({ selected, onToggle }) {
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function onMouseDown(e) {
+      if (!wrapRef.current?.contains(e.target)) setOpen(false);
+    }
+    document.addEventListener("mousedown", onMouseDown);
+    return () => document.removeEventListener("mousedown", onMouseDown);
+  }, [open]);
+
+  const label =
+    selected.length === 0       ? "All states" :
+    selected.length === 1       ? (STATE_NAME[selected[0]] ?? selected[0]) :
+                                  `${selected.length} states selected`;
+
+  return (
+    <div ref={wrapRef} style={st.msWrap}>
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        style={{ ...st.msTrigger, ...(open ? st.msTriggerOpen : {}) }}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+      >
+        <span>{label}</span>
+        <span style={st.msChevron}>{open ? "▴" : "▾"}</span>
+      </button>
+      {open && (
+        <div role="listbox" style={st.msPanel}>
+          {STATES.map(([code, name]) => {
+            const checked = selected.includes(code);
+            return (
+              <button
+                type="button"
+                key={code}
+                onClick={() => onToggle(code)}
+                style={{ ...st.msItem, ...(checked ? st.msItemChecked : {}) }}
+                role="option"
+                aria-selected={checked}
+              >
+                <span style={{ ...st.msCheckbox, ...(checked ? st.msCheckboxChecked : {}) }}>
+                  {checked ? "✓" : ""}
+                </span>
+                <span>{name}</span>
+                <span style={st.msCode}>{code}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -429,36 +618,36 @@ function ShowCard({ show, onToggle }) {
 
   return (
     <article style={{ ...st.card, ...(show.attending ? st.cardAttending : {}) }}>
-      {/* Countdown lives on its own line above the date row so the
-          three-element date layout (start | → | end) stays balanced. */}
-      {show.attending && countdown && (
-        <div style={st.countdownRow}>
-          <span style={st.countdown}>{countdown}</span>
-        </div>
-      )}
+      {/* Body fills the top with flex:1 so the action row at the bottom
+          (marginTop: auto) is always pinned regardless of how short or
+          long the venue/city/time content is. Combined with grid auto-
+          rows: 1fr in the parent, this gives uniform tile heights. */}
+      <div style={st.cardBody}>
+        {show.attending && countdown && (
+          <div style={st.countdownRow}>
+            <span style={st.countdown}>{countdown}</span>
+          </div>
+        )}
 
-      {/* Date header — `space-between` anchors the pills to the far
-          edges of the row; the arrow is `flex: 1` with `text-align:
-          center` so it occupies the entire middle gap and centers
-          itself between the two pills regardless of pill width. */}
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%" }}>
-        <DatePill date={startDate} />
-        {endDate && (
-          <>
-            <span style={{ color: "#f59e0b", fontSize: "1.2rem", fontWeight: 700, flex: 1, textAlign: "center" }}>→</span>
-            <DatePill date={endDate} />
-          </>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%" }}>
+          <DatePill date={startDate} />
+          {endDate && (
+            <>
+              <span style={{ color: "#f59e0b", fontSize: "1.2rem", fontWeight: 700, flex: 1, textAlign: "center" }}>→</span>
+              <DatePill date={endDate} />
+            </>
+          )}
+        </div>
+
+        <h3 style={st.cardName}>{show.name || "Untitled show"}</h3>
+        {show.venue && <div style={st.cardVenue}>{show.venue}</div>}
+        <div style={st.cardCity}>
+          {show.city ? `${show.city}, ${show.state}` : show.state}
+        </div>
+        {show.startTime && (
+          <div style={st.cardTime}>{formatTimeRange(show.startTime, show.endTime)}</div>
         )}
       </div>
-
-      <h3 style={st.cardName}>{show.name || "Untitled show"}</h3>
-      {show.venue && <div style={st.cardVenue}>{show.venue}</div>}
-      <div style={st.cardCity}>
-        {show.city ? `${show.city}, ${show.state}` : show.state}
-      </div>
-      {show.startTime && (
-        <div style={st.cardTime}>{formatTimeRange(show.startTime, show.endTime)}</div>
-      )}
 
       <div style={st.cardActions}>
         <button
@@ -644,6 +833,25 @@ const st = {
     letterSpacing: "0.16em", textTransform: "uppercase",
     padding: "0.3rem 0",
   },
+  // Wrapper around the active grid + the outgoing grid during a month
+  // transition. Position relative + overflow hidden so the absolute
+  // layer can slide in/out without bleeding past the panel.
+  monthGridWrap: {
+    position: "relative",
+    overflow: "hidden",
+  },
+  monthGridIn: {
+    position: "relative",
+    zIndex: 1,
+    willChange: "transform",
+  },
+  monthGridOut: {
+    position: "absolute",
+    top: 0, left: 0, right: 0,
+    zIndex: 0,
+    willChange: "transform",
+    pointerEvents: "none",
+  },
   monthGrid: {
     display: "grid",
     gridTemplateColumns: "repeat(7, 1fr)",
@@ -683,19 +891,68 @@ const st = {
     display: "flex", flexDirection: "column", gap: 3,
     marginTop: "auto",
   },
+  // Locked-size pill — height/font/padding are fixed, label is
+  // ellipsised. Toggling attending status anywhere never resizes the
+  // pill or its day cell. position:relative anchors the popover.
   dayPill: {
+    height: 18,
     background: gradients.goldPill,
     color: "#0f172a",
-    fontSize: "0.65rem", fontWeight: 800,
-    padding: "0.12rem 0.4rem",
+    fontSize: "0.62rem", fontWeight: 800,
+    padding: "0 0.45rem",
     borderRadius: 4,
-    overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
     letterSpacing: "0.02em",
+    display: "flex", alignItems: "center",
+    position: "relative",
+    flexShrink: 0,
+    overflow: "visible", // popover escapes; label has its own clip
+  },
+  dayPillLabel: {
+    flex: 1,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+    minWidth: 0,
   },
   dayPillMore: {
     color: colors.goldLight,
     fontSize: "0.62rem", fontWeight: 700,
     letterSpacing: "0.08em", textTransform: "uppercase",
+  },
+  // Hover-only popover floating above the pill. pointer-events:none
+  // keeps it out of click handling so the day cell underneath still
+  // expands when the pill area is clicked.
+  dayPillPopover: {
+    position: "absolute",
+    bottom: "calc(100% + 6px)",
+    left: 0,
+    minWidth: 220,
+    maxWidth: 280,
+    background: "rgba(10,15,31,0.97)",
+    border: "1px solid rgba(245,158,11,0.45)",
+    borderRadius: 8,
+    padding: "0.65rem 0.8rem",
+    boxShadow: "0 12px 32px rgba(0,0,0,0.55)",
+    zIndex: 50,
+    pointerEvents: "none",
+    textAlign: "left",
+    whiteSpace: "normal",
+    color: colors.textSecondary,
+    fontSize: "0.78rem",
+    fontWeight: 500,
+    letterSpacing: "0.01em",
+    lineHeight: 1.4,
+    textTransform: "none",
+  },
+  popoverName: {
+    color: colors.goldLight,
+    fontWeight: 800,
+    fontSize: "0.86rem",
+    letterSpacing: "-0.01em",
+    marginBottom: "0.3rem",
+  },
+  popoverLine: {
+    marginTop: "0.15rem",
   },
 
   expandedPane: {
@@ -815,10 +1072,127 @@ const st = {
     fontVariantNumeric: "tabular-nums",
   },
 
+  // ── Multi-state dropdown ──
+  msWrap: {
+    position: "relative",
+  },
+  msTrigger: {
+    minWidth: 180,
+    background: "rgba(15,23,42,0.7)",
+    color: colors.textSecondary,
+    border: `1px solid ${colors.borderSoft}`,
+    borderRadius: 6,
+    padding: "0.45rem 0.75rem",
+    fontSize: "0.85rem", fontWeight: 600,
+    fontFamily: "inherit",
+    cursor: "pointer",
+    display: "flex", alignItems: "center", justifyContent: "space-between",
+    gap: "0.6rem",
+    textAlign: "left",
+  },
+  msTriggerOpen: {
+    borderColor: colors.borderGold,
+    color: colors.textPrimary,
+  },
+  msChevron: {
+    color: colors.gold,
+    fontSize: "0.7rem",
+  },
+  msPanel: {
+    position: "absolute",
+    top: "calc(100% + 6px)",
+    left: 0,
+    width: 260,
+    maxHeight: 320,
+    overflowY: "auto",
+    background: "linear-gradient(160deg, #0f172a 0%, #0a0f1f 100%)",
+    border: `1px solid ${colors.borderGold}`,
+    borderRadius: 10,
+    boxShadow: "0 12px 32px rgba(0,0,0,0.55)",
+    padding: 6,
+    zIndex: 60,
+  },
+  msItem: {
+    display: "flex", alignItems: "center", gap: "0.6rem",
+    width: "100%",
+    padding: "0.45rem 0.6rem",
+    borderRadius: 6,
+    background: "transparent",
+    border: "none",
+    color: colors.textSecondary,
+    fontFamily: "inherit",
+    fontSize: "0.82rem", fontWeight: 500,
+    cursor: "pointer",
+    textAlign: "left",
+  },
+  msItemChecked: {
+    color: colors.goldLight,
+    background: "rgba(245,158,11,0.06)",
+    fontWeight: 700,
+  },
+  msCheckbox: {
+    width: 16, height: 16,
+    border: `1px solid ${colors.borderGold}`,
+    borderRadius: 3,
+    display: "inline-flex", alignItems: "center", justifyContent: "center",
+    color: "#0f172a",
+    fontSize: "0.7rem", fontWeight: 800,
+    flexShrink: 0,
+  },
+  msCheckboxChecked: {
+    background: gradients.goldPill,
+    borderColor: colors.gold,
+  },
+  msCode: {
+    marginLeft: "auto",
+    color: colors.textFaint,
+    fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+    fontSize: "0.74rem",
+    letterSpacing: "0.04em",
+  },
+
+  // ── Selected-state pills + Clear all ──
+  pillRow: {
+    display: "flex", flexWrap: "wrap", gap: "0.4rem",
+    marginTop: "0.85rem",
+  },
+  statePill: {
+    display: "inline-flex", alignItems: "center", gap: "0.4rem",
+    background: gradients.goldPill,
+    color: "#0f172a",
+    border: "none",
+    borderRadius: 999,
+    padding: "0.3rem 0.65rem 0.3rem 0.85rem",
+    fontFamily: "inherit",
+    fontSize: "0.75rem", fontWeight: 800,
+    letterSpacing: "0.04em",
+    cursor: "pointer",
+    boxShadow: "0 4px 12px rgba(245,158,11,0.2)",
+  },
+  statePillX: {
+    fontSize: "0.95rem", fontWeight: 800, lineHeight: 1,
+    opacity: 0.8,
+  },
+  clearAllBtn: {
+    background: "transparent",
+    border: `1px solid ${colors.borderSoft}`,
+    color: colors.textMuted,
+    borderRadius: 999,
+    padding: "0.3rem 0.85rem",
+    fontFamily: "inherit",
+    fontSize: "0.7rem", fontWeight: 700,
+    letterSpacing: "0.12em", textTransform: "uppercase",
+    cursor: "pointer",
+  },
+
   // ── Shows grid ──
+  // gridAutoRows: 1fr stretches every row to the tallest tile so the
+  // grid lines up uniformly. card uses flex column + cardBody flex:1
+  // so the I'm Attending button always pins to the bottom.
   grid: {
     display: "grid",
     gridTemplateColumns: "repeat(auto-fit, minmax(min(280px, 100%), 1fr))",
+    gridAutoRows: "1fr",
     gap: "1rem",
   },
   card: {
@@ -828,8 +1202,12 @@ const st = {
     borderRadius: 12,
     padding: "1.1rem 1.2rem 1.2rem",
     display: "flex", flexDirection: "column",
-    gap: "0.6rem",
     transition: "border-color 0.12s, transform 0.12s",
+  },
+  cardBody: {
+    flex: 1,
+    display: "flex", flexDirection: "column",
+    gap: "0.6rem",
   },
   cardAttending: {
     borderLeft: `3px solid ${colors.gold}`,
@@ -916,7 +1294,11 @@ const st = {
     fontVariantNumeric: "tabular-nums",
   },
   cardActions: {
-    marginTop: "0.4rem",
+    // marginTop: auto pins this to the bottom of the flex column even
+    // when cardBody content is short — combined with grid auto-rows: 1fr
+    // this gives all tiles in a row the same height + same button position.
+    marginTop: "auto",
+    paddingTop: "1rem",
     display: "flex", alignItems: "center", justifyContent: "space-between",
     gap: "0.7rem",
   },
