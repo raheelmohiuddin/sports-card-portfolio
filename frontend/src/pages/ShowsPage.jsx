@@ -424,17 +424,19 @@ function ShowCard({ show, onToggle }) {
         </div>
       )}
 
-      {/* Date header — 3 cells via flex:1 sides + a fixed-width middle.
-          Single-day shows render only the left cell; the row stays the
-          same shape so cards line up uniformly in the grid. */}
+      {/* Date header — both dates sit inside matching dark/gold-bordered
+          boxes. Multi-day adds `dateBoxSplit` (flex:1) so the two boxes
+          take equal width and visually mirror each other; the arrow is
+          fixed-width and naturally centered between them. Single-day
+          renders only the left box, content-sized + left-aligned. */}
       <div style={st.dateRow}>
-        <div style={{ ...st.dateText, ...st.dateTextLeft }}>
+        <div style={{ ...st.dateBox, ...(endDate ? st.dateBoxSplit : {}) }}>
           {formatDateLabel(date)}
         </div>
         {endDate && (
           <>
             <div style={st.dateArrow} aria-hidden>→</div>
-            <div style={{ ...st.dateText, ...st.dateTextRight }}>
+            <div style={{ ...st.dateBox, ...st.dateBoxSplit }}>
               {formatDateLabel(endDate)}
             </div>
           </>
@@ -826,31 +828,32 @@ const st = {
     paddingLeft: "calc(1.2rem - 2px)",
     boxShadow: "0 0 0 1px rgba(245,158,11,0.15), 0 8px 24px rgba(245,158,11,0.08)",
   },
-  // ── Date header (3-cell flex: start | arrow | end) ──
-  // Equal-flex sides anchor the dates to the card's outer edges so a
-  // multi-day pair lines up under the same x-coords as adjacent cards
-  // in the grid. The arrow sits in the middle as a fixed-width cell.
-  // For single-day shows the arrow + end cell are simply not rendered;
-  // the start cell stays flex:1 / left-aligned so the row's height is
-  // identical across cards.
+  // ── Date header (boxed dates flanking a gold arrow) ──
+  // Each date sits in its own dark / gold-bordered box. Multi-day pairs
+  // get `dateBoxSplit` so flex:1 balances the two boxes to identical
+  // widths regardless of their text length; single-day boxes stay
+  // content-sized at the left of the row.
   dateRow: {
     display: "flex", alignItems: "center",
-    gap: "0.5rem",
+    gap: "0.65rem",
   },
-  dateText: {
-    flex: 1,
+  dateBox: {
+    background: "rgba(15,23,42,0.6)",
+    border: `1px solid ${colors.borderGold}`,
+    borderRadius: 8,
+    padding: "0.5rem 0.95rem",
+    textAlign: "center",
     color: colors.textPrimary,
-    fontSize: "1.05rem", fontWeight: 700,
-    letterSpacing: "-0.01em",
+    fontSize: "0.95rem", fontWeight: 700,
+    letterSpacing: "0.01em",
     fontVariantNumeric: "tabular-nums",
     whiteSpace: "nowrap",
   },
-  dateTextLeft:  { textAlign: "left"  },
-  dateTextRight: { textAlign: "right" },
+  dateBoxSplit: { flex: 1 },
   dateArrow: {
     flex: "0 0 auto",
     color: colors.gold, // #f59e0b
-    fontSize: "1.2rem", fontWeight: 800,
+    fontSize: "1.25rem", fontWeight: 800,
     lineHeight: 1,
   },
 
