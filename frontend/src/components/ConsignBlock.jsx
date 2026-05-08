@@ -17,7 +17,7 @@ import { createConsignment } from "../services/api.js";
 //
 // Hidden entirely for admin users — admins shouldn't consign their own
 // collection, and they manage status via the admin portal anyway.
-export default function ConsignBlock({ cardId, role, consignmentStatus, consignmentSoldPrice, onConsigned }) {
+export default function ConsignBlock({ cardId, role, consignmentStatus, consignmentSoldPrice, consignmentBlocked, onConsigned }) {
   const [stage, setStage]       = useState("collapsed"); // collapsed | form
   const [type, setType]         = useState("auction");
   const [platform, setPlatform] = useState("fanatics");  // auction-only
@@ -32,6 +32,13 @@ export default function ConsignBlock({ cardId, role, consignmentStatus, consignm
   const [status, setStatus] = useState(consignmentStatus ?? null);
 
   if (role === "admin") return null;
+
+  // Permanent block (server-derived from consignment_blocks keyed on
+  // user_id + cert_number) takes precedence over every other render path.
+  // Survives card delete + re-add, and has no actionable button —
+  // overrides the ordinary "declined" status pill so the wording stays
+  // consistent regardless of how the user got here.
+  if (consignmentBlocked) return <BlockedMessage />;
 
   if (status) return <StatusPill status={status} soldPrice={consignmentSoldPrice ?? null} />;
 
@@ -130,6 +137,24 @@ export default function ConsignBlock({ cardId, role, consignmentStatus, consignm
         {busy ? "Submitting…" : "Submit Request"}
       </button>
     </form>
+  );
+}
+
+// ─── Permanent block message ────────────────────────────────────────
+// Rendered when the (user, cert) pair has a row in consignment_blocks —
+// i.e. a prior consignment for this exact PSA cert was declined by the
+// admin. The block survives the card being deleted and re-added, so this
+// message is intentionally final: no button, no link, no path forward
+// from inside the app. Keyed on cert_number so even a fresh card row
+// can't bypass it.
+function BlockedMessage() {
+  return (
+    <div style={st.blockedBlock}>
+      <div style={st.blockedPill}>
+        <span style={st.blockedDot} />
+        <span>Consignment unavailable for this card. Please contact us for assistance.</span>
+      </div>
+    </div>
   );
 }
 
@@ -306,6 +331,27 @@ const st = {
     color: "#94a3b8",
     fontSize: "0.78rem",
     letterSpacing: "0.01em",
+  },
+
+  // ── Permanent block ──
+  blockedBlock: {
+    marginTop: "1.5rem", marginBottom: "0.5rem",
+  },
+  blockedPill: {
+    display: "flex", alignItems: "flex-start", gap: "0.6rem",
+    padding: "0.85rem 1rem",
+    borderRadius: 10,
+    background: "rgba(148,163,184,0.06)",
+    border: "1px solid rgba(148,163,184,0.28)",
+    color: "#cbd5e1",
+    fontSize: "0.78rem", fontWeight: 600,
+    letterSpacing: "0.01em", lineHeight: 1.45,
+  },
+  blockedDot: {
+    width: 8, height: 8, borderRadius: "50%",
+    background: "#94a3b8",
+    flexShrink: 0,
+    marginTop: "0.4rem",
   },
 
   // ── Sold price block (only when status=sold + admin has entered price) ──

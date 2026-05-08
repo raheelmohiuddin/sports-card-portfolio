@@ -71,6 +71,17 @@ exports.handler = async (event) => {
   if (cardRow.rowCount === 0) return json(404, { error: "Card not found" });
   const card = cardRow.rows[0];
 
+  // Permanent block check — defense-in-depth against a client that bypasses
+  // the hidden UI button. Block is keyed on (user_id, cert_number) so it
+  // survives the user deleting and re-adding the card.
+  const blocked = await db.query(
+    "SELECT 1 FROM consignment_blocks WHERE user_id = $1 AND cert_number = $2",
+    [userId, card.cert_number]
+  );
+  if (blocked.rowCount > 0) {
+    return json(403, { error: "Consignment unavailable for this card. Please contact us for assistance." });
+  }
+
   let consignment;
   try {
     const insert = await db.query(

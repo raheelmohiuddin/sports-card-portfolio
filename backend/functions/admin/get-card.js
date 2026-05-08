@@ -41,7 +41,8 @@ exports.handler = async (event) => {
             c.num_sales, c.price_source, c.value_last_updated,
             c.added_at,
             cn.status     AS consignment_status,
-            cn.sold_price AS consignment_sold_price
+            cn.sold_price AS consignment_sold_price,
+            (cb.user_id IS NOT NULL) AS consignment_blocked
      FROM cards c
      LEFT JOIN LATERAL (
        SELECT status, sold_price FROM consignments
@@ -49,6 +50,8 @@ exports.handler = async (event) => {
        ORDER BY created_at DESC
        LIMIT 1
      ) cn ON TRUE
+     LEFT JOIN consignment_blocks cb
+       ON cb.user_id = c.user_id AND cb.cert_number = c.cert_number
      WHERE c.id = $1`,
     [cardId]
   );
@@ -94,5 +97,6 @@ exports.handler = async (event) => {
     addedAt:          row.added_at,
     consignmentStatus:    row.consignment_status     ?? null,
     consignmentSoldPrice: row.consignment_sold_price != null ? parseFloat(row.consignment_sold_price) : null,
+    consignmentBlocked:   !!row.consignment_blocked,
   });
 };

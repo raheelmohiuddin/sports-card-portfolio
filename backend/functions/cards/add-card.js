@@ -118,5 +118,19 @@ exports.handler = async (event) => {
     [frontKey, backKey, cardId]
   );
 
-  return json(201, { id: cardId, frontUploadUrl, backUploadUrl });
+  // Permanent consignment block lookup — if this user ever had a
+  // consignment for this cert declined, the block survived the original
+  // card being deleted. Surfaced so the frontend can render the blocked
+  // message immediately on re-add without a round-trip through getCards.
+  const blockRow = await db.query(
+    "SELECT 1 FROM consignment_blocks WHERE user_id = $1 AND cert_number = $2",
+    [userId, certNumber.trim()]
+  );
+
+  return json(201, {
+    id: cardId,
+    frontUploadUrl,
+    backUploadUrl,
+    consignmentBlocked: blockRow.rowCount > 0,
+  });
 };

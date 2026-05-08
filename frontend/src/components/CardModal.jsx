@@ -331,6 +331,7 @@ export default function CardModal({
               role={role}
               consignmentStatus={card.consignmentStatus ?? null}
               consignmentSoldPrice={card.consignmentSoldPrice ?? null}
+              consignmentBlocked={card.consignmentBlocked ?? false}
               onConsigned={(status) => onCardUpdate?.(card.id, { consignmentStatus: status })}
             />
           )}

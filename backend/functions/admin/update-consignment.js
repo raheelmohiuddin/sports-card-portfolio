@@ -34,6 +34,12 @@ exports.handler = async (event) => {
     }
     sets.push(`status = $${p++}`);
     params.push(status);
+    // ever_declined latches to true on first decline and never reverts.
+    // Set it in the same UPDATE so an outage between the two writes can't
+    // leave the audit flag inconsistent with status.
+    if (status === "declined") {
+      sets.push(`ever_declined = TRUE`);
+    }
   }
   if (internalNotes !== undefined) {
     sets.push(`internal_notes = $${p++}`);
@@ -58,12 +64,25 @@ exports.handler = async (event) => {
   const result = await db.query(
     `UPDATE consignments SET ${sets.join(", ")}
      WHERE id = $${p}
-     RETURNING id, status, internal_notes, sold_price, updated_at`,
+     RETURNING id, user_id, card_id, status, internal_notes, sold_price, updated_at`,
     params
   );
   if (result.rowCount === 0) return json(404, { error: "Not found" });
 
   const row = result.rows[0];
+
+  // On a decline, mirror the block into consignment_blocks keyed on
+  // (user_id, cert_number) so the block survives the user deleting and
+  // re-adding the card. Idempotent via the table's primary key — repeated
+  // decline-toggles by the admin won't error.
+  if (status === "declined") {
+    await db.query(
+      `INSERT INTO consignment_blocks (user_id, cert_number, reason)
+       SELECT $1, cert_number, 'declined' FROM cards WHERE id = $2
+       ON CONFLICT (user_id, cert_number) DO NOTHING`,
+      [row.user_id, row.card_id]
+    );
+  }
   return json(200, {
     id:            row.id,
     status:        row.status,

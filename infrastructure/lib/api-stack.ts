@@ -264,6 +264,14 @@ export class ApiStack extends Construct {
     });
     props.dbSecret.grantRead(migrationAuctionPlatformFn);
 
+    // Migration: ever_declined column + consignment_blocks survival table.
+    const migrationConsignmentBlocksFn = new NodejsFunction(this, "MigrationAddConsignmentBlocks", {
+      ...sharedNodejsProps,
+      functionName: "scp-migration-add-consignment-blocks",
+      entry: path.join(functionsDir, "_migrations/add-consignment-blocks.js"),
+    });
+    props.dbSecret.grantRead(migrationConsignmentBlocksFn);
+
     // Helper Lambda for the local geocoding pipeline — accepts a payload
     // of city/state → coords mappings and applies them as UPDATEs.
     // Direct-invoke only (no API route).

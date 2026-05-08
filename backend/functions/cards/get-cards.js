@@ -24,6 +24,9 @@ exports.handler = async (event) => {
   // We only ever care about the latest one for display: pending/in_review/
   // listed are open states, sold/declined are terminal. The frontend uses
   // this to swap the "Consign This Card" CTA for a read-only status pill.
+  // consignment_blocks is keyed on (user_id, cert_number) so the block
+  // persists across card deletion + re-add. The LEFT JOIN turns into a
+  // boolean via `cb.user_id IS NOT NULL`.
   const result = await db.query(
     `SELECT c.id, c.cert_number, c.year, c.brand, c.sport, c.player_name, c.card_number,
             c.grade, c.grade_description,
@@ -35,7 +38,8 @@ exports.handler = async (event) => {
             c.num_sales, c.price_source, c.value_last_updated,
             c.added_at,
             cn.status     AS consignment_status,
-            cn.sold_price AS consignment_sold_price
+            cn.sold_price AS consignment_sold_price,
+            (cb.user_id IS NOT NULL) AS consignment_blocked
      FROM cards c
      LEFT JOIN LATERAL (
        SELECT status, sold_price
@@ -44,6 +48,8 @@ exports.handler = async (event) => {
        ORDER BY created_at DESC
        LIMIT 1
      ) cn ON TRUE
+     LEFT JOIN consignment_blocks cb
+       ON cb.user_id = c.user_id AND cb.cert_number = c.cert_number
      WHERE c.user_id = $1
      ORDER BY c.added_at DESC`,
     [userId]
@@ -89,6 +95,7 @@ exports.handler = async (event) => {
         addedAt:          row.added_at,
         consignmentStatus:     row.consignment_status     ?? null,
         consignmentSoldPrice:  row.consignment_sold_price != null ? parseFloat(row.consignment_sold_price) : null,
+        consignmentBlocked:    !!row.consignment_blocked,
       };
     })
   );
