@@ -6,8 +6,14 @@ import { createConsignment } from "../services/api.js";
 //   expanded  → form (type, asking price, notes) + submit.
 //   submitted → success message; no further action.
 //
-// Hidden entirely for admin users (they shouldn't be consigning to themselves)
-// and for users where role is unknown (loading state — fail closed).
+// Hidden ONLY for admin users (admins shouldn't consign their own collections).
+// Everyone else — explicit collectors, users whose JWT predates the
+// custom:role attribute, users where the attribute fetch failed — sees the
+// button. The backend (POST /consignments) enforces card ownership, so a
+// stray render for a non-owner is harmless: the request would 404. This
+// permissive gate avoids the failure mode where a token issued before the
+// PostConfirmation trigger landed has no custom:role at all and the button
+// never shows for legitimate collectors.
 export default function ConsignBlock({ cardId, role }) {
   const [stage, setStage]   = useState("collapsed"); // collapsed | form | submitted
   const [type, setType]     = useState("auction");
@@ -16,7 +22,10 @@ export default function ConsignBlock({ cardId, role }) {
   const [busy, setBusy]     = useState(false);
   const [error, setError]   = useState(null);
 
-  if (role !== "collector") return null;
+  // TEMP diagnostic — remove once consign visibility is confirmed.
+  console.log("ConsignBlock received role:", role);
+
+  if (role === "admin") return null;
 
   async function handleSubmit(e) {
     e.preventDefault();

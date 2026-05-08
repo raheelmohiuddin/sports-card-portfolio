@@ -78,8 +78,19 @@ export default function CardModal({ card, onClose }) {
     if (!hydrated) return;
     let cancelled = false;
     fetchUserAttributes()
-      .then((attrs) => { if (!cancelled) setRole(attrs["custom:role"] ?? null); })
-      .catch(() => { if (!cancelled) setRole(null); });
+      .then((attrs) => {
+        // TEMP diagnostic — remove once consign visibility is confirmed.
+        console.log("CardModal role fetched:", {
+          customRole: attrs["custom:role"],
+          email: attrs.email,
+          allKeys: Object.keys(attrs),
+        });
+        if (!cancelled) setRole(attrs["custom:role"] ?? null);
+      })
+      .catch((err) => {
+        console.error("CardModal fetchUserAttributes failed:", err);
+        if (!cancelled) setRole(null);
+      });
     return () => { cancelled = true; };
   }, [hydrated]);
 
