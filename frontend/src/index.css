@@ -320,3 +320,11 @@ form:has(input[name="given_name"]) :where(
 @keyframes travelSpin {
   to { transform: rotate(360deg); }
 }
+
+/* Near Me dropdown panel — slight downward slide + fade so the panel
+   feels like it eases out of the button rather than popping. 120ms
+   keeps it crisp; longer reads as sluggish on a small element. */
+@keyframes nearMeFadeIn {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}

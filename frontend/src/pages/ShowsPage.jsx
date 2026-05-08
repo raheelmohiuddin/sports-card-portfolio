@@ -874,6 +874,24 @@ function FilterBar({
   nearMeOpen, onNearMeToggle, onNearMeApply, nearMe, onNearMeClear,
   loading, totalCount, attendingCount,
 }) {
+  // Click-outside detection for the Near Me dropdown. Anchored on the
+  // entire wrapper (button + panel) so a click on the trigger button
+  // doesn't fire close-then-reopen — the button's own onClick handles
+  // the toggle, and clicks anywhere else (including elsewhere on the
+  // page) call onNearMeToggle while the panel is open, closing it
+  // without resetting any panel state.
+  const nearMeAnchorRef = useRef(null);
+  useEffect(() => {
+    if (!nearMeOpen) return;
+    function handler(e) {
+      if (nearMeAnchorRef.current && !nearMeAnchorRef.current.contains(e.target)) {
+        onNearMeToggle();
+      }
+    }
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [nearMeOpen, onNearMeToggle]);
+
   return (
     <section style={st.filterBar}>
       <div style={st.filterRow}>
@@ -899,11 +917,15 @@ function FilterBar({
             style={st.input}
           />
         </div>
-        <div style={st.nearMeAnchor}>
+        <div style={st.nearMeAnchor} ref={nearMeAnchorRef}>
           <button
             type="button"
             onClick={onNearMeToggle}
-            style={{ ...st.nearMeBtn, ...(nearMeOpen ? st.nearMeBtnOpen : {}) }}
+            style={{
+              ...st.nearMeBtn,
+              ...(nearMe ? st.nearMeBtnActive : {}),
+              ...(nearMeOpen ? st.nearMeBtnOpen : {}),
+            }}
             aria-expanded={nearMeOpen}
             aria-haspopup="dialog"
           >📍 Near Me</button>
@@ -1030,60 +1052,72 @@ function NearMePanel({ onApply, onClear }) {
     }
   }
 
+  function reset() {
+    setZip("");
+    setRadius("any");
+    setError(null);
+    lastRef.current = { zip: "", radius: "" };
+    try {
+      localStorage.removeItem(NEAR_ME_ZIP_KEY);
+      localStorage.removeItem(NEAR_ME_RADIUS_KEY);
+    } catch {}
+    onClear?.();
+  }
+
   return (
-    <div style={st.nearMePanel}>
-      <div style={st.nearMeRow}>
-        <input
-          type="text"
-          inputMode="numeric"
-          maxLength={5}
-          autoFocus
-          value={zip}
-          placeholder="ZIP code"
-          aria-label="Zip code"
-          onFocus={() => setZipFocused(true)}
-          onBlur={() => setZipFocused(false)}
-          onChange={(e) => {
-            const next = e.target.value.replace(/[^\d]/g, "");
-            setZip(next);
-            setError(null);
-            // Empty input → drop the active filter so the grid resets
-            // to its default sort. lastRef is reset too so re-typing the
-            // same zip later actually re-fires.
-            if (next.length === 0) {
-              lastRef.current = { zip: "", radius: "" };
-              try {
-                localStorage.removeItem(NEAR_ME_ZIP_KEY);
-              } catch {}
-              onClear?.();
-              return;
-            }
-            // Auto-fire as soon as the zip becomes 5 digits.
-            if (next.length === 5) runLookup(next, radius);
-          }}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") { e.preventDefault(); runLookup(zip, radius); }
-          }}
-          style={{ ...st.nearMeZipInput, ...(zipFocused ? st.nearMeZipInputFocus : {}) }}
-        />
-        <select
-          value={radius}
-          aria-label="Search radius"
-          onChange={(e) => {
-            const next = e.target.value;
-            setRadius(next);
-            // Re-fire with the new radius if we have a valid zip already.
-            if (zip.length === 5) runLookup(zip, next);
-          }}
-          style={st.nearMeRadiusSelect}
-        >
-          <option value="any" style={{ background: "#0f172a", color: "#fff" }}>Any</option>
-          <option value="25"  style={{ background: "#0f172a", color: "#fff" }}>25mi</option>
-          <option value="50"  style={{ background: "#0f172a", color: "#fff" }}>50mi</option>
-          <option value="100" style={{ background: "#0f172a", color: "#fff" }}>100mi</option>
-          <option value="250" style={{ background: "#0f172a", color: "#fff" }}>250mi</option>
-        </select>
-      </div>
+    <div style={st.nearMePanel} role="dialog" aria-label="Near Me">
+      <input
+        type="text"
+        inputMode="numeric"
+        maxLength={5}
+        autoFocus
+        value={zip}
+        placeholder="Enter ZIP code"
+        aria-label="Zip code"
+        onFocus={() => setZipFocused(true)}
+        onBlur={() => setZipFocused(false)}
+        onChange={(e) => {
+          const next = e.target.value.replace(/[^\d]/g, "");
+          setZip(next);
+          setError(null);
+          // Persist on every keystroke so closing the panel by
+          // clicking outside doesn't lose mid-typed digits.
+          try {
+            if (next) localStorage.setItem(NEAR_ME_ZIP_KEY, next);
+            else      localStorage.removeItem(NEAR_ME_ZIP_KEY);
+          } catch {}
+          // Auto-fire as soon as the zip becomes 5 digits.
+          if (next.length === 5) runLookup(next, radius);
+        }}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") { e.preventDefault(); runLookup(zip, radius); }
+        }}
+        style={{ ...st.nearMeZipInput, ...(zipFocused ? st.nearMeZipInputFocus : {}) }}
+      />
+      <select
+        value={radius}
+        aria-label="Search radius"
+        onChange={(e) => {
+          const next = e.target.value;
+          setRadius(next);
+          try { localStorage.setItem(NEAR_ME_RADIUS_KEY, next); } catch {}
+          // Re-fire with the new radius if we have a valid zip already.
+          if (zip.length === 5) runLookup(zip, next);
+        }}
+        style={st.nearMeRadiusSelect}
+      >
+        <option value="any" style={{ background: "#0f172a", color: "#fff" }}>Any</option>
+        <option value="25"  style={{ background: "#0f172a", color: "#fff" }}>25mi</option>
+        <option value="50"  style={{ background: "#0f172a", color: "#fff" }}>50mi</option>
+        <option value="100" style={{ background: "#0f172a", color: "#fff" }}>100mi</option>
+        <option value="250" style={{ background: "#0f172a", color: "#fff" }}>250mi</option>
+      </select>
+      <button
+        type="button"
+        onClick={reset}
+        style={st.nearMeResetBtn}
+        aria-label="Reset Near Me filter"
+      >Reset</button>
       {error && <div style={st.nearMeInlineError}>{error}</div>}
     </div>
   );
@@ -1794,6 +1828,13 @@ const st = {
   nearMeBtnOpen: {
     boxShadow: "0 0 0 2px rgba(245,158,11,0.55), 0 4px 12px rgba(245,158,11,0.25)",
   },
+  // Stronger gold treatment when a Near Me filter is currently
+  // applied — distinguishes "you have proximity sorting on" from the
+  // default idle button. Composes with nearMeBtnOpen when both apply.
+  nearMeBtnActive: {
+    background: "linear-gradient(135deg, #fbbf24 0%, #f59e0b 100%)",
+    boxShadow: "0 0 0 1px rgba(245,158,11,0.7), 0 6px 18px rgba(245,158,11,0.35)",
+  },
   // Active proximity pill — only renders when a Near Me filter is set.
   // "ZIP · Nmi" with a click-to-clear × in gold.
   nearMeActivePill: {
@@ -1818,36 +1859,38 @@ const st = {
     fontFamily: "inherit",
     padding: 0,
   },
-  // Inline panel anchored below the Near Me button. Column layout so the
-  // error line wraps below the input row instead of pushing the row
-  // wider — keeps the compact 90+70+28+28 footprint on the filter bar.
+  // Stacked dropdown panel anchored below the Near Me button. 160w
+  // matches the spec footprint; gold-tinted border + dark fill ties it
+  // to the rest of the active-state palette without competing with the
+  // pulldown contents. nearMeFadeIn keyframe lives in index.css.
   nearMePanel: {
     position: "absolute",
     top: "calc(100% + 8px)",
     right: 0,
-    background: "transparent",
-    padding: 0,
-    border: "none",
-    boxShadow: "none",
+    width: 160,
+    background: "rgba(15,23,42,0.95)",
+    border: "1px solid rgba(245,158,11,0.45)",
+    borderRadius: 8,
+    padding: 10,
+    boxShadow: "0 10px 30px rgba(0,0,0,0.45)",
+    backdropFilter: "blur(6px)",
+    WebkitBackdropFilter: "blur(6px)",
     zIndex: 70,
     display: "flex",
     flexDirection: "column",
-    alignItems: "flex-end",
-    gap: 4,
-  },
-  nearMeRow: {
-    display: "inline-flex",
-    alignItems: "center",
-    gap: 4,
+    gap: 8,
+    animation: "nearMeFadeIn 120ms ease-out",
+    transformOrigin: "top right",
   },
   nearMeZipInput: {
-    width: 90, height: 28,
-    padding: "0 8px",
-    borderRadius: 4,
+    width: "100%",
+    height: 32,
+    padding: "0 10px",
+    borderRadius: 6,
     background: "rgba(15,23,42,0.85)",
     color: "#fff",
     border: "1px solid rgba(255,255,255,0.2)",
-    fontSize: 12,
+    fontSize: 13,
     fontFamily: "inherit",
     fontVariantNumeric: "tabular-nums",
     letterSpacing: "0.04em",
@@ -1857,16 +1900,17 @@ const st = {
   },
   nearMeZipInputFocus: {
     borderColor: "#f59e0b",
-    boxShadow: "0 0 0 1px rgba(245,158,11,0.45)",
+    boxShadow: "0 0 0 1px rgba(245,158,11,0.5)",
   },
   nearMeRadiusSelect: {
-    width: 70, height: 28,
-    padding: "0 6px",
-    borderRadius: 4,
+    width: "100%",
+    height: 32,
+    padding: "0 10px",
+    borderRadius: 6,
     background: "rgba(15,23,42,0.85)",
     color: "#fff",
     border: "1px solid rgba(255,255,255,0.2)",
-    fontSize: 12,
+    fontSize: 13,
     fontFamily: "inherit",
     cursor: "pointer",
     appearance: "none",
@@ -1874,6 +1918,23 @@ const st = {
     MozAppearance: "none",
     boxSizing: "border-box",
     outline: "none",
+  },
+  // Subtle dark-outlined Reset — visually de-emphasised vs. the
+  // input/select above it because clearing should feel lower-weight
+  // than configuring.
+  nearMeResetBtn: {
+    width: "100%",
+    height: 30,
+    borderRadius: 6,
+    background: "transparent",
+    color: "#e2e8f0",
+    border: "1px solid rgba(255,255,255,0.18)",
+    fontSize: 12, fontWeight: 700,
+    letterSpacing: "0.06em", textTransform: "uppercase",
+    fontFamily: "inherit",
+    cursor: "pointer",
+    padding: 0,
+    boxSizing: "border-box",
   },
   nearMeInlineError: {
     color: "#fca5a5",
