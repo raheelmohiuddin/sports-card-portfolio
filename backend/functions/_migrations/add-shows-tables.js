@@ -47,8 +47,23 @@ exports.handler = async () => {
   `);
   await db.query(`CREATE INDEX IF NOT EXISTS idx_user_shows_user ON user_shows (user_id)`);
 
+  // Counts so re-running this migration also serves as a quick health
+  // check ("are the tables there + populated?").
+  const counts = await db.query(`
+    SELECT
+      (SELECT COUNT(*) FROM card_shows) AS card_shows,
+      (SELECT COUNT(*) FROM user_shows) AS user_shows
+  `);
+
   return {
     statusCode: 200,
-    body: JSON.stringify({ ok: true, message: "shows tables ensured" }),
+    body: JSON.stringify({
+      ok: true,
+      message: "shows tables ensured",
+      counts: {
+        card_shows: parseInt(counts.rows[0].card_shows, 10),
+        user_shows: parseInt(counts.rows[0].user_shows, 10),
+      },
+    }),
   };
 };

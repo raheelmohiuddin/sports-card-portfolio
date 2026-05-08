@@ -36,6 +36,12 @@ exports.handler = async (event) => {
   const qLike = q ? `%${q}%` : null;
 
   const params = [userId, from, to, state, qLike];
+  // Every nullable text/date param is cast explicitly. Postgres can't
+  // infer types for a parameter whose only uses are `IS NULL` checks
+  // and an `=`/`ILIKE` against a NULL value — pg-node sends NULL
+  // without a type tag, and the planner refuses ("could not determine
+  // data type of parameter $N"). The cast tells it once and the
+  // expression compiles cleanly.
   const sql = `
     SELECT
       cs.id, cs.tcdb_id, cs.name, cs.venue, cs.city, cs.state, cs.country,
@@ -47,8 +53,8 @@ exports.handler = async (event) => {
       ON us.card_show_id = cs.id AND us.user_id = $1
     WHERE cs.show_date >= COALESCE($2::date, CURRENT_DATE)
       AND ($3::date IS NULL OR cs.show_date <= $3::date)
-      AND ($4 IS NULL OR cs.state = $4)
-      AND ($5 IS NULL OR cs.name ILIKE $5 OR cs.city ILIKE $5)
+      AND ($4::text IS NULL OR cs.state = $4::text)
+      AND ($5::text IS NULL OR cs.name ILIKE $5::text OR cs.city ILIKE $5::text)
     ORDER BY cs.show_date ASC, cs.start_time ASC NULLS LAST
     LIMIT 1000
   `;
