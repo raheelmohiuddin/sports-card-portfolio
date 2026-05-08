@@ -29,32 +29,72 @@ export default function NavHeader() {
     navigate("/", { replace: true });
   }
 
+  const isMobile = useIsMobile();
+
   return (
     <header style={st.header}>
       <div className="container" style={st.inner}>
         <Link to="/" style={st.brand}>
           <span style={st.brandMark}>◆</span>
-          <span>Collector's Reserve</span>
+          <span style={st.brandText}>Collector's Reserve</span>
         </Link>
 
-        <nav style={st.nav}>
-          <NavLink to="/" label="Home" active={pathname === "/"} />
-          <NavLink to="/about" label="About" active={pathname === "/about"} />
-          {isAuth && (
-            <NavLink to="/portfolio" label="My Portfolio" active={pathname === "/portfolio"} badge="BETA" />
-          )}
-        </nav>
+        {isMobile ? (
+          <MobileMenu
+            pathname={pathname}
+            isAuth={isAuth}
+            username={username}
+            onSignOut={handleSignOut}
+          />
+        ) : (
+          <>
+            <nav style={st.nav}>
+              <NavLink to="/" label="Home" active={pathname === "/"} />
+              <NavLink to="/about" label="About" active={pathname === "/about"} />
+              {isAuth && (
+                <NavLink to="/portfolio" label="My Portfolio" active={pathname === "/portfolio"} badge="BETA" />
+              )}
+            </nav>
 
-        <div style={st.right}>
-          {isAuth ? (
-            <UserMenu username={username} onSignOut={handleSignOut} />
-          ) : (
-            <Link to="/signin" style={st.signInBtn}>Sign In</Link>
-          )}
-        </div>
+            <div style={st.right}>
+              {isAuth ? (
+                <UserMenu username={username} onSignOut={handleSignOut} />
+              ) : (
+                <Link
+                  to="/signin"
+                  className="scp-signin-btn"
+                  style={{
+                    ...st.signInBtn,
+                    whiteSpace: "nowrap",
+                    minWidth: "fit-content",
+                    flexShrink: 0,
+                    padding: "8px 12px",
+                  }}
+                >
+                  Sign In
+                </Link>
+              )}
+            </div>
+          </>
+        )}
       </div>
     </header>
   );
+}
+
+// Tracks viewport width so we can swap nav layouts at the breakpoint.
+// Only the layout components need this; CSS-media-query alternatives can't
+// conditionally render different React subtrees.
+function useIsMobile(breakpoint = 768) {
+  const [isMobile, setIsMobile] = useState(() =>
+    typeof window !== "undefined" && window.innerWidth <= breakpoint
+  );
+  useEffect(() => {
+    function onResize() { setIsMobile(window.innerWidth <= breakpoint); }
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, [breakpoint]);
+  return isMobile;
 }
 
 // Per-link component so each one tracks its own hover state — needed because
@@ -65,6 +105,7 @@ function NavLink({ to, label, active, badge }) {
   return (
     <Link
       to={to}
+      className="scp-nav-link"
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       style={{ ...st.link, ...dynamicStyle }}
@@ -197,6 +238,151 @@ function MenuButton({ icon, label, onClick }) {
   );
 }
 
+// ─── Mobile hamburger menu (≤768px) ──────────────────────────────────
+function MobileMenu({ pathname, isAuth, username, onSignOut }) {
+  const [open, setOpen] = useState(false);
+  const navigate = useNavigate();
+  const wrapRef = useRef(null);
+
+  // Close when the route changes (after a link tap)
+  useEffect(() => { setOpen(false); }, [pathname]);
+
+  // Close on outside click
+  useEffect(() => {
+    if (!open) return;
+    function onMouseDown(e) {
+      if (!wrapRef.current?.contains(e.target)) setOpen(false);
+    }
+    document.addEventListener("mousedown", onMouseDown);
+    return () => document.removeEventListener("mousedown", onMouseDown);
+  }, [open]);
+
+  // Close on Escape
+  useEffect(() => {
+    if (!open) return;
+    function onKey(e) { if (e.key === "Escape") setOpen(false); }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open]);
+
+  function go(to) {
+    setOpen(false);
+    navigate(to);
+  }
+
+  return (
+    <div ref={wrapRef} style={st.mobileWrap}>
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        style={{ ...st.hamburger, ...(open ? st.hamburgerActive : {}) }}
+        aria-label={open ? "Close menu" : "Open menu"}
+        aria-expanded={open}
+      >
+        <Hamburger open={open} />
+      </button>
+
+      <div style={{
+        ...st.mobileMenu,
+        opacity: open ? 1 : 0,
+        transform: open ? "translateY(0)" : "translateY(-8px)",
+        pointerEvents: open ? "auto" : "none",
+      }}>
+        <MobileItem to="/"          label="Home"        active={pathname === "/"}          onClick={() => go("/")} />
+        <MobileItem to="/about"     label="About"       active={pathname === "/about"}     onClick={() => go("/about")} />
+        {isAuth && (
+          <MobileItem
+            to="/portfolio"
+            label={<>My Portfolio <sup style={st.betaBadge}>BETA</sup></>}
+            active={pathname === "/portfolio"}
+            onClick={() => go("/portfolio")}
+          />
+        )}
+
+        {isAuth && (
+          <>
+            <div style={st.menuDivider} />
+            {username && <div style={st.mobileUsername}>@{username}</div>}
+            <MobileItem to="/profile"  icon="👤" label="My Profile"       onClick={() => go("/profile")} />
+            <MobileItem to="/settings" icon="⚙️" label="Account Settings" onClick={() => go("/settings")} />
+            <button
+              type="button"
+              onClick={() => { setOpen(false); onSignOut(); }}
+              style={{ ...st.mobileItem, ...st.mobileItemBtn }}
+            >
+              <span style={st.menuIcon}>🚪</span>
+              <span>Sign Out</span>
+            </button>
+          </>
+        )}
+
+        {!isAuth && (
+          <>
+            <div style={st.menuDivider} />
+            <button
+              type="button"
+              onClick={() => go("/signin")}
+              className="scp-signin-btn"
+              style={st.mobileSignInBtn}
+            >
+              Sign In
+            </button>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function MobileItem({ to, icon, label, active, onClick }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{
+        ...st.mobileItem,
+        ...st.mobileItemBtn,
+        ...(active ? st.mobileItemActive : {}),
+      }}
+    >
+      {icon && <span style={st.menuIcon}>{icon}</span>}
+      <span>{label}</span>
+    </button>
+  );
+}
+
+// Hamburger icon — three lines that morph into an X when open. Pure SVG
+// transforms so the animation is GPU-cheap.
+function Hamburger({ open }) {
+  return (
+    <svg width="20" height="20" viewBox="0 0 20 20" aria-hidden>
+      <line
+        x1="3" x2="17"
+        y1={open ? "10" : "5"}
+        y2={open ? "10" : "5"}
+        stroke="currentColor" strokeWidth="2" strokeLinecap="round"
+        style={{ transition: "transform 200ms ease, y1 200ms ease, y2 200ms ease",
+                 transform: open ? "rotate(45deg)" : "rotate(0)",
+                 transformOrigin: "center" }}
+      />
+      <line
+        x1="3" x2="17" y1="10" y2="10"
+        stroke="currentColor" strokeWidth="2" strokeLinecap="round"
+        style={{ transition: "opacity 200ms ease", opacity: open ? 0 : 1 }}
+      />
+      <line
+        x1="3" x2="17"
+        y1={open ? "10" : "15"}
+        y2={open ? "10" : "15"}
+        stroke="currentColor" strokeWidth="2" strokeLinecap="round"
+        style={{ transition: "transform 200ms ease, y1 200ms ease, y2 200ms ease",
+                 transform: open ? "rotate(-45deg)" : "rotate(0)",
+                 transformOrigin: "center" }}
+      />
+    </svg>
+  );
+}
+
 const st = {
   header: {
     background: "#0f172a",
@@ -205,15 +391,26 @@ const st = {
   },
   inner: {
     display: "flex", alignItems: "center",
-    height: 60, gap: "2rem",
+    height: 60, gap: "1rem",
+    minWidth: 0, // let flex children shrink without overflowing
   },
   brand: {
     display: "flex", alignItems: "center", gap: "0.5rem",
     color: "#fff", fontWeight: 700, fontSize: "1.05rem",
     letterSpacing: "-0.01em", marginRight: "auto",
     textDecoration: "none",
+    // Allow the inner text to truncate before the right-side buttons get
+    // squeezed out of view on tiny screens
+    minWidth: 0,
+    overflow: "hidden",
   },
-  brandMark: { color: "#f59e0b", fontSize: "0.75rem" },
+  brandMark: { color: "#f59e0b", fontSize: "0.75rem", flexShrink: 0 },
+  brandText: {
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+    minWidth: 0,
+  },
   nav: { display: "flex", gap: "0.25rem" },
   link: {
     color: "#94a3b8", fontSize: "0.88rem", fontWeight: 500,
@@ -242,7 +439,7 @@ const st = {
     verticalAlign: "super",
     lineHeight: 1,
   },
-  right: { display: "flex", alignItems: "center", gap: "0.75rem" },
+  right: { display: "flex", alignItems: "center", gap: "0.75rem", flexShrink: 0 },
 
   // ── User dropdown ──
   userWrap: { position: "relative" },
@@ -307,11 +504,83 @@ const st = {
     background: "rgba(255,255,255,0.06)",
     margin: "6px 4px",
   },
+
+  // ─── Mobile hamburger + dropdown ───
+  mobileWrap: { position: "relative", marginLeft: "auto" },
+  hamburger: {
+    display: "flex", alignItems: "center", justifyContent: "center",
+    background: "transparent",
+    border: "1px solid transparent",
+    borderRadius: 999,
+    width: 40, height: 40,
+    color: "#fbbf24",
+    cursor: "pointer",
+    transition: "background 0.15s, border-color 0.15s",
+    padding: 0,
+  },
+  hamburgerActive: {
+    background: "rgba(245,158,11,0.08)",
+    borderColor: "rgba(245,158,11,0.28)",
+  },
+  mobileMenu: {
+    position: "absolute",
+    top: "calc(100% + 8px)",
+    right: 0,
+    minWidth: 240,
+    maxWidth: "calc(100vw - 2rem)",
+    background: "linear-gradient(160deg, #0f172a 0%, #0a0f1f 100%)",
+    border: "1px solid rgba(245,158,11,0.18)",
+    borderRadius: 10,
+    boxShadow:
+      "0 10px 32px rgba(0,0,0,0.55), 0 0 0 1px rgba(245,158,11,0.08), 0 0 28px rgba(245,158,11,0.06)",
+    padding: 6,
+    transition: "opacity 150ms ease-out, transform 150ms ease-out",
+    zIndex: 200,
+  },
+  mobileItem: {
+    display: "flex", alignItems: "center", gap: "0.65rem",
+    padding: "0.7rem 0.85rem",
+    borderRadius: 6,
+    color: "#cbd5e1",
+    fontSize: "0.92rem", fontWeight: 500,
+    textDecoration: "none",
+    cursor: "pointer",
+    width: "100%",
+    textAlign: "left",
+    transition: "background 0.12s, color 0.12s",
+  },
+  mobileItemBtn: {
+    background: "transparent", border: "none",
+    fontFamily: "inherit",
+  },
+  mobileItemActive: {
+    color: "#f59e0b",
+    background: "rgba(245,158,11,0.08)",
+  },
+  mobileUsername: {
+    fontSize: "0.7rem", fontWeight: 700,
+    letterSpacing: "0.12em", textTransform: "uppercase",
+    color: "#fbbf24",
+    padding: "0.5rem 0.85rem 0.25rem",
+  },
+  mobileSignInBtn: {
+    display: "block", width: "calc(100% - 8px)",
+    margin: "4px",
+    background: "#f59e0b", color: "#0f172a",
+    border: "none", borderRadius: 6,
+    fontSize: "0.92rem", fontWeight: 800,
+    padding: "0.7rem 1rem",
+    cursor: "pointer",
+    fontFamily: "inherit",
+    letterSpacing: "0.01em",
+  },
   signInBtn: {
     background: "#f59e0b", color: "#0f172a",
     fontSize: "0.85rem", fontWeight: 700,
     padding: "0.4rem 1rem", borderRadius: 6,
     textDecoration: "none",
     letterSpacing: "0.01em",
+    whiteSpace: "nowrap",
+    flexShrink: 0,
   },
 };

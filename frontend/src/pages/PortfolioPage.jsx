@@ -1646,12 +1646,23 @@ function MilestoneToast({ milestone, onDismiss }) {
 
 // ─── Styles ───────────────────────────────────────────────────────────
 const st = {
-  // Full-bleed dark wrapper — breaks out of the protected route's container
+  // Full-bleed dark wrapper — breaks out of the protected route's container.
+  // overflow-x: hidden defends against any deeply-nested element (charts,
+  // grids, animated cards) that might extend past viewport on narrow screens.
   page: {
+    overflowX: "hidden",
     background: gradients.pageDark,
     minHeight: "calc(100vh - 60px)",
-    marginLeft: "calc(50% - 50vw)",
-    marginRight: "calc(50% - 50vw)",
+    // Break out of the parent <main className="container"> 1rem padding
+    // without relying on 100vw — desktop browsers that include the
+    // scrollbar in 100vw produce a more-negative margin than the
+    // container's padding, pushing the page past the right edge of the
+    // viewport (the source of the right-side whitespace on mobile sims).
+    // -1rem exactly cancels .container's horizontal padding.
+    marginLeft: "-1rem",
+    marginRight: "-1rem",
+    maxWidth: "calc(100% + 2rem)",
+    boxSizing: "border-box",
     marginTop: "-2rem",
     marginBottom: "-2rem",
     padding: "3.5rem 0 5rem",

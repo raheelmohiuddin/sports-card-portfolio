@@ -1,9 +1,76 @@
-*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+/* AGGRESSIVE GLOBAL CONTAINMENT — every element is forced inside its parent.
+   `* { max-width: 100% }` is heavier-handed than usual (it can clip
+   absolutely-positioned children of narrow parents, SVG icons with intrinsic
+   px widths, and form inputs sized via `width`), but it's the surest way to
+   stop ANY rogue element from creating horizontal overflow on mobile.
+   We pair it with `box-sizing: border-box` (also reset margin/padding to 0)
+   so percentage widths include padding/border. */
+* {
+  box-sizing: border-box;
+  max-width: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+/* Belt-and-braces clamp on the three top-level boxes: <html>, <body>, and
+   React's #root mount point. width: 100% pins them to the viewport;
+   max-width: 100vw is the second-line defence; overflow-x: hidden clips
+   anything that still escapes. */
+html, body, #root {
+  overflow-x: hidden;
+  width: 100%;
+  max-width: 100vw;
+}
+
+/* Defensive: never let a media element exceed its container on mobile. */
+img, video, canvas { max-width: 100%; }
 
 body {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  background: #fff;
+  /* Dark navy so overscroll bouncing (iOS rubber-banding, etc.) and any
+     space below the page footer or above the hero shows the brand colour
+     instead of bare white. Page sections that need a white background
+     (features, story) set their own bg, so this only shows in those gaps. */
+  background: #0f172a;
   color: #222;
+}
+
+/* Partnership banner — stacks vertically on small screens so the 120px
+   logo + flanking text don't fight for horizontal space inside a 1fr/auto/1fr
+   grid that would otherwise overflow.
+   `min-width: 0` on the children is the critical bit: grid items default to
+   `min-width: auto` (= min-content), which forces a column to be at least as
+   wide as the longest unbreakable word ("marketplace" here). Without this, a
+   long sub-headline can push the right column past the viewport's right edge.
+   `overflow-wrap: break-word` is the second-line defence. */
+.scp-partner-inner {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 2.5rem;
+}
+.scp-partner-inner > * { min-width: 0; }
+.scp-partner-sub,
+.scp-partner-eyebrow {
+  overflow-wrap: break-word;
+  word-wrap: break-word;
+}
+/* Stack earlier (was 768px) so we don't try to squeeze 1fr|logo|1fr into a
+   tablet-portrait viewport where the long sub-headline doesn't fit. */
+@media (max-width: 900px) {
+  .scp-partner-inner {
+    grid-template-columns: 1fr;
+    gap: 1rem;
+    text-align: center;
+  }
+  .scp-partner-eyebrow,
+  .scp-partner-sub {
+    text-align: center;
+  }
+  .scp-partner-logo {
+    margin: 0 auto;
+    height: 80px !important;
+  }
 }
 
 a { color: inherit; text-decoration: none; }
@@ -89,6 +156,43 @@ a { color: inherit; text-decoration: none; }
       0 12px 32px rgba(0,0,0,0.5),
       0 0 56px rgba(245,158,11,0.55);
   }
+}
+
+/* Force the navbar Sign In button to stay on one line. Inline whiteSpace:
+   nowrap was apparently being overridden somewhere in the cascade (Amplify's
+   global Authenticator stylesheet ships some !important rules), so this
+   class with !important is the bullet-proof guarantee. min-width: fit-content
+   (also !important) overrides the universal `* { max-width: 100% }` rule's
+   knock-on effect on flex items: with max-width: 100% in play, a flex item's
+   default `min-width: auto` (= min-content) is the only thing keeping it from
+   collapsing — but min-content for a button is the longest word ("Sign" or
+   "In"), so the button can wrap. fit-content forces the button to size to its
+   full content. */
+.scp-signin-btn {
+  white-space: nowrap !important;
+  flex-shrink: 0 !important;
+  display: inline-block !important;
+  min-width: fit-content !important;
+  max-width: none !important;
+}
+
+/* On mobile, shrink the nav link font + padding so brand + Home + About
+   + Sign In all fit on one line at narrow viewports. The Layout component
+   swaps to a hamburger below 768px, so this rule covers tablet sizes
+   (769–900px) where everything still tries to fit on one line. */
+@media (max-width: 900px) {
+  .scp-nav-link { font-size: 14px !important; padding: 0.3rem 0.6rem !important; }
+}
+
+/* Hide the decorative floating cards on small screens. They're
+   absolutely-positioned with sizes up to 240×336px — overkill for a
+   390px viewport — and they were the most likely culprit for residual
+   horizontal overflow even with overflow:hidden on the cards layer
+   (mobile Safari has historically had bugs clipping transformed
+   absolutely-positioned descendants). The hero stays visually rich on
+   desktop; mobile gets a cleaner, faster hero. */
+@media (max-width: 768px) {
+  .scp-floating-cards { display: none !important; }
 }
 
 /* Hide number input spinners */

@@ -180,10 +180,15 @@ function ToggleSwitch({ on, onChange }) {
 
 const st = {
   page: {
+    overflowX: "hidden",
     background: gradients.pageDark,
     minHeight: "calc(100vh - 60px)",
-    marginLeft: "calc(50% - 50vw)",
-    marginRight: "calc(50% - 50vw)",
+    // -1rem instead of calc(50% - 50vw) — see PortfolioPage st.page for the
+    // full reasoning (100vw + scrollbar = right-edge overflow on mobile).
+    marginLeft: "-1rem",
+    marginRight: "-1rem",
+    maxWidth: "calc(100% + 2rem)",
+    boxSizing: "border-box",
     marginTop: "-2rem",
     marginBottom: "-2rem",
     padding: "3.5rem 0 5rem",

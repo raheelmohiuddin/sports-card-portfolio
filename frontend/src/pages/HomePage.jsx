@@ -63,10 +63,10 @@ export default function HomePage() {
 
       {/* ── Partnership banner ── */}
       <section style={st.partner}>
-        <div className="container" style={st.partnerInner}>
-          <span style={st.partnerEyebrow}>Exclusive Partner</span>
-          <img src="/fanatics-collectibles.png" alt="Fanatics Collectibles" style={st.partnerLogo} />
-          <span style={st.partnerSub}>
+        <div className="container scp-partner-inner" style={st.partnerInner}>
+          <span className="scp-partner-eyebrow" style={st.partnerEyebrow}>Exclusive Partner</span>
+          <img className="scp-partner-logo" src="/fanatics-collectibles.png" alt="Fanatics Collectibles" style={st.partnerLogo} />
+          <span className="scp-partner-sub" style={st.partnerSub}>
             Access the world's largest collectibles marketplace
           </span>
         </div>
@@ -160,7 +160,7 @@ function FloatingCards() {
   ), []);
 
   return (
-    <div style={st.cardsLayer} aria-hidden>
+    <div className="scp-floating-cards" style={st.cardsLayer} aria-hidden>
       {cards.map((c, i) => <FloatingCard key={i} card={c} />)}
     </div>
   );
@@ -242,6 +242,11 @@ const st = {
     position: "relative",
     background: "linear-gradient(160deg, #0f172a 0%, #1e293b 55%, #0f172a 100%)",
     overflow: "hidden",
+    // 100% (parent body) instead of 100vw — 100vw includes the scrollbar
+    // width on browsers that render persistent scrollbars, which pushes
+    // the hero past the viewport edge.
+    maxWidth: "100%",
+    boxSizing: "border-box",
     padding: "7rem 0 6rem",
   },
   heroNoise: {
@@ -290,14 +295,11 @@ const st = {
     borderBottom: "1px solid rgba(245,158,11,0.25)",
     padding: "24px 0",
   },
-  // Grid layout: 1fr | auto | 1fr keeps the logo dead-centre regardless of
-  // the side text widths. Equal column gaps give even visual spacing.
-  partnerInner: {
-    display: "grid",
-    gridTemplateColumns: "1fr auto 1fr",
-    alignItems: "center",
-    gap: "2.5rem",
-  },
+  // Layout (grid 1fr | auto | 1fr on desktop, single-column stack on mobile)
+  // is owned by the .scp-partner-inner CSS class in index.css so the
+  // media query can swap to a stacked layout below 768px. Inline style
+  // kept empty so we don't compete with the CSS rule.
+  partnerInner: {},
   partnerEyebrow: {
     color: "#f59e0b",
     fontSize: "0.72rem", fontWeight: 700,
@@ -331,7 +333,10 @@ const st = {
   },
   featureGrid: {
     display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(230px, 1fr))",
+    // min(230px, 100%) ensures the column never exceeds the available width,
+    // so on viewports narrower than 230px the grid still renders one column
+    // at full width instead of overflowing horizontally.
+    gridTemplateColumns: "repeat(auto-fit, minmax(min(230px, 100%), 1fr))",
     gap: "1.5rem",
   },
   featureCard: {
