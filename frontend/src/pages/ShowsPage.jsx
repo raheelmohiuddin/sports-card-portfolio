@@ -36,6 +36,13 @@ export default function ShowsPage() {
   const [shows, setShows]           = useState([]);
   const [loading, setLoading]       = useState(true);
   const [error, setError]           = useState(null);
+  // gridOpacity drives the fade-out → swap → fade-in sequence on
+  // filter changes. 0 = mid-transition (data being swapped), 1 = idle.
+  // The grid is always rendered (not replaced with a "Loading…" string)
+  // after the first successful load, so its height stays roughly stable
+  // and scroll position doesn't jump when filters change.
+  const [gridOpacity, setGridOpacity] = useState(1);
+  const [hasLoadedOnce, setHasLoadedOnce] = useState(false);
   // Filters — q is debounced into qApplied which is what the API sees.
   // states is now an array (multi-select). The API accepts a comma-
   // separated list and uses ANY($::text[]) to fan out the WHERE clause.
@@ -55,20 +62,43 @@ export default function ShowsPage() {
   // selected set really changes, not on every array identity change.
   const statesKey = states.slice().sort().join(",");
 
-  // Fetch shows on filter change.
+  // Fetch shows on filter change. Sequential fade pattern:
+  //   1. opacity → 0 (200ms transition out via CSS)
+  //   2. wait until BOTH the 200ms fade timer AND the API have settled
+  //      (Promise.all races them — fade always completes before swap)
+  //   3. swap data, opacity → 1 (200ms transition in)
+  // The first load skips step 1 (no old content to fade out) and just
+  // shows the loading state until data arrives.
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
     setError(null);
-    getShows({
-      states:   states.length ? states : undefined,
-      from:     fromDate || undefined,
-      to:       toDate   || undefined,
-      q:        qApplied || undefined,
-    })
-      .then((data) => { if (!cancelled) setShows(data); })
-      .catch((e)   => { if (!cancelled) setError(e?.message ?? "Failed to load shows"); })
-      .finally(()  => { if (!cancelled) setLoading(false); });
+    if (hasLoadedOnce) setGridOpacity(0);
+
+    Promise.all([
+      new Promise((r) => setTimeout(r, 200)),
+      getShows({
+        states:   states.length ? states : undefined,
+        from:     fromDate || undefined,
+        to:       toDate   || undefined,
+        q:        qApplied || undefined,
+      }),
+    ])
+      .then(([_, data]) => {
+        if (cancelled) return;
+        setShows(data);
+        setGridOpacity(1);
+        setLoading(false);
+        setHasLoadedOnce(true);
+      })
+      .catch((e) => {
+        if (cancelled) return;
+        setError(e?.message ?? "Failed to load shows");
+        // Fade old content back in so the user isn't stuck staring at
+        // a blank panel after a network error.
+        setGridOpacity(1);
+        setLoading(false);
+      });
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [statesKey, fromDate, toDate, qApplied]);
@@ -140,18 +170,28 @@ export default function ShowsPage() {
           attendingCount={attending.length}
         />
 
-        {/* ── Grid ── */}
-        {loading ? (
-          <div style={st.stateMsg}>Loading shows…</div>
-        ) : shows.length === 0 ? (
-          <div style={st.stateMsg}>No shows match your filters.</div>
-        ) : (
-          <div style={st.grid}>
-            {shows.map((s) => (
-              <ShowCard key={s.id} show={s} onToggle={() => toggleAttending(s)} />
-            ))}
-          </div>
-        )}
+        {/* ── Grid ──
+            Wrapper has a min-height so an empty result set never
+            collapses the page — that collapse is what causes the
+            scroll-jump when the user filters down to a small/zero set.
+            After the first successful load the grid stays mounted
+            (even when shows is empty) and just transitions opacity
+            during refetches, so layout stays stable. */}
+        <div style={st.gridWrap}>
+          {!hasLoadedOnce ? (
+            <div style={st.stateMsg}>Loading shows…</div>
+          ) : (
+            <div style={{ ...st.grid, opacity: gridOpacity }}>
+              {shows.length === 0 ? (
+                <div style={st.gridEmpty}>No shows match your filters.</div>
+              ) : (
+                shows.map((s) => (
+                  <ShowCard key={s.id} show={s} onToggle={() => toggleAttending(s)} />
+                ))
+              )}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -1186,14 +1226,29 @@ const st = {
   },
 
   // ── Shows grid ──
-  // gridAutoRows: 1fr stretches every row to the tallest tile so the
-  // grid lines up uniformly. card uses flex column + cardBody flex:1
-  // so the I'm Attending button always pins to the bottom.
+  // gridWrap reserves a minimum height so an empty result set never
+  // collapses the page (which is what causes scroll-jump on filter).
+  // The grid itself fades opacity on filter changes — sequential
+  // 200ms fade-out, data swap, 200ms fade-in. Transition is declared
+  // on the static style so React's render doesn't churn it.
+  gridWrap: {
+    minHeight: 480,
+  },
   grid: {
     display: "grid",
     gridTemplateColumns: "repeat(auto-fit, minmax(min(280px, 100%), 1fr))",
     gridAutoRows: "1fr",
     gap: "1rem",
+    transition: "opacity 200ms ease-in-out",
+  },
+  // No-results state inside the grid — spans all columns so it sits
+  // centered + can't break the grid's layout commitment.
+  gridEmpty: {
+    gridColumn: "1 / -1",
+    color: colors.textFaint,
+    textAlign: "center",
+    padding: "3rem 1rem",
+    fontSize: "0.9rem",
   },
   card: {
     background: gradients.goldPanel,
