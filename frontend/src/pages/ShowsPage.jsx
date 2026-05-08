@@ -926,7 +926,7 @@ function FilterBar({
             </span>
           )}
           {nearMeOpen && (
-            <NearMePanel onApply={onNearMeApply} />
+            <NearMePanel onApply={onNearMeApply} onClear={onNearMeClear} hasActive={!!nearMe} />
           )}
         </div>
       </div>
@@ -982,7 +982,7 @@ function parseRadius(raw) {
   return Number.isFinite(n) && n > 0 ? n : null;
 }
 
-function NearMePanel({ onApply }) {
+function NearMePanel({ onApply, onClear, hasActive }) {
   const [zip, setZip]       = useState(() => localStorage.getItem(NEAR_ME_ZIP_KEY) ?? "");
   // Radius is stored as a string ("any" | "25" | "50" | "100" | "250")
   // because <select> values are strings; keeps round-trip with the
@@ -990,15 +990,19 @@ function NearMePanel({ onApply }) {
   // zip code shows every show sorted nearest-first by default.
   const [radius, setRadius] = useState(() => localStorage.getItem(NEAR_ME_RADIUS_KEY) ?? "any");
   const [error, setError]   = useState(null);
+  const [busy,  setBusy]    = useState(false);
   const [zipFocused, setZipFocused] = useState(false);
-  const lastRef = useRef({ zip: "", radius: "" });
 
-  async function runLookup(z, r) {
-    if (!/^\d{5}$/.test(z)) return;
-    if (z === lastRef.current.zip && r === lastRef.current.radius) return;
+  async function submit() {
+    if (busy) return;
+    if (!/^\d{5}$/.test(zip)) {
+      setError("Enter a 5-digit zip code.");
+      return;
+    }
     setError(null);
+    setBusy(true);
     try {
-      const res = await fetch(`https://api.zippopotam.us/us/${z}`);
+      const res = await fetch(`https://api.zippopotam.us/us/${zip}`);
       if (!res.ok) {
         setError(res.status === 404 ? "Zip not found." : "Lookup failed.");
         return;
@@ -1011,59 +1015,85 @@ function NearMePanel({ onApply }) {
         setError("Couldn't read coordinates from zip.");
         return;
       }
-      lastRef.current = { zip: z, radius: r };
       try {
-        localStorage.setItem(NEAR_ME_ZIP_KEY,    z);
-        localStorage.setItem(NEAR_ME_RADIUS_KEY, r);
+        localStorage.setItem(NEAR_ME_ZIP_KEY,    zip);
+        localStorage.setItem(NEAR_ME_RADIUS_KEY, radius);
       } catch {}
       onApply({
-        zip: z,
-        radiusMiles: parseRadius(r),  // null when r === "any"
+        zip,
+        radiusMiles: parseRadius(radius),  // null when radius === "any"
         centerLat: lat,
         centerLng: lng,
       });
     } catch {
       setError("Network error.");
+    } finally {
+      setBusy(false);
     }
+  }
+
+  function clear() {
+    setZip("");
+    setRadius("any");
+    setError(null);
+    try {
+      localStorage.removeItem(NEAR_ME_ZIP_KEY);
+      localStorage.removeItem(NEAR_ME_RADIUS_KEY);
+    } catch {}
+    if (hasActive) onClear?.();
   }
 
   return (
     <div style={st.nearMePanel}>
-      <input
-        type="text"
-        inputMode="numeric"
-        maxLength={5}
-        autoFocus
-        value={zip}
-        placeholder="Enter zip code"
-        aria-label="Zip code"
-        onFocus={() => setZipFocused(true)}
-        onBlur={() => setZipFocused(false)}
-        onChange={(e) => {
-          const next = e.target.value.replace(/[^\d]/g, "");
-          setZip(next);
-          setError(null);
-          if (next.length === 5) runLookup(next, radius);
-        }}
-        style={{ ...st.nearMeZipInput, ...(zipFocused ? st.nearMeZipInputFocus : {}) }}
-      />
-      <select
-        value={radius}
-        aria-label="Search radius"
-        onChange={(e) => {
-          const next = e.target.value;
-          setRadius(next);
-          if (zip.length === 5) runLookup(zip, next);
-        }}
-        style={st.nearMeRadiusSelect}
-      >
-        <option value="any" style={{ background: "#0f172a", color: "#fff" }}>Any</option>
-        <option value="25"  style={{ background: "#0f172a", color: "#fff" }}>25mi</option>
-        <option value="50"  style={{ background: "#0f172a", color: "#fff" }}>50mi</option>
-        <option value="100" style={{ background: "#0f172a", color: "#fff" }}>100mi</option>
-        <option value="250" style={{ background: "#0f172a", color: "#fff" }}>250mi</option>
-      </select>
-      {error && <span style={st.nearMeInlineError}>{error}</span>}
+      <div style={st.nearMeRow}>
+        <input
+          type="text"
+          inputMode="numeric"
+          maxLength={5}
+          autoFocus
+          value={zip}
+          placeholder="ZIP code"
+          aria-label="Zip code"
+          onFocus={() => setZipFocused(true)}
+          onBlur={() => setZipFocused(false)}
+          onChange={(e) => {
+            setZip(e.target.value.replace(/[^\d]/g, ""));
+            setError(null);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") { e.preventDefault(); submit(); }
+          }}
+          style={{ ...st.nearMeZipInput, ...(zipFocused ? st.nearMeZipInputFocus : {}) }}
+        />
+        <select
+          value={radius}
+          aria-label="Search radius"
+          onChange={(e) => setRadius(e.target.value)}
+          style={st.nearMeRadiusSelect}
+        >
+          <option value="any" style={{ background: "#0f172a", color: "#fff" }}>Any</option>
+          <option value="25"  style={{ background: "#0f172a", color: "#fff" }}>25mi</option>
+          <option value="50"  style={{ background: "#0f172a", color: "#fff" }}>50mi</option>
+          <option value="100" style={{ background: "#0f172a", color: "#fff" }}>100mi</option>
+          <option value="250" style={{ background: "#0f172a", color: "#fff" }}>250mi</option>
+        </select>
+        <button
+          type="button"
+          onClick={submit}
+          disabled={busy}
+          aria-label="Apply Near Me filter"
+          title="Apply"
+          style={st.nearMeApplyBtn}
+        >✓</button>
+        <button
+          type="button"
+          onClick={clear}
+          aria-label="Clear Near Me filter"
+          title="Clear"
+          style={st.nearMeClearBtn}
+        >×</button>
+      </div>
+      {error && <div style={st.nearMeInlineError}>{error}</div>}
     </div>
   );
 }
@@ -1797,8 +1827,9 @@ const st = {
     fontFamily: "inherit",
     padding: 0,
   },
-  // Inline panel anchored below the Near Me button — minimal row of
-  // two compact dark inputs per spec, no panel chrome.
+  // Inline panel anchored below the Near Me button. Column layout so the
+  // error line wraps below the input row instead of pushing the row
+  // wider — keeps the compact 90+70+28+28 footprint on the filter bar.
   nearMePanel: {
     position: "absolute",
     top: "calc(100% + 8px)",
@@ -1808,17 +1839,24 @@ const st = {
     border: "none",
     boxShadow: "none",
     zIndex: 70,
-    display: "inline-flex", alignItems: "center",
-    gap: 6,
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "flex-end",
+    gap: 4,
+  },
+  nearMeRow: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 4,
   },
   nearMeZipInput: {
-    width: 120, height: 32,
-    padding: "4px 8px",
+    width: 90, height: 28,
+    padding: "0 8px",
     borderRadius: 4,
     background: "rgba(15,23,42,0.85)",
     color: "#fff",
     border: "1px solid rgba(255,255,255,0.2)",
-    fontSize: 13,
+    fontSize: 12,
     fontFamily: "inherit",
     fontVariantNumeric: "tabular-nums",
     letterSpacing: "0.04em",
@@ -1831,13 +1869,13 @@ const st = {
     boxShadow: "0 0 0 1px rgba(245,158,11,0.45)",
   },
   nearMeRadiusSelect: {
-    width: 80, height: 32,
-    padding: "4px 8px",
+    width: 70, height: 28,
+    padding: "0 6px",
     borderRadius: 4,
     background: "rgba(15,23,42,0.85)",
     color: "#fff",
     border: "1px solid rgba(255,255,255,0.2)",
-    fontSize: 13,
+    fontSize: 12,
     fontFamily: "inherit",
     cursor: "pointer",
     appearance: "none",
@@ -1846,12 +1884,38 @@ const st = {
     boxSizing: "border-box",
     outline: "none",
   },
+  // Filled gold submit button — matches the active-action affordance.
+  nearMeApplyBtn: {
+    width: 28, height: 28,
+    borderRadius: 4,
+    border: "none",
+    background: "#f59e0b",
+    color: "#000",
+    fontSize: 14, fontWeight: 700, lineHeight: 1,
+    cursor: "pointer",
+    fontFamily: "inherit",
+    padding: 0,
+    boxSizing: "border-box",
+  },
+  // Outlined gold reset — same footprint as the apply button so the row
+  // stays balanced; visually distinguished as a destructive/cancel
+  // action rather than a confirm.
+  nearMeClearBtn: {
+    width: 28, height: 28,
+    borderRadius: 4,
+    border: "1px solid rgba(245,158,11,0.55)",
+    background: "transparent",
+    color: "#f59e0b",
+    fontSize: 16, fontWeight: 700, lineHeight: 1,
+    cursor: "pointer",
+    fontFamily: "inherit",
+    padding: 0,
+    boxSizing: "border-box",
+  },
   nearMeInlineError: {
     color: "#fca5a5",
     fontSize: 11,
     fontWeight: 600,
-    marginLeft: 4,
-    alignSelf: "center",
   },
   filterMeta: {
     marginTop: "0.85rem",
