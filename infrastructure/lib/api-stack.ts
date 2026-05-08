@@ -272,6 +272,16 @@ export class ApiStack extends Construct {
     });
     props.dbSecret.grantRead(migrationConsignmentBlocksFn);
 
+    // Diagnostic: exercises the decline → block flow inside a
+    // transaction with a ROLLBACK at the end. No production data
+    // mutated. Direct-invoke only.
+    const testDeclineLogicFn = new NodejsFunction(this, "TestDeclineLogic", {
+      ...sharedNodejsProps,
+      functionName: "scp-test-decline-logic",
+      entry: path.join(functionsDir, "_diagnostics/test-decline-logic.js"),
+    });
+    props.dbSecret.grantRead(testDeclineLogicFn);
+
     // Helper Lambda for the local geocoding pipeline — accepts a payload
     // of city/state → coords mappings and applies them as UPDATEs.
     // Direct-invoke only (no API route).
