@@ -50,7 +50,7 @@ exports.handler = async (event) => {
   const sql = `
     SELECT
       cs.id, cs.tcdb_id, cs.name, cs.venue, cs.city, cs.state, cs.country,
-      cs.show_date, cs.end_date, cs.start_time, cs.end_time,
+      cs.show_date, cs.end_date, cs.start_time, cs.end_time, cs.daily_times,
       (us.id IS NOT NULL) AS attending,
       us.notes            AS attending_notes
     FROM card_shows cs
@@ -83,6 +83,10 @@ exports.handler = async (event) => {
                       : r.end_date),
     startTime:  r.start_time,
     endTime:    r.end_time,
+    // pg's JSONB type comes back as a parsed object/array, so the
+    // value is already structured — pass it through unchanged. Falls
+    // back to null when the column is NULL (single-day shows).
+    dailyTimes: Array.isArray(r.daily_times) ? r.daily_times : null,
     attending:  r.attending,
     attendingNotes: r.attending_notes ?? null,
   }));

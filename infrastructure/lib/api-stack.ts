@@ -240,6 +240,14 @@ export class ApiStack extends Construct {
     });
     props.dbSecret.grantRead(migrationMergeShowsFn);
 
+    // Migration: daily_times JSONB column for per-day multi-day schedules.
+    const migrationDailyTimesFn = new NodejsFunction(this, "MigrationAddDailyTimes", {
+      ...sharedNodejsProps,
+      functionName: "scp-migration-add-daily-times",
+      entry: path.join(functionsDir, "_migrations/add-daily-times.js"),
+    });
+    props.dbSecret.grantRead(migrationDailyTimesFn);
+
     // ─── Card-shows feature ───
     const importShowsFn = new NodejsFunction(this, "ImportShows", {
       ...sharedNodejsProps,

@@ -430,6 +430,7 @@ function CalendarPanel({ cursor, setCursor, attending, onToggleAttending }) {
                   <ExpandedShowRow
                     key={s.id}
                     show={s}
+                    clickedDate={expandedDate}
                     onRemove={(show) => {
                       // Toggle off + close the popover. Optimistic
                       // update in onToggleAttending makes the show
@@ -548,25 +549,56 @@ function isShowToday(show) {
   return y === today.getFullYear() && (m - 1) === today.getMonth() && d === today.getDate();
 }
 
-function ExpandedShowRow({ show, compact, onRemove }) {
+function ExpandedShowRow({ show, compact, clickedDate, onRemove }) {
   const isRange = show.endDate && show.endDate !== show.date;
   const start = show.date    ? new Date(`${show.date}T00:00:00`)    : null;
   const end   = show.endDate ? new Date(`${show.endDate}T00:00:00`) : null;
+
+  // Find the schedule entry for the day the user clicked. Falls back
+  // to the show's top-level start/end when daily_times isn't present
+  // (single-day shows imported before the schema added it).
+  const totalDays = show.dailyTimes?.length ?? 0;
+  const dayIndex  = (totalDays > 0 && clickedDate)
+    ? show.dailyTimes.findIndex((d) => d.date === clickedDate)
+    : -1;
+  const todaysSchedule = dayIndex >= 0 ? show.dailyTimes[dayIndex] : null;
+  const showsAsMultiDay = !compact && totalDays > 1 && dayIndex >= 0;
+
+  // Time shown in the small top-line column.
+  // Compact (list view): keep the date-range label.
+  // Popover with a multi-day match: show this specific day's start time.
+  // Otherwise: show the show's top-level start time.
   const dateLabel = compact
     ? (isRange
         ? `${formatDateLabel(start)} → ${formatDateLabel(end)}`
         : formatDateLine(show.date))
-    : (show.startTime || "—");
+    : (todaysSchedule?.startTime || show.startTime || "—");
+
+  // The bottom meta line shows times only when there's a single
+  // schedule. For multi-day clicked shows, the dedicated banner
+  // below the name carries the per-day schedule instead so we don't
+  // duplicate the info.
+  const showMetaTime = !showsAsMultiDay && show.startTime;
+
   return (
     <div style={st.expandedRow}>
       <div style={st.expandedTopLine}>
         <div style={st.expandedDate}>{dateLabel}</div>
         <div style={st.expandedDetails}>
           <div style={st.expandedName}>{show.name}</div>
+          {showsAsMultiDay && (
+            <div style={st.expandedDayBanner}>
+              <span style={st.expandedDayBadge}>Day {dayIndex + 1} of {totalDays}</span>
+              <span style={st.expandedDayTime}>
+                {todaysSchedule.startTime}
+                {todaysSchedule.endTime ? ` to ${todaysSchedule.endTime}` : ""}
+              </span>
+            </div>
+          )}
           <div style={st.expandedMeta}>
             {[show.venue, show.city ? `${show.city}, ${show.state}` : show.state]
               .filter(Boolean).join(" · ")}
-            {show.startTime && (
+            {showMetaTime && (
               <span> · {formatTimeRange(show.startTime, show.endTime)}</span>
             )}
           </div>
@@ -963,7 +995,12 @@ function ShowCard({ show, onToggle }) {
           {show.city ? `${show.city}, ${show.state}` : show.state}
         </div>
         {show.startTime && (
-          <div style={st.cardTime}>{formatTimeRange(show.startTime, show.endTime)}</div>
+          <div style={st.cardTime}>
+            {formatTimeRange(show.startTime, show.endTime)}
+            {hasVaryingTimes(show) && (
+              <span style={st.cardTimeVary}> · Times vary by day</span>
+            )}
+          </div>
         )}
       </div>
 
@@ -1020,6 +1057,16 @@ function formatDateLine(iso) {
 function formatTimeRange(start, end) {
   if (start && end) return `${start} – ${end}`;
   return start || end || "";
+}
+// True when the show has multiple per-day entries AND any pair of
+// start/end times differs across them. Single-day shows and uniform
+// multi-day runs return false (so the "Times vary by day" subtitle
+// only appears when actually informative).
+function hasVaryingTimes(show) {
+  const dt = show?.dailyTimes;
+  if (!Array.isArray(dt) || dt.length <= 1) return false;
+  const first = dt[0];
+  return dt.some((d) => d.startTime !== first.startTime || d.endTime !== first.endTime);
 }
 // Compact label used in both the start and end cells of the date row,
 // so multi-day shows have visually identical date typography.
@@ -1365,6 +1412,30 @@ const st = {
     color: colors.textPrimary, fontWeight: 700,
     fontSize: "0.92rem",
     overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+  },
+  // Day-of-Y banner shown in the popover when the user clicks a day
+  // inside a multi-day run. "Day 2 of 3" + "10:00 AM to 6:00 PM" laid
+  // out on a single line; pill + time text both gold-tinted to match
+  // the rest of the popover accents.
+  expandedDayBanner: {
+    display: "flex", alignItems: "center", gap: "0.55rem",
+    marginTop: "0.3rem",
+    flexWrap: "wrap",
+  },
+  expandedDayBadge: {
+    background: gradients.goldPill,
+    color: "#0f172a",
+    fontSize: "0.62rem", fontWeight: 800,
+    letterSpacing: "0.14em", textTransform: "uppercase",
+    padding: "0.18rem 0.55rem",
+    borderRadius: 999,
+    flexShrink: 0,
+  },
+  expandedDayTime: {
+    color: colors.goldLight,
+    fontSize: "0.85rem", fontWeight: 700,
+    fontVariantNumeric: "tabular-nums",
+    letterSpacing: "0.01em",
   },
   expandedMeta: {
     color: colors.textMuted,
@@ -1732,6 +1803,14 @@ const st = {
     color: colors.textMuted,
     fontSize: "0.78rem",
     fontVariantNumeric: "tabular-nums",
+  },
+  // Subtitle appended to the time line on multi-day shows whose
+  // schedules actually differ between days. Picks up the gold accent
+  // so the eye catches it.
+  cardTimeVary: {
+    color: colors.goldLight,
+    fontVariantNumeric: "normal",
+    fontStyle: "italic",
   },
   cardActions: {
     // marginTop: auto pins this to the bottom of the flex column even

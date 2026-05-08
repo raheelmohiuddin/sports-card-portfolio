@@ -1,12 +1,22 @@
 // Bulk-import card shows from a JSON payload. Designed to be invoked
 // directly (`aws lambda invoke --payload file://shows.json`), not exposed
 // as an HTTP route. Payload shape:
-//   { "shows": [
+//   { "truncate": true,            // optional — wipe card_shows first
+//     "shows": [
 //       { "tcdbId": 17425, "name": "...", "venue": "...", "city": "...",
 //         "state": "PA", "country": "United States",
-//         "date": "2026-05-09", "startTime": "9:00 AM", "endTime": "2:00 PM" },
-//       ...
+//         "date": "2026-05-09", "endDate": "2026-05-11",
+//         "startTime": "9:00 AM", "endTime": "2:00 PM",
+//         "dailyTimes": [
+//           { "date": "2026-05-09", "startTime": "9:00 AM", "endTime": "5:00 PM" },
+//           { "date": "2026-05-10", "startTime": "10:00 AM", "endTime": "6:00 PM" },
+//           ...
+//         ]
+//       }, ...
 //   ]}
+//
+// truncate: clears card_shows before insert (FK CASCADE wipes
+// user_shows too). Use when re-importing after a fresh scrape.
 //
 // Upserts on tcdb_id so re-runs after a re-scrape only refresh changes.
 // Inserts in batches inside a single transaction for throughput.
@@ -16,16 +26,26 @@ const BATCH = 200;
 
 exports.handler = async (event) => {
   const shows = Array.isArray(event?.shows) ? event.shows : [];
-  if (shows.length === 0) {
+  const shouldTruncate = event?.truncate === true;
+  if (shows.length === 0 && !shouldTruncate) {
     return { statusCode: 400, body: JSON.stringify({ error: "no shows in payload" }) };
   }
 
   const db = await getPool();
   const client = await db.connect();
-  let inserted = 0, updated = 0, skipped = 0;
+  let inserted = 0, updated = 0, skipped = 0, truncatedRows = 0;
 
   try {
     await client.query("BEGIN");
+
+    if (shouldTruncate) {
+      // CASCADE so dependent user_shows rows are dropped along with the
+      // shows they reference (FK has ON DELETE CASCADE; TRUNCATE without
+      // CASCADE refuses when there are referencing rows).
+      const before = await client.query("SELECT COUNT(*) AS n FROM card_shows");
+      truncatedRows = parseInt(before.rows[0].n, 10);
+      await client.query("TRUNCATE TABLE card_shows CASCADE");
+    }
 
     for (let i = 0; i < shows.length; i += BATCH) {
       const slice = shows.slice(i, i + BATCH);
@@ -47,27 +67,34 @@ exports.handler = async (event) => {
           s.endDate   || null,
           s.startTime || null,
           s.endTime   || null,
+          // Pass JSONB as a JSON-stringified literal; pg's parameter
+          // binder hands it to the server as text and the column's
+          // JSONB type takes care of parsing.
+          Array.isArray(s.dailyTimes) && s.dailyTimes.length
+            ? JSON.stringify(s.dailyTimes)
+            : null,
         );
         placeholders.push(
-          `($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5}, $${base + 6}, $${base + 7}, $${base + 8}, $${base + 9}, $${base + 10})`
+          `($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5}, $${base + 6}, $${base + 7}, $${base + 8}, $${base + 9}, $${base + 10}, $${base + 11}::jsonb)`
         );
       });
       if (placeholders.length === 0) continue;
 
       const sql = `
-        INSERT INTO card_shows (tcdb_id, name, venue, city, state, country, show_date, end_date, start_time, end_time)
+        INSERT INTO card_shows (tcdb_id, name, venue, city, state, country, show_date, end_date, start_time, end_time, daily_times)
         VALUES ${placeholders.join(", ")}
         ON CONFLICT (tcdb_id) DO UPDATE SET
-          name       = EXCLUDED.name,
-          venue      = EXCLUDED.venue,
-          city       = EXCLUDED.city,
-          state      = EXCLUDED.state,
-          country    = EXCLUDED.country,
-          show_date  = EXCLUDED.show_date,
-          end_date   = EXCLUDED.end_date,
-          start_time = EXCLUDED.start_time,
-          end_time   = EXCLUDED.end_time,
-          updated_at = NOW()
+          name        = EXCLUDED.name,
+          venue       = EXCLUDED.venue,
+          city        = EXCLUDED.city,
+          state       = EXCLUDED.state,
+          country     = EXCLUDED.country,
+          show_date   = EXCLUDED.show_date,
+          end_date    = EXCLUDED.end_date,
+          start_time  = EXCLUDED.start_time,
+          end_time    = EXCLUDED.end_time,
+          daily_times = EXCLUDED.daily_times,
+          updated_at  = NOW()
         RETURNING (xmax = 0) AS inserted
       `;
       const res = await client.query(sql, values);
@@ -92,6 +119,8 @@ exports.handler = async (event) => {
     statusCode: 200,
     body: JSON.stringify({
       ok: true,
+      truncated: shouldTruncate,
+      truncatedRows,
       payloadCount: shows.length,
       inserted,
       updated,
