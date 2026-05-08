@@ -163,6 +163,23 @@ export class ApiStack extends Construct {
       })
     );
 
+    // Image moderation gate — runs before the S3 pre-signed URL is
+    // requested in AddCardPage so rejected images never reach storage.
+    // Same Anthropic key as edge-texture; VPC NAT egress reaches
+    // api.anthropic.com.
+    const moderateImageFn = new NodejsFunction(this, "ModerateImage", {
+      ...sharedNodejsProps,
+      functionName: "scp-moderate-image",
+      entry: path.join(functionsDir, "cards/moderate-image.js"),
+      timeout: cdk.Duration.seconds(20),
+    });
+    moderateImageFn.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: ["secretsmanager:GetSecretValue"],
+        resources: ["arn:aws:secretsmanager:us-east-1:501789774892:secret:sports-card-portfolio/anthropic-api-key*"],
+      })
+    );
+
     // One-off migration Lambda — invoke manually after deploy. Idempotent.
     const migrationAddMyCostFn = new NodejsFunction(this, "MigrationAddMyCost", {
       ...sharedNodejsProps,
@@ -475,6 +492,13 @@ export class ApiStack extends Construct {
       path: "/cards/edge-texture",
       methods: [apigwv2.HttpMethod.POST],
       integration: new apigwv2integrations.HttpLambdaIntegration("GenerateEdgeTexture", generateEdgeTextureFn),
+      ...authRoute,
+    });
+
+    api.addRoutes({
+      path: "/cards/moderate-image",
+      methods: [apigwv2.HttpMethod.POST],
+      integration: new apigwv2integrations.HttpLambdaIntegration("ModerateImage", moderateImageFn),
       ...authRoute,
     });
 

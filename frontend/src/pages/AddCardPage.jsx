@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { lookupPsaCert, addCard, uploadCardImages } from "../services/api.js";
 import DropZone from "../components/DropZone.jsx";
+import { moderateFile } from "../utils/imageModeration.js";
 import { gradients } from "../utils/theme.js";
 
 function useImageFile(psaUrl) {
@@ -325,6 +326,7 @@ function ImageZone({ side, psaUrl, file, setFile, displayUrl }) {
 
       <DropZone
         onFile={setFile}
+        verify={moderateFile}
         previewUrl={displayUrl}
         label={`Drop ${side.toLowerCase()} image`}
         hint={hasPsa ? "or click to override PSA image" : "or click to browse"}

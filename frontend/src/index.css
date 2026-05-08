@@ -209,6 +209,12 @@ a { color: inherit; text-decoration: none; }
   opacity: 1;
 }
 
+/* DropZone "Verifying image…" spinner — used during the moderation
+   round-trip on /add-card. */
+@keyframes scp-spin {
+  to { transform: rotate(360deg); }
+}
+
 /* /shows pagination buttons — subtle hover lifting on inactive
    buttons. Active (gold) and disabled buttons are excluded. Inline
    styles can't address :hover, so the rule lives here. */

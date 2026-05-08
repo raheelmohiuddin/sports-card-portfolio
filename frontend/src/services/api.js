@@ -108,6 +108,22 @@ export async function getAvatarViewUrl(key) {
   return res.json();
 }
 
+// Image moderation gate — call before requesting an S3 upload URL.
+// Body: { image: base64-string, contentType: "image/jpeg" } and returns
+// { allowed: bool, reason: string, unverified?: bool }. Server-side
+// fail-open semantics: infrastructure errors return allowed=true with
+// unverified=true rather than block the user.
+export async function moderateImage({ image, contentType }) {
+  const headers = await authHeaders();
+  const res = await fetch(`${API_BASE}/cards/moderate-image`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ image, contentType }),
+  });
+  if (!res.ok) throw await readError(res);
+  return res.json();
+}
+
 // Analyze a card's front image via Claude vision and return the border edge color.
 // Returns { edgeColor: "#hex", texture: "white|cream|colored" }.
 // Falls back to { edgeColor: "#f2f0eb", texture: "white" } on any failure.
