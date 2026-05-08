@@ -47,10 +47,26 @@ export default function ShowsPage() {
   // states is now an array (multi-select). The API accepts a comma-
   // separated list and uses ANY($::text[]) to fan out the WHERE clause.
   const [states, setStates]         = useState([]);
-  const [fromDate, setFromDate]     = useState("");
-  const [toDate, setToDate]         = useState("");
+  // Calendar cursor lives at this level so navigating months can drive
+  // the grid's date-range filter. Initial cursor + from/to are seeded
+  // to the current month so the first render is already filtered to
+  // it (matches the calendar default view).
+  const [cursor, setCursor]         = useState(() => startOfMonth(new Date()));
+  const [fromDate, setFromDate]     = useState(() => toIsoDate(startOfMonth(new Date())));
+  const [toDate, setToDate]         = useState(() => toIsoDate(endOfMonth(new Date())));
   const [q, setQ]                   = useState("");
   const [qApplied, setQApplied]     = useState("");
+
+  // Whenever the calendar moves, snap from/to to that month's bounds.
+  // The user can still type custom dates afterwards; their values stick
+  // until the next calendar nav. The fetch effect picks the new range
+  // up via fromDate/toDate, so the grid follows automatically — and
+  // the existing fade-out → swap → fade-in pipeline handles the
+  // smooth transition between months.
+  useEffect(() => {
+    setFromDate(toIsoDate(startOfMonth(cursor)));
+    setToDate(toIsoDate(endOfMonth(cursor)));
+  }, [cursor]);
 
   // Debounce search input — 350ms after the last keystroke.
   useEffect(() => {
@@ -102,6 +118,33 @@ export default function ShowsPage() {
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [statesKey, fromDate, toDate, qApplied]);
+
+  // ── Pagination ──
+  // PAGE_SIZE is fixed at 30 per spec. currentPage resets to 1 every
+  // time the active filter set changes (so a new fetch always lands
+  // the user on page 1) — the existing fetch effect deps below are
+  // the canonical "filter changed" signal, so we mirror them here.
+  const [currentPage, setCurrentPage] = useState(1);
+  useEffect(() => { setCurrentPage(1); }, [statesKey, fromDate, toDate, qApplied]);
+
+  const PAGE_SIZE = 30;
+  const totalPages = Math.max(1, Math.ceil(shows.length / PAGE_SIZE));
+  const pagedShows = useMemo(
+    () => shows.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE),
+    [shows, currentPage]
+  );
+
+  // Smooth-scroll to the top of the grid (not the page) on page change.
+  const gridWrapRef = useRef(null);
+  function changePage(n) {
+    const next = Math.max(1, Math.min(totalPages, n));
+    if (next === currentPage) return;
+    setCurrentPage(next);
+    // Defer until the new page renders so the scroll target exists.
+    requestAnimationFrame(() => {
+      gridWrapRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  }
 
   function toggleState(code) {
     setStates((prev) => prev.includes(code) ? prev.filter((s) => s !== code) : [...prev, code]);
@@ -156,6 +199,8 @@ export default function ShowsPage() {
 
         {/* ── Calendar / list view ── */}
         <CalendarPanel
+          cursor={cursor}
+          setCursor={setCursor}
           attending={attending}
           onToggleAttending={toggleAttending}
         />
@@ -180,7 +225,7 @@ export default function ShowsPage() {
             After the first successful load the grid stays mounted
             (even when shows is empty) and just transitions opacity
             during refetches, so layout stays stable. */}
-        <div style={st.gridWrap}>
+        <div ref={gridWrapRef} style={st.gridWrap}>
           {!hasLoadedOnce ? (
             <div style={st.stateMsg}>Loading shows…</div>
           ) : (
@@ -188,11 +233,18 @@ export default function ShowsPage() {
               {shows.length === 0 ? (
                 <div style={st.gridEmpty}>No shows match your filters.</div>
               ) : (
-                shows.map((s) => (
+                pagedShows.map((s) => (
                   <ShowCard key={s.id} show={s} onToggle={() => toggleAttending(s)} />
                 ))
               )}
             </div>
+          )}
+          {hasLoadedOnce && totalPages > 1 && (
+            <Pagination
+              currentPage={currentPage}
+              totalPages={totalPages}
+              onChange={changePage}
+            />
           )}
         </div>
       </div>
@@ -201,10 +253,11 @@ export default function ShowsPage() {
 }
 
 // ─── Calendar panel ──────────────────────────────────────────────────
-function CalendarPanel({ attending, onToggleAttending }) {
+// cursor + setCursor are controlled by ShowsPage so navigating months
+// can drive the grid's date-range filter at the same time.
+function CalendarPanel({ cursor, setCursor, attending, onToggleAttending }) {
   const today = useMemo(() => startOfDay(new Date()), []);
   const [viewMode, setViewMode] = useState("month"); // month | list
-  const [cursor, setCursor]     = useState(() => startOfMonth(new Date()));
   const [expandedDate, setExpandedDate] = useState(null);
 
   // Bucket attending shows by ISO date so the month grid lookup is O(1).
@@ -523,6 +576,63 @@ function DatePill({ date }) {
   );
 }
 
+// ─── Pagination controls ────────────────────────────────────────────
+// Windowed page list — always shows first + last + the current page
+// ± 1, with ellipses between disjoint sections so the bar stays
+// short for portfolios with hundreds of pages. The bar hides itself
+// when there's only 1 page (handled by the caller).
+function Pagination({ currentPage, totalPages, onChange }) {
+  const items = pageWindow(currentPage, totalPages);
+  const atFirst = currentPage <= 1;
+  const atLast  = currentPage >= totalPages;
+  return (
+    <nav style={st.pagination} aria-label="Pagination">
+      <button
+        type="button"
+        className="scp-page-btn"
+        onClick={() => onChange(currentPage - 1)}
+        disabled={atFirst}
+        style={{ ...st.pageBtn, ...(atFirst ? st.pageBtnDisabled : {}) }}
+        aria-label="Previous page"
+      >‹</button>
+      {items.map((it, i) =>
+        it === "…" ? (
+          <span key={`e${i}`} style={st.pageEllipsis}>…</span>
+        ) : (
+          <button
+            key={it}
+            type="button"
+            className={`scp-page-btn${it === currentPage ? " scp-page-btn-active" : ""}`}
+            onClick={() => onChange(it)}
+            style={{ ...st.pageBtn, ...(it === currentPage ? st.pageBtnActive : {}) }}
+            aria-current={it === currentPage ? "page" : undefined}
+          >{it}</button>
+        )
+      )}
+      <button
+        type="button"
+        className="scp-page-btn"
+        onClick={() => onChange(currentPage + 1)}
+        disabled={atLast}
+        style={{ ...st.pageBtn, ...(atLast ? st.pageBtnDisabled : {}) }}
+        aria-label="Next page"
+      >›</button>
+    </nav>
+  );
+}
+
+function pageWindow(current, total) {
+  if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1);
+  const items = [1];
+  if (current > 3) items.push("…");
+  for (let i = Math.max(2, current - 1); i <= Math.min(total - 1, current + 1); i++) {
+    items.push(i);
+  }
+  if (current < total - 2) items.push("…");
+  items.push(total);
+  return items;
+}
+
 function ToggleBtn({ active, onClick, children }) {
   return (
     <button
@@ -729,6 +839,12 @@ function startOfDay(d) {
 }
 function startOfMonth(d) {
   return new Date(d.getFullYear(), d.getMonth(), 1);
+}
+// Day 0 of the next month is the last day of the current month — used
+// to compute the calendar's currently-viewed month boundary for the
+// grid's date filter.
+function endOfMonth(d) {
+  return new Date(d.getFullYear(), d.getMonth() + 1, 0);
 }
 function sameDay(a, b) {
   return a.getFullYear() === b.getFullYear()
@@ -1280,6 +1396,48 @@ const st = {
     textAlign: "center",
     padding: "3rem 1rem",
     fontSize: "0.9rem",
+  },
+
+  // ── Pagination ──
+  // Dark pill row at the bottom of the grid. Active page picks up the
+  // gold-pill gradient; inactive cells are subtle dark with a hover
+  // effect handled via the .scp-page-btn class in index.css (inline
+  // styles can't address :hover). Disabled prev/next dim to 0.35.
+  pagination: {
+    display: "flex", alignItems: "center", justifyContent: "center",
+    gap: "0.45rem",
+    marginTop: "1.75rem",
+    flexWrap: "wrap",
+  },
+  pageBtn: {
+    background: "rgba(15,23,42,0.6)",
+    color: colors.textSecondary,
+    border: `1px solid ${colors.borderSoft}`,
+    borderRadius: 999,
+    minWidth: 36, height: 36,
+    padding: "0 0.75rem",
+    display: "inline-flex", alignItems: "center", justifyContent: "center",
+    cursor: "pointer",
+    fontFamily: "inherit",
+    fontSize: "0.82rem", fontWeight: 700,
+    fontVariantNumeric: "tabular-nums",
+    transition: "background 0.12s, color 0.12s, border-color 0.12s",
+  },
+  pageBtnActive: {
+    background: gradients.goldPill,
+    color: "#0f172a",
+    borderColor: colors.gold,
+    boxShadow: "0 4px 12px rgba(245,158,11,0.22)",
+  },
+  pageBtnDisabled: {
+    opacity: 0.35,
+    cursor: "not-allowed",
+  },
+  pageEllipsis: {
+    color: colors.textFaint,
+    fontSize: "0.85rem", fontWeight: 700,
+    padding: "0 0.4rem",
+    userSelect: "none",
   },
   card: {
     background: gradients.goldPanel,

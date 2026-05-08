@@ -209,6 +209,18 @@ a { color: inherit; text-decoration: none; }
   opacity: 1;
 }
 
+/* /shows pagination buttons — subtle hover lifting on inactive
+   buttons. Active (gold) and disabled buttons are excluded. Inline
+   styles can't address :hover, so the rule lives here. */
+.scp-page-btn:not(.scp-page-btn-active):not(:disabled):hover {
+  background: rgba(245,158,11,0.10) !important;
+  border-color: rgba(245,158,11,0.45) !important;
+  color: #fbbf24 !important;
+}
+.scp-page-btn.scp-page-btn-active:hover {
+  filter: brightness(1.06);
+}
+
 /* Date inputs on dark backgrounds — the WebKit calendar picker
    indicator defaults to a near-black icon that vanishes against our
    dark form fields. Filter chain shifts a black source into the brand
