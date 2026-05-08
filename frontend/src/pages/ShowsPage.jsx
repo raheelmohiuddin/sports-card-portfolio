@@ -630,6 +630,14 @@ function Pagination({ currentPage, totalPages, onChange }) {
       <button
         type="button"
         className="scp-page-btn"
+        onClick={() => onChange(1)}
+        disabled={atFirst}
+        style={{ ...st.pageBtn, ...(atFirst ? st.pageBtnDisabled : {}) }}
+        aria-label="First page"
+      >First</button>
+      <button
+        type="button"
+        className="scp-page-btn"
         onClick={() => onChange(currentPage - 1)}
         disabled={atFirst}
         style={{ ...st.pageBtn, ...(atFirst ? st.pageBtnDisabled : {}) }}
@@ -657,6 +665,14 @@ function Pagination({ currentPage, totalPages, onChange }) {
         style={{ ...st.pageBtn, ...(atLast ? st.pageBtnDisabled : {}) }}
         aria-label="Next page"
       >›</button>
+      <button
+        type="button"
+        className="scp-page-btn"
+        onClick={() => onChange(totalPages)}
+        disabled={atLast}
+        style={{ ...st.pageBtn, ...(atLast ? st.pageBtnDisabled : {}) }}
+        aria-label="Last page"
+      >Last</button>
     </nav>
   );
 }
@@ -1481,7 +1497,10 @@ const st = {
     boxShadow: "0 4px 12px rgba(245,158,11,0.22)",
   },
   pageBtnDisabled: {
-    opacity: 0.35,
+    // Per spec: 0.4 opacity, no hover effect (the .scp-page-btn:hover
+    // rule in index.css excludes :disabled buttons via :not(:disabled),
+    // so disabled cells naturally lose the gold hover treatment).
+    opacity: 0.4,
     cursor: "not-allowed",
   },
   pageEllipsis: {
