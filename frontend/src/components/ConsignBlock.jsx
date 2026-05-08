@@ -1,31 +1,38 @@
 import { useState } from "react";
 import { createConsignment } from "../services/api.js";
 
-// "Consign This Card" affordance for the card sidebar. Three states:
-//   collapsed → button only.
-//   expanded  → form (type, asking price, notes) + submit.
-//   submitted → success message; no further action.
+// "Consign This Card" affordance for the card sidebar. Three flows:
+//   has status pill → read-only display of the current consignment state.
+//   no status, collapsed → "Consign This Card" button.
+//   no status, form → type / asking price / notes form, then submit.
 //
-// Hidden ONLY for admin users (admins shouldn't consign their own collections).
-// Everyone else — explicit collectors, users whose JWT predates the
-// custom:role attribute, users where the attribute fetch failed — sees the
-// button. The backend (POST /consignments) enforces card ownership, so a
-// stray render for a non-owner is harmless: the request would 404. This
-// permissive gate avoids the failure mode where a token issued before the
-// PostConfirmation trigger landed has no custom:role at all and the button
-// never shows for legitimate collectors.
-export default function ConsignBlock({ cardId, role }) {
-  const [stage, setStage]   = useState("collapsed"); // collapsed | form | submitted
+// Status semantics: once a card has been consigned, the user can never
+// resubmit or change the status — only an admin can. So when an existing
+// consignmentStatus is present (passed from props OR set optimistically
+// after a successful submit) we replace the entire CTA with a read-only
+// pill. Even terminal states (sold, declined) lock the button — declined
+// gets a small note pointing the collector at the admin to discuss
+// next steps. The backend's partial unique index is the actual guard;
+// this UI just reflects it so collectors don't try to submit twice.
+//
+// Hidden entirely for admin users — admins shouldn't consign their own
+// collection, and they manage status via the admin portal anyway.
+export default function ConsignBlock({ cardId, role, consignmentStatus }) {
+  const [stage, setStage]   = useState("collapsed"); // collapsed | form
   const [type, setType]     = useState("auction");
   const [price, setPrice]   = useState("");
   const [notes, setNotes]   = useState("");
   const [busy, setBusy]     = useState(false);
   const [error, setError]   = useState(null);
-
-  // TEMP diagnostic — remove once consign visibility is confirmed.
-  console.log("ConsignBlock received role:", role);
+  // Local-state mirror of the persisted status. Seeds from props; flips
+  // to "pending" optimistically the moment a submit succeeds. The next
+  // time getCards/getCard runs, props will carry the real value and
+  // override this — so a server-side rejection would self-heal.
+  const [status, setStatus] = useState(consignmentStatus ?? null);
 
   if (role === "admin") return null;
+
+  if (status) return <StatusPill status={status} />;
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -37,26 +44,15 @@ export default function ConsignBlock({ cardId, role }) {
         askingPrice: price === "" ? null : parseFloat(price),
         notes: notes || null,
       });
-      setStage("submitted");
+      // Optimistically mark as pending — the API returned 201 with status
+      // "pending", and we drop into the same pill render path the parent
+      // would land on after a refresh.
+      setStatus("pending");
     } catch (err) {
       setError(err?.message ?? "Submission failed");
     } finally {
       setBusy(false);
     }
-  }
-
-  if (stage === "submitted") {
-    return (
-      <div style={st.successBlock}>
-        <div style={st.successIcon}>✓</div>
-        <div>
-          <div style={st.successTitle}>Consignment submitted</div>
-          <div style={st.successSub}>
-            We've received your request. The team will reach out shortly to discuss next steps.
-          </div>
-        </div>
-      </div>
-    );
   }
 
   if (stage === "collapsed") {
@@ -115,6 +111,75 @@ export default function ConsignBlock({ cardId, role }) {
     </form>
   );
 }
+
+// ─── Read-only status pill ──────────────────────────────────────────
+// Used once a consignment exists for the card. Colors per status follow
+// the spec: pending=amber, in_review=blue, listed/sold=green, declined=red.
+function StatusPill({ status }) {
+  const variant = STATUS_VARIANTS[status];
+  if (!variant) return null;
+  return (
+    <div style={st.statusBlock}>
+      <div style={{ ...st.statusPill, ...variant.pill }}>
+        <span style={{ ...st.statusDot, background: variant.dotColor }} />
+        <span>{variant.label}</span>
+      </div>
+      {status === "declined" && (
+        <p style={st.statusNote}>
+          Contact us to discuss options.
+        </p>
+      )}
+    </div>
+  );
+}
+
+const STATUS_VARIANTS = {
+  pending: {
+    label: "Consignment Pending — Under Review",
+    dotColor: "#f59e0b",
+    pill: {
+      background: "rgba(245,158,11,0.10)",
+      border: "1px solid rgba(245,158,11,0.45)",
+      color: "#fbbf24",
+    },
+  },
+  in_review: {
+    label: "In Review by Collector's Reserve",
+    dotColor: "#60a5fa",
+    pill: {
+      background: "rgba(96,165,250,0.10)",
+      border: "1px solid rgba(96,165,250,0.45)",
+      color: "#93c5fd",
+    },
+  },
+  listed: {
+    label: "Listed for Sale",
+    dotColor: "#10b981",
+    pill: {
+      background: "rgba(16,185,129,0.10)",
+      border: "1px solid rgba(16,185,129,0.45)",
+      color: "#6ee7b7",
+    },
+  },
+  sold: {
+    label: "Sold",
+    dotColor: "#10b981",
+    pill: {
+      background: "rgba(16,185,129,0.12)",
+      border: "1px solid rgba(16,185,129,0.5)",
+      color: "#6ee7b7",
+    },
+  },
+  declined: {
+    label: "Consignment Declined",
+    dotColor: "#f87171",
+    pill: {
+      background: "rgba(248,113,113,0.10)",
+      border: "1px solid rgba(248,113,113,0.45)",
+      color: "#fca5a5",
+    },
+  },
+};
 
 const st = {
   cta: {
@@ -185,29 +250,25 @@ const st = {
     borderRadius: 6,
   },
 
-  successBlock: {
-    display: "flex", gap: "0.85rem",
-    background: "rgba(16,185,129,0.08)",
-    border: "1px solid rgba(16,185,129,0.32)",
-    borderRadius: 12,
-    padding: "1rem 1.1rem",
-    marginTop: "1.5rem",
+  // ─── Status pill ───
+  statusBlock: {
+    marginTop: "1.5rem", marginBottom: "0.5rem",
   },
-  successIcon: {
-    width: 32, height: 32,
-    borderRadius: "50%",
-    background: "rgba(16,185,129,0.18)",
-    color: "#6ee7b7",
-    display: "flex", alignItems: "center", justifyContent: "center",
-    fontWeight: 800, fontSize: "1.05rem",
+  statusPill: {
+    display: "flex", alignItems: "center", gap: "0.6rem",
+    padding: "0.7rem 1rem",
+    borderRadius: 10,
+    fontSize: "0.78rem", fontWeight: 700,
+    letterSpacing: "0.04em",
+  },
+  statusDot: {
+    width: 8, height: 8, borderRadius: "50%",
     flexShrink: 0,
   },
-  successTitle: {
-    color: "#a7f3d0", fontWeight: 700,
-    fontSize: "0.9rem", letterSpacing: "-0.01em",
-  },
-  successSub: {
-    color: "#94a3b8", fontSize: "0.78rem",
-    marginTop: "0.25rem", lineHeight: 1.5,
+  statusNote: {
+    marginTop: "0.55rem",
+    color: "#94a3b8",
+    fontSize: "0.78rem",
+    letterSpacing: "0.01em",
   },
 };

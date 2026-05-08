@@ -267,7 +267,16 @@ export default function CardModal({ card, onClose }) {
             : <div style={st.salesPlaceholder} />}
 
           {/* ── Consign this card (collectors only) ── */}
-          {hydrated && <ConsignBlock cardId={card.id} role={role} />}
+          {/* consignmentStatus comes from get-cards.js / get-card.js via the
+              `card` prop and tells ConsignBlock whether to show the form
+              CTA or a read-only status pill. */}
+          {hydrated && (
+            <ConsignBlock
+              cardId={card.id}
+              role={role}
+              consignmentStatus={card.consignmentStatus ?? null}
+            />
+          )}
         </div>
       </aside>
 

@@ -20,19 +20,31 @@ exports.handler = async (event) => {
   const db = await getPool();
   const userId = await ensureUser(db, claims.sub, claims.email);
 
+  // LEFT JOIN LATERAL pulls the single most-recent consignment row per card.
+  // We only ever care about the latest one for display: pending/in_review/
+  // listed are open states, sold/declined are terminal. The frontend uses
+  // this to swap the "Consign This Card" CTA for a read-only status pill.
   const result = await db.query(
-    `SELECT id, cert_number, year, brand, sport, player_name, card_number,
-            grade, grade_description,
-            s3_image_key, image_url,
-            s3_back_image_key, back_image_url,
-            psa_population, psa_population_higher,
-            manual_price, my_cost, target_price,
-            estimated_value, avg_sale_price, last_sale_price,
-            num_sales, price_source, value_last_updated,
-            added_at
-     FROM cards
-     WHERE user_id = $1
-     ORDER BY added_at DESC`,
+    `SELECT c.id, c.cert_number, c.year, c.brand, c.sport, c.player_name, c.card_number,
+            c.grade, c.grade_description,
+            c.s3_image_key, c.image_url,
+            c.s3_back_image_key, c.back_image_url,
+            c.psa_population, c.psa_population_higher,
+            c.manual_price, c.my_cost, c.target_price,
+            c.estimated_value, c.avg_sale_price, c.last_sale_price,
+            c.num_sales, c.price_source, c.value_last_updated,
+            c.added_at,
+            cn.status AS consignment_status
+     FROM cards c
+     LEFT JOIN LATERAL (
+       SELECT status
+       FROM consignments
+       WHERE card_id = c.id
+       ORDER BY created_at DESC
+       LIMIT 1
+     ) cn ON TRUE
+     WHERE c.user_id = $1
+     ORDER BY c.added_at DESC`,
     [userId]
   );
 
@@ -74,6 +86,7 @@ exports.handler = async (event) => {
         priceSource:      manualPrice !== null ? "manual" : (row.price_source ?? null),
         valueLastUpdated: row.value_last_updated ?? null,
         addedAt:          row.added_at,
+        consignmentStatus: row.consignment_status ?? null,
       };
     })
   );

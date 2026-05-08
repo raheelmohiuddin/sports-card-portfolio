@@ -24,18 +24,28 @@ exports.handler = async (event) => {
   const db = await getPool();
   const userId = await ensureUser(db, claims.sub, claims.email);
 
+  // Lateral subquery pulls the most-recent consignment status — see
+  // get-cards.js for rationale. Kept consistent so the sidebar's freshness
+  // re-fetch doesn't blank out the status the list view already loaded.
   const result = await db.query(
-    `SELECT id, cert_number, year, brand, sport, player_name, card_number,
-            grade, grade_description,
-            s3_image_key, image_url,
-            s3_back_image_key, back_image_url,
-            psa_population, psa_population_higher,
-            manual_price, my_cost, target_price,
-            estimated_value, avg_sale_price, last_sale_price,
-            num_sales, price_source, value_last_updated,
-            added_at
-     FROM cards
-     WHERE id = $1 AND user_id = $2`,
+    `SELECT c.id, c.cert_number, c.year, c.brand, c.sport, c.player_name, c.card_number,
+            c.grade, c.grade_description,
+            c.s3_image_key, c.image_url,
+            c.s3_back_image_key, c.back_image_url,
+            c.psa_population, c.psa_population_higher,
+            c.manual_price, c.my_cost, c.target_price,
+            c.estimated_value, c.avg_sale_price, c.last_sale_price,
+            c.num_sales, c.price_source, c.value_last_updated,
+            c.added_at,
+            cn.status AS consignment_status
+     FROM cards c
+     LEFT JOIN LATERAL (
+       SELECT status FROM consignments
+       WHERE card_id = c.id
+       ORDER BY created_at DESC
+       LIMIT 1
+     ) cn ON TRUE
+     WHERE c.id = $1 AND c.user_id = $2`,
     [cardId, userId]
   );
 
@@ -78,5 +88,6 @@ exports.handler = async (event) => {
       priceSource:      manualPrice !== null ? "manual" : (row.price_source ?? null),
       valueLastUpdated: row.value_last_updated ?? null,
       addedAt:          row.added_at,
+      consignmentStatus: row.consignment_status ?? null,
   });
 };
