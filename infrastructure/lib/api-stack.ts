@@ -248,6 +248,25 @@ export class ApiStack extends Construct {
     });
     props.dbSecret.grantRead(migrationDailyTimesFn);
 
+    // Migration: lat/lng columns + index for proximity filtering.
+    const migrationShowCoordsFn = new NodejsFunction(this, "MigrationAddShowCoords", {
+      ...sharedNodejsProps,
+      functionName: "scp-migration-add-show-coords",
+      entry: path.join(functionsDir, "_migrations/add-show-coords.js"),
+    });
+    props.dbSecret.grantRead(migrationShowCoordsFn);
+
+    // Helper Lambda for the local geocoding pipeline — accepts a payload
+    // of city/state → coords mappings and applies them as UPDATEs.
+    // Direct-invoke only (no API route).
+    const applyShowCoordsFn = new NodejsFunction(this, "ApplyShowCoords", {
+      ...sharedNodejsProps,
+      functionName: "scp-apply-show-coords",
+      entry: path.join(functionsDir, "shows/apply-show-coords.js"),
+      timeout: cdk.Duration.seconds(60),
+    });
+    props.dbSecret.grantRead(applyShowCoordsFn);
+
     // ─── Card-shows feature ───
     const importShowsFn = new NodejsFunction(this, "ImportShows", {
       ...sharedNodejsProps,

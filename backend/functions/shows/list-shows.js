@@ -40,7 +40,21 @@ exports.handler = async (event) => {
   const q     = (qs.q    ?? "").trim() || null;
   const qLike = q ? `%${q}%` : null;
 
-  const params = [userId, from, to, states, qLike];
+  // Proximity: when centerLat + centerLng + radiusMiles all parse,
+  // exclude shows without coords and apply a Haversine distance
+  // filter. radius_meters lets us compare in metres without an
+  // explicit unit-conversion in the WHERE clause.
+  const cLat   = Number(qs.centerLat);
+  const cLng   = Number(qs.centerLng);
+  const radMi  = Number(qs.radiusMiles);
+  const proximityActive =
+    Number.isFinite(cLat) && Number.isFinite(cLng) && Number.isFinite(radMi) && radMi > 0;
+  const radiusMeters = proximityActive ? radMi * 1609.344 : null;
+
+  const params = [userId, from, to, states, qLike,
+                  proximityActive ? cLat : null,
+                  proximityActive ? cLng : null,
+                  proximityActive ? radiusMeters : null];
   // Every nullable text/date param is cast explicitly. Postgres can't
   // infer types for a parameter whose only uses are `IS NULL` checks
   // and an `=`/`ILIKE` against a NULL value — pg-node sends NULL
@@ -51,6 +65,7 @@ exports.handler = async (event) => {
     SELECT
       cs.id, cs.tcdb_id, cs.name, cs.venue, cs.city, cs.state, cs.country,
       cs.show_date, cs.end_date, cs.start_time, cs.end_time, cs.daily_times,
+      cs.lat, cs.lng,
       (us.id IS NOT NULL) AS attending,
       us.notes            AS attending_notes
     FROM card_shows cs
@@ -60,6 +75,22 @@ exports.handler = async (event) => {
       AND ($3::date IS NULL OR cs.show_date <= $3::date)
       AND ($4::text[] IS NULL OR cs.state = ANY($4::text[]))
       AND ($5::text IS NULL OR cs.name ILIKE $5::text OR cs.city ILIKE $5::text)
+      -- Haversine distance filter (great-circle on a sphere of radius
+      -- 6371000 m). Active only when all three center+radius params
+      -- are non-null; skips shows missing lat/lng. The acos clamp
+      -- guards against floating-point drift past 1.0 that would
+      -- otherwise NaN the result.
+      AND (
+        $6::numeric IS NULL
+        OR (
+          cs.lat IS NOT NULL AND cs.lng IS NOT NULL
+          AND 6371000 * acos(LEAST(1.0,
+              cos(radians($6::numeric)) * cos(radians(cs.lat))
+              * cos(radians(cs.lng) - radians($7::numeric))
+              + sin(radians($6::numeric)) * sin(radians(cs.lat))
+          )) <= $8::numeric
+        )
+      )
     ORDER BY cs.show_date ASC, cs.start_time ASC NULLS LAST
     LIMIT 1000
   `;

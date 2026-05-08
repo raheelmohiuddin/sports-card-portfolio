@@ -199,14 +199,21 @@ export async function getAdminConsignments() {
 
 // ─── Card shows ───────────────────────────────────────────────────────
 // states is an array of 2-letter codes (e.g. ["PA","NY"]). Empty array
-// or missing → no state filter. Other params are unchanged.
-export async function getShows({ states, from, to, q } = {}) {
+// or missing → no state filter. centerLat + centerLng + radiusMiles
+// activate the proximity (Haversine) filter — all three must be
+// provided together.
+export async function getShows({ states, from, to, q, centerLat, centerLng, radiusMiles } = {}) {
   const headers = await authHeaders();
   const params = new URLSearchParams();
   if (states && states.length) params.set("state", states.join(","));
   if (from)  params.set("from",  from);
   if (to)    params.set("to",    to);
   if (q)     params.set("q",     q);
+  if (Number.isFinite(centerLat) && Number.isFinite(centerLng) && Number.isFinite(radiusMiles)) {
+    params.set("centerLat",   String(centerLat));
+    params.set("centerLng",   String(centerLng));
+    params.set("radiusMiles", String(radiusMiles));
+  }
   const qs = params.toString();
   const res = await fetch(`${API_BASE}/shows${qs ? `?${qs}` : ""}`, { headers });
   if (!res.ok) throw await readError(res);

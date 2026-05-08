@@ -94,10 +94,13 @@ export default function ShowsPage() {
     Promise.all([
       new Promise((r) => setTimeout(r, 200)),
       getShows({
-        states:   states.length ? states : undefined,
-        from:     fromDate || undefined,
-        to:       toDate   || undefined,
-        q:        qApplied || undefined,
+        states:      states.length ? states : undefined,
+        from:        fromDate || undefined,
+        to:          toDate   || undefined,
+        q:           qApplied || undefined,
+        centerLat:   nearMe?.centerLat,
+        centerLng:   nearMe?.centerLng,
+        radiusMiles: nearMe?.radiusMiles,
       }),
     ])
       .then(([_, data]) => {
@@ -117,7 +120,7 @@ export default function ShowsPage() {
       });
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [statesKey, fromDate, toDate, qApplied]);
+  }, [statesKey, fromDate, toDate, qApplied, nearMe]);
 
   // ── Pagination ──
   // PAGE_SIZE is fixed at 30 per spec.
@@ -191,21 +194,16 @@ export default function ShowsPage() {
     }
   }
 
-  function applyNearMe() {
-    let code = localStorage.getItem(NEAR_ME_KEY);
-    if (!code || !STATE_NAME[code]) {
-      const input = window.prompt(
-        "Pick your state (2-letter code, e.g. PA, NY, CA) — we'll remember this for next time:"
-      );
-      if (!input) return;
-      code = input.trim().toUpperCase();
-      if (!STATE_NAME[code]) { window.alert(`"${code}" isn't a valid US state code.`); return; }
-      localStorage.setItem(NEAR_ME_KEY, code);
-    }
-    // Replace the current selection with just the user's local state —
-    // matches the "show me what's nearby" intent better than appending.
-    setStates([code]);
-  }
+  // Near Me — proximity (zip → coords → Haversine radius). Holds:
+  //   • whether the inline panel is mounted (Near Me button toggles it),
+  //   • the active center coords + radius (drives /shows API params),
+  //   • the zip the user typed (for display in the active "x" pill).
+  // Cleared via the gold X next to the Near Me button when active.
+  const [nearMeOpen, setNearMeOpen] = useState(false);
+  const [nearMe, setNearMe]         = useState(null);
+  // { zip, radiusMiles, centerLat, centerLng }
+  function applyNearMe(next) { setNearMe(next); setNearMeOpen(false); }
+  function clearNearMe()     { setNearMe(null); }
 
   const attending = useMemo(() => shows.filter((s) => s.attending), [shows]);
 
@@ -235,7 +233,11 @@ export default function ShowsPage() {
           fromDate={fromDate} setFromDate={setFromDate}
           toDate={toDate}     setToDate={setToDate}
           q={q}               setQ={setQ}
-          onNearMe={applyNearMe}
+          nearMeOpen={nearMeOpen}
+          onNearMeToggle={() => setNearMeOpen((o) => !o)}
+          onNearMeApply={applyNearMe}
+          nearMe={nearMe}
+          onNearMeClear={clearNearMe}
           loading={loading}
           totalCount={shows.length}
           attendingCount={attending.length}
@@ -828,7 +830,8 @@ function ToggleBtn({ active, onClick, children }) {
 function FilterBar({
   states, onToggleState, onRemoveState, onClearStates,
   fromDate, setFromDate, toDate, setToDate,
-  q, setQ, onNearMe,
+  q, setQ,
+  nearMeOpen, onNearMeToggle, onNearMeApply, nearMe, onNearMeClear,
   loading, totalCount, attendingCount,
 }) {
   return (
@@ -856,9 +859,31 @@ function FilterBar({
             style={st.input}
           />
         </div>
-        <button type="button" onClick={onNearMe} style={st.nearMeBtn}>
-          📍 Near Me
-        </button>
+        <div style={st.nearMeAnchor}>
+          <button
+            type="button"
+            onClick={onNearMeToggle}
+            style={{ ...st.nearMeBtn, ...(nearMeOpen ? st.nearMeBtnOpen : {}) }}
+            aria-expanded={nearMeOpen}
+            aria-haspopup="dialog"
+          >📍 Near Me</button>
+          {/* Active proximity pill — shows the current zip + radius
+              with a gold X to clear. Only renders when nearMe is set. */}
+          {nearMe && (
+            <span style={st.nearMeActivePill} title={`Within ${nearMe.radiusMiles} mi of ${nearMe.zip}`}>
+              {nearMe.zip} · {nearMe.radiusMiles}mi
+              <button
+                type="button"
+                onClick={onNearMeClear}
+                style={st.nearMeActiveClose}
+                aria-label="Clear Near Me filter"
+              >×</button>
+            </span>
+          )}
+          {nearMeOpen && (
+            <NearMePanel onApply={onNearMeApply} />
+          )}
+        </div>
       </div>
 
       {/* Selected-state pills + Clear all. Renders only when any state
@@ -888,6 +913,94 @@ function FilterBar({
         {attendingCount > 0 && ` · ${attendingCount} attending`}
       </div>
     </section>
+  );
+}
+
+// ─── Near Me panel ───────────────────────────────────────────────────
+//
+// Inline row anchored below the Near Me button: 120px zip input + 80px
+// radius select, no labels, no search button. Auto-fires the zip→coords
+// lookup the moment the user reaches 5 valid digits and reports back to
+// the parent via onApply, which closes the panel.
+//
+// API note: the spec calls for the Ziptastic API at
+// http://ZiptasticAPI.com/{zip}, but Ziptastic's response only contains
+// {country, state, city} — no coordinates. We use zippopotam.us instead
+// (free, HTTPS, returns latitude + longitude in a single call) so the
+// downstream Haversine filter actually has inputs to work with.
+function NearMePanel({ onApply }) {
+  const [zip, setZip]       = useState(() => localStorage.getItem(NEAR_ME_ZIP_KEY) ?? "");
+  const [radius, setRadius] = useState(() => parseInt(localStorage.getItem(NEAR_ME_RADIUS_KEY) ?? "50", 10));
+  const [error, setError]   = useState(null);
+  const [zipFocused, setZipFocused] = useState(false);
+  const lastRef = useRef({ zip: "", radius: 0 });
+
+  async function runLookup(z, r) {
+    if (!/^\d{5}$/.test(z)) return;
+    if (z === lastRef.current.zip && r === lastRef.current.radius) return;
+    setError(null);
+    try {
+      const res = await fetch(`https://api.zippopotam.us/us/${z}`);
+      if (!res.ok) {
+        setError(res.status === 404 ? "Zip not found." : "Lookup failed.");
+        return;
+      }
+      const data = await res.json();
+      const place = data?.places?.[0];
+      const lat = parseFloat(place?.latitude);
+      const lng = parseFloat(place?.longitude);
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+        setError("Couldn't read coordinates from zip.");
+        return;
+      }
+      lastRef.current = { zip: z, radius: r };
+      try {
+        localStorage.setItem(NEAR_ME_ZIP_KEY,    z);
+        localStorage.setItem(NEAR_ME_RADIUS_KEY, String(r));
+      } catch {}
+      onApply({ zip: z, radiusMiles: r, centerLat: lat, centerLng: lng });
+    } catch {
+      setError("Network error.");
+    }
+  }
+
+  return (
+    <div style={st.nearMePanel}>
+      <input
+        type="text"
+        inputMode="numeric"
+        maxLength={5}
+        autoFocus
+        value={zip}
+        placeholder="Enter zip code"
+        aria-label="Zip code"
+        onFocus={() => setZipFocused(true)}
+        onBlur={() => setZipFocused(false)}
+        onChange={(e) => {
+          const next = e.target.value.replace(/[^\d]/g, "");
+          setZip(next);
+          setError(null);
+          if (next.length === 5) runLookup(next, radius);
+        }}
+        style={{ ...st.nearMeZipInput, ...(zipFocused ? st.nearMeZipInputFocus : {}) }}
+      />
+      <select
+        value={radius}
+        aria-label="Search radius"
+        onChange={(e) => {
+          const next = parseInt(e.target.value, 10);
+          setRadius(next);
+          if (zip.length === 5) runLookup(zip, next);
+        }}
+        style={st.nearMeRadiusSelect}
+      >
+        <option value={25}  style={{ background: "#0f172a", color: "#fff" }}>25mi</option>
+        <option value={50}  style={{ background: "#0f172a", color: "#fff" }}>50mi</option>
+        <option value={100} style={{ background: "#0f172a", color: "#fff" }}>100mi</option>
+        <option value={250} style={{ background: "#0f172a", color: "#fff" }}>250mi</option>
+      </select>
+      {error && <span style={st.nearMeInlineError}>{error}</span>}
+    </div>
   );
 }
 
@@ -1496,6 +1609,15 @@ const st = {
     colorScheme: "dark",
     accentColor: "#f59e0b",
   },
+  // Wrapping anchor for the Near Me button + active pill + inline panel.
+  // inline-flex so the active pill (when set) sits to the right of the
+  // button on the same baseline.
+  nearMeAnchor: {
+    position: "relative",
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 6,
+  },
   nearMeBtn: {
     background: gradients.goldPill,
     color: "#0f172a",
@@ -1507,6 +1629,89 @@ const st = {
     cursor: "pointer",
     fontFamily: "inherit",
     boxShadow: "0 4px 12px rgba(245,158,11,0.2)",
+  },
+  nearMeBtnOpen: {
+    boxShadow: "0 0 0 2px rgba(245,158,11,0.55), 0 4px 12px rgba(245,158,11,0.25)",
+  },
+  // Active proximity pill — only renders when a Near Me filter is set.
+  // "ZIP · Nmi" with a click-to-clear × in gold.
+  nearMeActivePill: {
+    display: "inline-flex", alignItems: "center", gap: 6,
+    background: "rgba(245,158,11,0.12)",
+    border: "1px solid rgba(245,158,11,0.55)",
+    color: colors.goldLight,
+    fontSize: 12, fontWeight: 700,
+    letterSpacing: "0.04em",
+    padding: "4px 4px 4px 10px",
+    borderRadius: 999,
+    fontVariantNumeric: "tabular-nums",
+  },
+  nearMeActiveClose: {
+    width: 18, height: 18,
+    borderRadius: "50%",
+    border: "none",
+    background: "transparent",
+    color: "#fbbf24",
+    fontSize: 14, fontWeight: 900, lineHeight: 1,
+    cursor: "pointer",
+    fontFamily: "inherit",
+    padding: 0,
+  },
+  // Inline panel anchored below the Near Me button — minimal row of
+  // two compact dark inputs per spec, no panel chrome.
+  nearMePanel: {
+    position: "absolute",
+    top: "calc(100% + 8px)",
+    right: 0,
+    background: "transparent",
+    padding: 0,
+    border: "none",
+    boxShadow: "none",
+    zIndex: 70,
+    display: "inline-flex", alignItems: "center",
+    gap: 6,
+  },
+  nearMeZipInput: {
+    width: 120, height: 32,
+    padding: "4px 8px",
+    borderRadius: 4,
+    background: "rgba(15,23,42,0.85)",
+    color: "#fff",
+    border: "1px solid rgba(255,255,255,0.2)",
+    fontSize: 13,
+    fontFamily: "inherit",
+    fontVariantNumeric: "tabular-nums",
+    letterSpacing: "0.04em",
+    outline: "none",
+    boxSizing: "border-box",
+    transition: "border-color 0.12s, box-shadow 0.12s",
+  },
+  nearMeZipInputFocus: {
+    borderColor: "#f59e0b",
+    boxShadow: "0 0 0 1px rgba(245,158,11,0.45)",
+  },
+  nearMeRadiusSelect: {
+    width: 80, height: 32,
+    padding: "4px 8px",
+    borderRadius: 4,
+    background: "rgba(15,23,42,0.85)",
+    color: "#fff",
+    border: "1px solid rgba(255,255,255,0.2)",
+    fontSize: 13,
+    fontFamily: "inherit",
+    cursor: "pointer",
+    appearance: "none",
+    WebkitAppearance: "none",
+    MozAppearance: "none",
+    boxSizing: "border-box",
+    outline: "none",
+  },
+  nearMeInlineError: {
+    color: "#fca5a5",
+    fontSize: 11,
+    fontWeight: 600,
+    marginLeft: 4,
+    alignSelf: "center",
   },
   filterMeta: {
     marginTop: "0.85rem",
