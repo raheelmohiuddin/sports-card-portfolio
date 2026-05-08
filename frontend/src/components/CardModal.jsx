@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from "react";
+import { fetchUserAttributes } from "aws-amplify/auth";
 import { getCard, getCardSales } from "../services/api.js";
 import { getRarityTier, TIER_LABELS } from "../utils/rarity.js";
 import GhostIcon from "./GhostIcon.jsx";
 import CardPop from "./CardPop.jsx";
 import SalesHistory from "./SalesHistory.jsx";
+import ConsignBlock from "./ConsignBlock.jsx";
 
 function isRare(card) {
   return getRarityTier(card) !== null;
@@ -30,6 +32,10 @@ export default function CardModal({ card, onClose }) {
   // Animation completes at ~320ms — mount the heavy below-the-fold content
   // (sales chart) only after that to keep the slide-in compositor frames clean.
   const [hydrated, setHydrated] = useState(false);
+  // Fetch role lazily so the Consign button shows for collectors only and is
+  // hidden for admins. Defer past the slide-in so the network call doesn't
+  // compete with the compositor.
+  const [role, setRole] = useState(null);
   const tier = getRarityTier(card);
   const rare = tier !== null;
 
@@ -65,6 +71,17 @@ export default function CardModal({ card, onClose }) {
     const id = setTimeout(() => setHydrated(true), 340);
     return () => clearTimeout(id);
   }, []);
+
+  // Fetch role once after hydration. Cached by Amplify in-memory after the
+  // first call so subsequent sidebar opens are free.
+  useEffect(() => {
+    if (!hydrated) return;
+    let cancelled = false;
+    fetchUserAttributes()
+      .then((attrs) => { if (!cancelled) setRole(attrs["custom:role"] ?? null); })
+      .catch(() => { if (!cancelled) setRole(null); });
+    return () => { cancelled = true; };
+  }, [hydrated]);
 
   function handleClose() {
     if (closing) return;
@@ -237,6 +254,9 @@ export default function CardModal({ card, onClose }) {
           {hydrated
             ? <SalesHistory loading={salesLoading} error={salesError} sales={sales} />
             : <div style={st.salesPlaceholder} />}
+
+          {/* ── Consign this card (collectors only) ── */}
+          {hydrated && <ConsignBlock cardId={card.id} role={role} />}
         </div>
       </aside>
 

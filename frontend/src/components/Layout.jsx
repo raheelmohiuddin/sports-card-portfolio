@@ -9,20 +9,34 @@ export default function NavHeader() {
   const navigate = useNavigate();
   const isAuth = authStatus === "authenticated";
 
-  // Fetch the preferred_username attribute when authenticated. The user object
-  // from useAuthenticator gives signInDetails.loginId (email or username they
-  // typed), but we want the persisted preferred_username for display.
+  // Fetch the preferred_username, email, and custom:role attributes when
+  // authenticated. The user object from useAuthenticator gives signInDetails
+  // .loginId (email or username they typed), but we want the persisted
+  // values: preferred_username for the @handle display, email as a fallback
+  // when preferred_username isn't set yet (new signups land here before the
+  // setup-username flow), and custom:role to gate the Admin link.
   const [username, setUsername] = useState(null);
+  const [email, setEmail]       = useState(null);
+  const [role, setRole]         = useState(null);
   useEffect(() => {
-    if (!isAuth) { setUsername(null); return; }
+    // TEMP diagnostic for nav-header auth state — remove once stable.
+    console.log("nav-header authStatus:", authStatus);
+    if (!isAuth) { setUsername(null); setEmail(null); setRole(null); return; }
     let cancelled = false;
     fetchUserAttributes()
       .then((attrs) => {
-        if (!cancelled) setUsername(attrs.preferred_username ?? null);
+        if (cancelled) return;
+        console.log("nav-header attributes:", attrs);
+        setUsername(attrs.preferred_username ?? null);
+        setEmail(attrs.email ?? null);
+        setRole(attrs["custom:role"] ?? null);
       })
-      .catch(() => { if (!cancelled) setUsername(null); });
+      .catch((err) => {
+        console.error("nav-header fetchUserAttributes failed:", err);
+        if (!cancelled) { setUsername(null); setEmail(null); setRole(null); }
+      });
     return () => { cancelled = true; };
-  }, [isAuth]);
+  }, [authStatus, isAuth]);
 
   function handleSignOut() {
     signOut();
@@ -44,6 +58,8 @@ export default function NavHeader() {
             pathname={pathname}
             isAuth={isAuth}
             username={username}
+            email={email}
+            role={role}
             onSignOut={handleSignOut}
           />
         ) : (
@@ -58,7 +74,7 @@ export default function NavHeader() {
 
             <div style={st.right}>
               {isAuth ? (
-                <UserMenu username={username} onSignOut={handleSignOut} />
+                <UserMenu username={username} email={email} role={role} onSignOut={handleSignOut} />
               ) : (
                 <Link
                   to="/signin"
@@ -117,7 +133,13 @@ function NavLink({ to, label, active, badge }) {
 }
 
 // ─── User dropdown menu ──────────────────────────────────────────────
-function UserMenu({ username, onSignOut }) {
+function UserMenu({ username, email, role, onSignOut }) {
+  const isAdmin = role === "admin";
+  // New signups land here before they've picked a preferred_username (the
+  // setup-username flow hasn't run yet). Fall back to email so the dropdown
+  // is always reachable — the user can complete username setup from inside.
+  const display = username ? `@${username}` : (email ?? "Account");
+  const needsUsername = !username;
   const [open, setOpen]       = useState(false);
   const [trigHov, setTrigHov] = useState(false);
   const wrapRef = useRef(null);
@@ -140,8 +162,6 @@ function UserMenu({ username, onSignOut }) {
     return () => window.removeEventListener("keydown", onKey);
   }, [open]);
 
-  if (!username) return null;
-
   return (
     <div ref={wrapRef} style={st.userWrap}>
       <button
@@ -153,7 +173,7 @@ function UserMenu({ username, onSignOut }) {
         aria-haspopup="menu"
         aria-expanded={open}
       >
-        <span style={st.usernameText}>@{username}</span>
+        <span style={st.usernameText}>{display}</span>
         <Chevron open={open} />
       </button>
 
@@ -167,8 +187,20 @@ function UserMenu({ username, onSignOut }) {
           pointerEvents: open ? "auto" : "none",
         }}
       >
+        {needsUsername && (
+          <>
+            <MenuItem to="/setup-username" icon="✦" label="Choose Username" onClick={() => setOpen(false)} />
+            <div style={st.menuDivider} />
+          </>
+        )}
         <MenuItem to="/profile"  icon="👤" label="My Profile"        onClick={() => setOpen(false)} />
         <MenuItem to="/settings" icon="⚙️" label="Account Settings"  onClick={() => setOpen(false)} />
+        {isAdmin && (
+          <>
+            <div style={st.menuDivider} />
+            <MenuItem to="/admin" icon="🛡️" label="Admin" admin onClick={() => setOpen(false)} />
+          </>
+        )}
         <div style={st.menuDivider} />
         <MenuButton icon="🚪" label="Sign Out" onClick={() => { setOpen(false); onSignOut(); }} />
       </div>
@@ -193,7 +225,7 @@ function Chevron({ open }) {
   );
 }
 
-function MenuItem({ to, icon, label, onClick }) {
+function MenuItem({ to, icon, label, onClick, admin }) {
   const [hov, setHov] = useState(false);
   const navigate = useNavigate();
 
@@ -213,7 +245,11 @@ function MenuItem({ to, icon, label, onClick }) {
       onClick={handleClick}
       onMouseEnter={() => setHov(true)}
       onMouseLeave={() => setHov(false)}
-      style={{ ...st.menuItem, ...(hov ? st.menuItemHover : {}) }}
+      style={{
+        ...st.menuItem,
+        ...(admin ? st.menuItemAdmin : {}),
+        ...(hov ? (admin ? st.menuItemAdminHover : st.menuItemHover) : {}),
+      }}
     >
       <span style={st.menuIcon}>{icon}</span>
       <span>{label}</span>
@@ -239,7 +275,10 @@ function MenuButton({ icon, label, onClick }) {
 }
 
 // ─── Mobile hamburger menu (≤768px) ──────────────────────────────────
-function MobileMenu({ pathname, isAuth, username, onSignOut }) {
+function MobileMenu({ pathname, isAuth, username, email, role, onSignOut }) {
+  const isAdmin = role === "admin";
+  const needsUsername = isAuth && !username;
+  const accountLabel = username ?? email ?? "Account";
   const [open, setOpen] = useState(false);
   const navigate = useNavigate();
   const wrapRef = useRef(null);
@@ -302,9 +341,15 @@ function MobileMenu({ pathname, isAuth, username, onSignOut }) {
         {isAuth && (
           <>
             <div style={st.menuDivider} />
-            {username && <div style={st.mobileUsername}>@{username}</div>}
+            <div style={st.mobileUsername}>{username ? `@${username}` : accountLabel}</div>
+            {needsUsername && (
+              <MobileItem to="/setup-username" icon="✦" label="Choose Username" onClick={() => go("/setup-username")} />
+            )}
             <MobileItem to="/profile"  icon="👤" label="My Profile"       onClick={() => go("/profile")} />
             <MobileItem to="/settings" icon="⚙️" label="Account Settings" onClick={() => go("/settings")} />
+            {isAdmin && (
+              <MobileItem to="/admin" icon="🛡️" label="Admin" admin onClick={() => go("/admin")} />
+            )}
             <button
               type="button"
               onClick={() => { setOpen(false); onSignOut(); }}
@@ -334,7 +379,7 @@ function MobileMenu({ pathname, isAuth, username, onSignOut }) {
   );
 }
 
-function MobileItem({ to, icon, label, active, onClick }) {
+function MobileItem({ to, icon, label, active, onClick, admin }) {
   return (
     <button
       type="button"
@@ -343,6 +388,7 @@ function MobileItem({ to, icon, label, active, onClick }) {
         ...st.mobileItem,
         ...st.mobileItemBtn,
         ...(active ? st.mobileItemActive : {}),
+        ...(admin ? st.mobileItemAdmin : {}),
       }}
     >
       {icon && <span style={st.menuIcon}>{icon}</span>}
@@ -463,6 +509,10 @@ const st = {
     fontSize: "0.85rem", fontWeight: 600,
     letterSpacing: "0.01em",
     fontVariantNumeric: "tabular-nums",
+    // Cap long emails (used as fallback when preferred_username isn't set)
+    // so the trigger button doesn't expand and break the navbar layout.
+    maxWidth: 200,
+    overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
   },
   menu: {
     position: "absolute",
@@ -498,6 +548,14 @@ const st = {
     background: "rgba(245,158,11,0.1)",
     color: "#fbbf24",
   },
+  // Admin menu items use a violet accent so they read as "different scope"
+  // from the gold-accented collector menu — same shape, distinct identity.
+  menuItemAdmin: { color: "#c4b5fd" },
+  menuItemAdminHover: {
+    background: "rgba(167,139,250,0.12)",
+    color: "#ddd6fe",
+  },
+  mobileItemAdmin: { color: "#c4b5fd" },
   menuIcon: { fontSize: "0.95rem", flexShrink: 0 },
   menuDivider: {
     height: 1,

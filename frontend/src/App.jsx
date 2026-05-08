@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { Authenticator, useAuthenticator } from "@aws-amplify/ui-react";
 import "@aws-amplify/ui-react/styles.css";
 import NavHeader from "./components/Layout.jsx";
+import AdminGuard from "./components/AdminGuard.jsx";
 import HomePage from "./pages/HomePage.jsx";
 import AboutPage from "./pages/AboutPage.jsx";
 import SignInPage from "./pages/SignInPage.jsx";
@@ -10,6 +11,8 @@ import ProfilePage from "./pages/ProfilePage.jsx";
 import SettingsPage from "./pages/SettingsPage.jsx";
 import PortfolioPage from "./pages/PortfolioPage.jsx";
 import AddCardPage from "./pages/AddCardPage.jsx";
+import AdminPage from "./pages/AdminPage.jsx";
+import AdminConsignmentsPage from "./pages/AdminConsignmentsPage.jsx";
 
 function ProtectedRoute({ children }) {
   const { authStatus } = useAuthenticator((ctx) => [ctx.authStatus]);
@@ -47,6 +50,12 @@ export default function App() {
           <Route path="/add-card"  element={<ProtectedRoute><AddCardPage /></ProtectedRoute>} />
           <Route path="/profile"   element={<ProtectedRoute><ProfilePage /></ProtectedRoute>} />
           <Route path="/settings"  element={<ProtectedRoute><SettingsPage /></ProtectedRoute>} />
+          {/* Admin routes — AdminGuard handles unauth + non-admin redirects.
+              Wrapped in <main className="container"> through ProtectedRoute is
+              wrong here because the admin pages own a full-bleed sub-nav; we
+              wrap the children in a thin <main> manually. */}
+          <Route path="/admin"               element={<AdminGuard><main className="container" style={{ padding: "2rem 1rem" }}><AdminPage /></main></AdminGuard>} />
+          <Route path="/admin/consignments"  element={<AdminGuard><main className="container" style={{ padding: "2rem 1rem" }}><AdminConsignmentsPage /></main></AdminGuard>} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </BrowserRouter>

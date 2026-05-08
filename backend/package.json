@@ -4,8 +4,10 @@
   "private": true,
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
+    "@aws-sdk/client-cognito-identity-provider": "^3.0.0",
     "@aws-sdk/client-s3": "^3.0.0",
     "@aws-sdk/client-secrets-manager": "^3.0.0",
+    "@aws-sdk/client-sesv2": "^3.0.0",
     "@aws-sdk/s3-request-presigner": "^3.0.0",
     "pg": "^8.13.0"
   },

@@ -27,15 +27,35 @@ async function getPool() {
 }
 
 // Upsert a user row from Cognito claims, returning the internal user UUID.
-async function ensureUser(db, sub, email) {
+// Also keeps given_name / family_name in sync with whatever Cognito has —
+// admin views need first/last for display, and the JWT carries them on every
+// request so we get fresh data without an extra Cognito API call. We do NOT
+// touch `role` here: role is set exclusively by the post-confirmation trigger
+// on signup, and by admin promotion thereafter, so this code path can never
+// accidentally downgrade an admin back to collector.
+async function ensureUser(db, sub, email, givenName = null, familyName = null) {
   const result = await db.query(
-    `INSERT INTO users (cognito_sub, email)
-     VALUES ($1, $2)
-     ON CONFLICT (cognito_sub) DO UPDATE SET email = EXCLUDED.email
+    `INSERT INTO users (cognito_sub, email, given_name, family_name)
+     VALUES ($1, $2, $3, $4)
+     ON CONFLICT (cognito_sub) DO UPDATE
+       SET email       = EXCLUDED.email,
+           given_name  = COALESCE(EXCLUDED.given_name,  users.given_name),
+           family_name = COALESCE(EXCLUDED.family_name, users.family_name)
      RETURNING id`,
-    [sub, email]
+    [sub, email, givenName, familyName]
   );
   return result.rows[0].id;
 }
 
-module.exports = { getPool, ensureUser };
+// Resolve the role for a Cognito sub. Admin endpoints fall back to the DB
+// row when the JWT claim is missing (older tokens issued before custom:role
+// was added to the client's read attributes won't carry the claim).
+async function getUserRole(db, sub) {
+  const result = await db.query(
+    `SELECT role FROM users WHERE cognito_sub = $1`,
+    [sub]
+  );
+  return result.rows[0]?.role ?? null;
+}
+
+module.exports = { getPool, ensureUser, getUserRole };

@@ -49,6 +49,22 @@ export const gradients = {
 
   // Solid gold pill — used on primary CTAs and the Add Card button.
   goldPill: "linear-gradient(135deg, #f59e0b 0%, #d97706 100%)",
+
+  // Admin variants — same dark page, but every "elevated" surface picks up
+  // a violet wash so the admin portal reads as a sibling app rather than
+  // a section of the collector experience.
+  violetPanel:
+    "linear-gradient(135deg, rgba(167,139,250,0.06) 0%, rgba(255,255,255,0.02) 50%, rgba(167,139,250,0.04) 100%)",
+  violetPill:
+    "linear-gradient(135deg, #a78bfa 0%, #7c3aed 100%)",
+};
+
+// Admin-portal accent ramp — kept narrow and distinct from the collector gold.
+export const adminColors = {
+  accent:      "#a78bfa", // violet 400
+  accentLight: "#c4b5fd", // violet 300 — text + hover
+  accentDark:  "#7c3aed", // violet 600 — pill bottom
+  border:      "rgba(167,139,250,0.28)",
 };
 
 // ─── Reusable style objects ──────────────────────────────────────────

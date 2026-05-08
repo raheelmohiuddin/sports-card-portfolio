@@ -5,6 +5,8 @@ dist/
 *.env
 cdk.out/
 cdk.context.json
+cdk-outputs.json
+out.json
 frontend/src/aws-exports.js
 *.js.map
 .DS_Store

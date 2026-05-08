@@ -8,10 +8,15 @@ import * as apigwv2authorizers from "aws-cdk-lib/aws-apigatewayv2-authorizers";
 import * as cognito from "aws-cdk-lib/aws-cognito";
 import * as rds from "aws-cdk-lib/aws-rds";
 import * as s3 from "aws-cdk-lib/aws-s3";
+import * as ses from "aws-cdk-lib/aws-ses";
 import * as secretsmanager from "aws-cdk-lib/aws-secretsmanager";
 import * as iam from "aws-cdk-lib/aws-iam";
 import { Construct } from "constructs";
 import * as path from "path";
+
+// Single source of truth for the admin email — used as both the SES sender
+// (must be verified) and the destination for new-consignment notifications.
+const ADMIN_EMAIL = "raheelmohiuddin1@gmail.com";
 
 interface ApiStackProps {
   userPool: cognito.UserPool;
@@ -174,8 +179,103 @@ export class ApiStack extends Construct {
     });
     props.dbSecret.grantRead(migrationPortfolioFeaturesFn);
 
+    // Migration: roles + consignments table.
+    const migrationRolesFn = new NodejsFunction(this, "MigrationAddRolesAndConsignments", {
+      ...sharedNodejsProps,
+      functionName: "scp-migration-add-roles-and-consignments",
+      entry: path.join(functionsDir, "_migrations/add-roles-and-consignments.js"),
+    });
+    props.dbSecret.grantRead(migrationRolesFn);
+
+    // One-off DESTRUCTIVE truncate. Removes every row from every user-data
+    // table. Invoke manually after deploy; remove from CDK after use.
+    const migrationTruncateFn = new NodejsFunction(this, "MigrationTruncateAll", {
+      ...sharedNodejsProps,
+      functionName: "scp-migration-truncate-all",
+      entry: path.join(functionsDir, "_migrations/truncate-all.js"),
+    });
+    props.dbSecret.grantRead(migrationTruncateFn);
+
+    // ─── Consignment + admin functions ───
+    const createConsignmentFn = new NodejsFunction(this, "CreateConsignment", {
+      ...sharedNodejsProps,
+      functionName: "scp-create-consignment",
+      entry: path.join(functionsDir, "consignments/create.js"),
+      environment: { ...sharedEnv, ADMIN_EMAIL, SENDER_EMAIL: ADMIN_EMAIL },
+    });
+
+    // Admin Lambdas need the user pool ID at runtime so requireAdmin can do
+    // a live AdminGetUser fallback when the JWT claim is stale (e.g. user was
+    // promoted via Cognito console but their existing JWT is still pre-promotion).
+    const adminFnEnv = { ...sharedEnv, USER_POOL_ID: props.userPool.userPoolId };
+
+    const adminStatsFn = new NodejsFunction(this, "AdminStats", {
+      ...sharedNodejsProps,
+      functionName: "scp-admin-stats",
+      entry: path.join(functionsDir, "admin/stats.js"),
+      environment: adminFnEnv,
+    });
+
+    const adminCardsFn = new NodejsFunction(this, "AdminCards", {
+      ...sharedNodejsProps,
+      functionName: "scp-admin-cards",
+      entry: path.join(functionsDir, "admin/all-cards.js"),
+      environment: adminFnEnv,
+    });
+
+    const adminConsignmentsListFn = new NodejsFunction(this, "AdminConsignmentsList", {
+      ...sharedNodejsProps,
+      functionName: "scp-admin-consignments-list",
+      entry: path.join(functionsDir, "admin/list-consignments.js"),
+      environment: adminFnEnv,
+    });
+
+    const adminConsignmentUpdateFn = new NodejsFunction(this, "AdminConsignmentUpdate", {
+      ...sharedNodejsProps,
+      functionName: "scp-admin-consignment-update",
+      entry: path.join(functionsDir, "admin/update-consignment.js"),
+      environment: adminFnEnv,
+    });
+
+    // Grant cognito-idp:AdminGetUser to the admin Lambdas for the live
+    // fallback in requireAdmin. Wildcard ARN (no CFN ref) to avoid the same
+    // circular dependency we hit in auth-stack.ts.
+    const cognitoArnWildcard = `arn:aws:cognito-idp:${cdk.Stack.of(this).region}:${cdk.Stack.of(this).account}:userpool/*`;
+    for (const fn of [adminStatsFn, adminCardsFn, adminConsignmentsListFn, adminConsignmentUpdateFn]) {
+      fn.addToRolePolicy(new iam.PolicyStatement({
+        actions: ["cognito-idp:AdminGetUser"],
+        resources: [cognitoArnWildcard],
+      }));
+    }
+
+    // SES verified identity for the admin email — required for sending in
+    // SES sandbox mode. Verification URL is emailed to ADMIN_EMAIL on first
+    // deploy; click it once to enable sending. Both From and To are the same
+    // address, which is allowed in the sandbox without production access.
+    new ses.EmailIdentity(this, "AdminEmailIdentity", {
+      identity: ses.Identity.email(ADMIN_EMAIL),
+    });
+
+    // Grant SES send permission to the consignment-create Lambda.
+    createConsignmentFn.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: ["ses:SendEmail", "ses:SendRawEmail"],
+        // Identity ARNs are scoped to the verified address.
+        resources: [
+          `arn:aws:ses:${cdk.Stack.of(this).region}:${cdk.Stack.of(this).account}:identity/${ADMIN_EMAIL}`,
+        ],
+      })
+    );
+
     // Grant permissions
-    for (const fn of [addCardFn, getCardsFn, getCardFn, deleteCardFn, psaLookupFn, portfolioValueFn, portfolioHistoryFn, cardSalesFn, updatePriceFn, updateCardFn, avatarUploadUrlFn, avatarViewUrlFn]) {
+    const consignmentAndAdminFns = [
+      createConsignmentFn,
+      adminStatsFn,
+      adminCardsFn,
+      adminConsignmentsListFn,
+      adminConsignmentUpdateFn,
+    ];
+    for (const fn of [addCardFn, getCardsFn, getCardFn, deleteCardFn, psaLookupFn, portfolioValueFn, portfolioHistoryFn, cardSalesFn, updatePriceFn, updateCardFn, avatarUploadUrlFn, avatarViewUrlFn, ...consignmentAndAdminFns]) {
       props.dbSecret.grantRead(fn);
       props.cardImagesBucket.grantReadWrite(fn);
       fn.addToRolePolicy(
@@ -303,6 +403,42 @@ export class ApiStack extends Construct {
       path: "/cards/edge-texture",
       methods: [apigwv2.HttpMethod.POST],
       integration: new apigwv2integrations.HttpLambdaIntegration("GenerateEdgeTexture", generateEdgeTextureFn),
+      ...authRoute,
+    });
+
+    // ─── Consignment + admin routes ───
+    api.addRoutes({
+      path: "/consignments",
+      methods: [apigwv2.HttpMethod.POST],
+      integration: new apigwv2integrations.HttpLambdaIntegration("CreateConsignment", createConsignmentFn),
+      ...authRoute,
+    });
+
+    api.addRoutes({
+      path: "/admin/stats",
+      methods: [apigwv2.HttpMethod.GET],
+      integration: new apigwv2integrations.HttpLambdaIntegration("AdminStats", adminStatsFn),
+      ...authRoute,
+    });
+
+    api.addRoutes({
+      path: "/admin/cards",
+      methods: [apigwv2.HttpMethod.GET],
+      integration: new apigwv2integrations.HttpLambdaIntegration("AdminCards", adminCardsFn),
+      ...authRoute,
+    });
+
+    api.addRoutes({
+      path: "/admin/consignments",
+      methods: [apigwv2.HttpMethod.GET],
+      integration: new apigwv2integrations.HttpLambdaIntegration("AdminConsignmentsList", adminConsignmentsListFn),
+      ...authRoute,
+    });
+
+    api.addRoutes({
+      path: "/admin/consignments/{id}",
+      methods: [apigwv2.HttpMethod.PATCH],
+      integration: new apigwv2integrations.HttpLambdaIntegration("AdminConsignmentUpdate", adminConsignmentUpdateFn),
       ...authRoute,
     });
 

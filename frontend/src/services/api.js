@@ -147,6 +147,51 @@ export async function updateCardPrice(id, manualPrice) {
   return res.json();
 }
 
+// ─── Consignments (collector) ─────────────────────────────────────────
+export async function createConsignment({ cardId, type, askingPrice, notes }) {
+  const headers = await authHeaders();
+  const res = await fetch(`${API_BASE}/consignments`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ cardId, type, askingPrice, notes }),
+  });
+  if (!res.ok) throw await readError(res);
+  return res.json();
+}
+
+// ─── Admin endpoints ──────────────────────────────────────────────────
+export async function getAdminStats() {
+  const headers = await authHeaders();
+  const res = await fetch(`${API_BASE}/admin/stats`, { headers });
+  if (!res.ok) throw await readError(res);
+  return res.json();
+}
+
+export async function getAdminCards() {
+  const headers = await authHeaders();
+  const res = await fetch(`${API_BASE}/admin/cards`, { headers });
+  if (!res.ok) throw await readError(res);
+  return res.json();
+}
+
+export async function getAdminConsignments() {
+  const headers = await authHeaders();
+  const res = await fetch(`${API_BASE}/admin/consignments`, { headers });
+  if (!res.ok) throw await readError(res);
+  return res.json();
+}
+
+export async function updateAdminConsignment(id, patch) {
+  const headers = await authHeaders();
+  const res = await fetch(`${API_BASE}/admin/consignments/${id}`, {
+    method: "PATCH",
+    headers,
+    body: JSON.stringify(patch),
+  });
+  if (!res.ok) throw await readError(res);
+  return res.json();
+}
+
 // Upload front and/or back images directly to S3 using pre-signed URLs.
 // Skips a side if no file is provided for it.
 export async function uploadCardImages({ frontUploadUrl, frontFile, backUploadUrl, backFile }) {
