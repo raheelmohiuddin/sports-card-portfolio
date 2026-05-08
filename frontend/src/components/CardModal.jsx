@@ -27,6 +27,9 @@ export default function CardModal({ card, onClose }) {
   const [sales, setSales]             = useState([]);
   const [salesLoading, setSalesLoading] = useState(true);
   const [salesError, setSalesError]   = useState(false);
+  // Animation completes at ~320ms — mount the heavy below-the-fold content
+  // (sales chart) only after that to keep the slide-in compositor frames clean.
+  const [hydrated, setHydrated] = useState(false);
   const tier = getRarityTier(card);
   const rare = tier !== null;
 
@@ -37,11 +40,30 @@ export default function CardModal({ card, onClose }) {
     return () => cancelAnimationFrame(id);
   }, []);
 
-  // Lock body scroll while sidebar is open
+  // Lock body scroll while sidebar is open. Defer one frame so the synchronous
+  // overflow-toggle reflow doesn't compete with the slide-in's first paint —
+  // the slide-in begins from translateX(100%) (off-screen) so a one-frame
+  // delay on the scroll lock is invisible.
   useEffect(() => {
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    return () => { document.body.style.overflow = prev; };
+    let cancelled = false;
+    let prev;
+    const id = requestAnimationFrame(() => {
+      if (cancelled) return;
+      prev = document.body.style.overflow;
+      document.body.style.overflow = "hidden";
+    });
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(id);
+      if (prev !== undefined) document.body.style.overflow = prev;
+    };
+  }, []);
+
+  // Hydrate the heavy content (sales fetch + chart) after the slide-in
+  // settles. Animation duration is 320ms; +20ms slack to be safe.
+  useEffect(() => {
+    const id = setTimeout(() => setHydrated(true), 340);
+    return () => clearTimeout(id);
   }, []);
 
   function handleClose() {
@@ -61,8 +83,12 @@ export default function CardModal({ card, onClose }) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pop.open]);
 
-  // Fetch sales history for this card
+  // Fetch sales history once the slide-in has finished. Network is async and
+  // doesn't block the main thread, but the React re-render that processes
+  // the result (and the SalesHistory chart's reflow) does — running it after
+  // the animation keeps the compositor unblocked.
   useEffect(() => {
+    if (!hydrated) return;
     let cancelled = false;
     setSalesLoading(true);
     setSalesError(false);
@@ -77,7 +103,7 @@ export default function CardModal({ card, onClose }) {
         if (!cancelled) setSalesLoading(false);
       });
     return () => { cancelled = true; };
-  }, [card.id]);
+  }, [card.id, hydrated]);
 
   const displayValue = card.estimatedValue ?? card.avgSalePrice;
 
@@ -204,8 +230,13 @@ export default function CardModal({ card, onClose }) {
           )}
 
           {/* ── Sales history ── */}
+          {/* Render an inert placeholder during the slide-in so the chart's
+              SVG layout doesn't fight for main-thread time during the
+              animation. After hydration the full SalesHistory takes over. */}
           <div style={st.sectionHead}>Sales History</div>
-          <SalesHistory loading={salesLoading} error={salesError} sales={sales} />
+          {hydrated
+            ? <SalesHistory loading={salesLoading} error={salesError} sales={sales} />
+            : <div style={st.salesPlaceholder} />}
         </div>
       </aside>
 
@@ -223,7 +254,9 @@ export default function CardModal({ card, onClose }) {
 
 // ─── Card image (5:7 framed, click-to-zoom) ──────────────────────────
 // Refreshes the URL via getCard on mount — the freshly-signed S3 URL
-// avoids any CORS-cache issues from the portfolio grid fetch.
+// avoids any CORS-cache issues from the portfolio grid fetch. Deferred
+// past the slide-in animation so the network request + re-render don't
+// compete with the compositor for main-thread time.
 function CardImage({ card, onZoom }) {
   const [imgUrl, setImgUrl] = useState(card.imageUrl ?? null);
   const [loaded, setLoaded] = useState(false);
@@ -231,12 +264,15 @@ function CardImage({ card, onZoom }) {
 
   useEffect(() => {
     let cancelled = false;
-    getCard(card.id)
-      .then((fresh) => {
-        if (!cancelled && fresh.imageUrl) setImgUrl(fresh.imageUrl);
-      })
-      .catch(() => {});
-    return () => { cancelled = true; };
+    const id = setTimeout(() => {
+      if (cancelled) return;
+      getCard(card.id)
+        .then((fresh) => {
+          if (!cancelled && fresh.imageUrl) setImgUrl(fresh.imageUrl);
+        })
+        .catch(() => {});
+    }, 340);
+    return () => { cancelled = true; clearTimeout(id); };
   }, [card.id]);
 
   function handleClick() {
@@ -409,11 +445,18 @@ function sourceBadgeStyle(s) {
 
 const st = {
   // ─── Backdrop + sidebar shell ───
+  // backdrop-filter intentionally NOT used here — full-screen blur is one of
+  // the most expensive composite effects, and combined with an opacity
+  // transition it forces the browser to re-rasterize a blurred snapshot of
+  // the underlying page on every animation frame. Cost scales with viewport
+  // area, which is why the sidebar felt fine on mobile (~330k px) but choppy
+  // on desktop (~2M px). Higher backdrop opacity (0.78 vs 0.65) keeps enough
+  // visual separation without the blur. Same lesson is in CardPop.jsx.
   backdrop: {
     position: "fixed", inset: 0, zIndex: 1000,
-    background: "rgba(5,8,17,0.65)",
-    backdropFilter: "blur(3px)",
+    background: "rgba(5,8,17,0.78)",
     transition: "opacity 0.32s ease",
+    willChange: "opacity",
   },
   sidebar: {
     position: "fixed", top: 0, right: 0, bottom: 0,
@@ -423,6 +466,14 @@ const st = {
     borderLeft: "1px solid rgba(255,255,255,0.06)",
     boxShadow: "-12px 0 40px rgba(0,0,0,0.6)",
     transition: "transform 0.32s cubic-bezier(0.4, 0, 0.2, 1)",
+    // willChange tells the browser to promote the sidebar to its own
+    // compositor layer ahead of time, so the first frame of the transition
+    // doesn't trigger a fresh paint. `contain: layout paint style` isolates
+    // the sidebar's paint from the rest of the page — repaints inside the
+    // sidebar (sales chart hydrating, image loading) won't invalidate the
+    // portfolio underneath.
+    willChange: "transform",
+    contain: "layout paint style",
     color: "#e2e8f0",
     display: "flex", flexDirection: "column",
   },
@@ -677,4 +728,12 @@ const st = {
     animation: "livePulse 1.6s ease-in-out infinite",
   },
 
+  // Reserved space for the sales chart pre-hydration so the sidebar's
+  // scroll height doesn't snap when SalesHistory swaps in.
+  salesPlaceholder: {
+    height: 180,
+    background: "rgba(255,255,255,0.02)",
+    border: "1px solid rgba(255,255,255,0.04)",
+    borderRadius: 10,
+  },
 };
