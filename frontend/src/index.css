@@ -302,3 +302,21 @@ form:has(input[name="given_name"]) :where(
 ):has(input[name="username"]) {
   display: none !important;
 }
+
+/* My Shows travel-time animations.
+   Car drives left-to-right inside a fixed-width track that clips with
+   overflow:hidden, so the loop is a clean continuous reentry from the
+   left edge. Plane shares the X motion but adds a small Y arc so it
+   feels like a glide rather than a slide. */
+@keyframes travelCarDrive {
+  0%   { transform: translateX(-110%); }
+  100% { transform: translateX(110%); }
+}
+@keyframes travelPlaneFly {
+  0%   { transform: translate(-110%, 0); }
+  50%  { transform: translate(0, -4px); }
+  100% { transform: translate(110%, 0); }
+}
+@keyframes travelSpin {
+  to { transform: rotate(360deg); }
+}

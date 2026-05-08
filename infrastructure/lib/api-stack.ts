@@ -317,6 +317,22 @@ export class ApiStack extends Construct {
       entry: path.join(functionsDir, "shows/unmark-attending.js"),
     });
 
+    // Travel-time Lambda — Google Geocoding + Distance Matrix. Reaches
+    // maps.googleapis.com via the same VPC NAT egress used by the
+    // Anthropic-backed Lambdas. Per-tile lookups are short, but the two
+    // serial Geocoding calls + one Distance Matrix call can take a beat
+    // on a cold cache.
+    const travelTimeFn = new NodejsFunction(this, "TravelTime", {
+      ...sharedNodejsProps,
+      functionName: "scp-get-travel-time",
+      entry: path.join(functionsDir, "shows/get-travel-time.js"),
+      timeout: cdk.Duration.seconds(15),
+    });
+    travelTimeFn.addToRolePolicy(new iam.PolicyStatement({
+      actions: ["secretsmanager:GetSecretValue"],
+      resources: ["arn:aws:secretsmanager:us-east-1:501789774892:secret:sports-card-portfolio/google-maps-api-key*"],
+    }));
+
     // ─── Consignment + admin functions ───
     const createConsignmentFn = new NodejsFunction(this, "CreateConsignment", {
       ...sharedNodejsProps,
@@ -621,6 +637,12 @@ export class ApiStack extends Construct {
       path: "/shows/{id}/attending",
       methods: [apigwv2.HttpMethod.DELETE],
       integration: new apigwv2integrations.HttpLambdaIntegration("UnmarkAttending", unmarkAttendingFn),
+      ...authRoute,
+    });
+    api.addRoutes({
+      path: "/travel-time",
+      methods: [apigwv2.HttpMethod.GET],
+      integration: new apigwv2integrations.HttpLambdaIntegration("TravelTime", travelTimeFn),
       ...authRoute,
     });
 

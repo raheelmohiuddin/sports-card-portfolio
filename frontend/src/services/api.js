@@ -231,6 +231,22 @@ export async function markAttending(showId, notes) {
   return res.json();
 }
 
+// Travel time from a US zip to a (city, state) destination. Returns
+// { mode: "drive"|"fly", durationMinutes, distanceMiles }. Caller is
+// responsible for caching — the My Shows page maintains a session-scoped
+// Map keyed by `${zip}|${city}|${state}` to avoid duplicate requests.
+export async function getTravelTime({ originZip, destCity, destState, destCountry }) {
+  const headers = await authHeaders();
+  const params  = new URLSearchParams();
+  params.set("originZip", originZip);
+  params.set("destCity",  destCity);
+  params.set("destState", destState);
+  if (destCountry) params.set("destCountry", destCountry);
+  const res = await fetch(`${API_BASE}/travel-time?${params.toString()}`, { headers });
+  if (!res.ok) throw await readError(res);
+  return res.json();
+}
+
 export async function unmarkAttending(showId) {
   const headers = await authHeaders();
   const res = await fetch(`${API_BASE}/shows/${showId}/attending`, {

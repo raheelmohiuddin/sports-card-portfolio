@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { getShows, markAttending, unmarkAttending } from "../services/api.js";
+import { getShows, markAttending, unmarkAttending, getTravelTime } from "../services/api.js";
 import { colors, gradients } from "../utils/theme.js";
 
 // All 50 US states (matches the scraper).
@@ -26,6 +26,16 @@ const STATE_NAME = Object.fromEntries(STATES);
 
 const NEAR_ME_ZIP_KEY    = "scp.nearMe.zip";
 const NEAR_ME_RADIUS_KEY = "scp.nearMe.radiusMiles";
+
+// Session-scoped travel-time cache. Keyed by `${zip}|${city}|${state}` so
+// re-renders, pagination, and filter changes don't refire requests for a
+// show whose travel-time we already have. Module-level (not React state)
+// so the cache survives ShowsPage unmount → remount within the same
+// browser session — exactly what the spec asks for.
+const travelTimeCache = new Map();
+function travelKey(zip, city, state) {
+  return `${zip}|${(city ?? "").trim()}|${(state ?? "").trim().toUpperCase()}`;
+}
 const DAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTH_NAMES = [
   "January", "February", "March", "April", "May", "June",
@@ -183,6 +193,82 @@ export default function ShowsPage() {
     });
   }
 
+  // Travel-time per visible show. Only fetches for shows on the current
+  // page (so we don't burn Google quota on shows the user can't see) and
+  // only when Near Me is active — without a zip there's no origin to
+  // compute from. Map<showId, "loading" | "error" | result>.
+  const [travelTimes, setTravelTimes] = useState(() => new Map());
+  useEffect(() => {
+    const zip = nearMe?.zip;
+    if (!zip) return;
+    let cancelled = false;
+
+    // Pull from the module cache for any show we can answer immediately.
+    // Pre-seed state with cached results so the SVG appears on the first
+    // paint of the page.
+    setTravelTimes((prev) => {
+      let next = prev;
+      let mutated = false;
+      for (const s of pagedShows) {
+        if (!s.city || !s.state) continue;
+        const k = travelKey(zip, s.city, s.state);
+        const cached = travelTimeCache.get(k);
+        if (cached && next.get(s.id) !== cached) {
+          if (!mutated) { next = new Map(prev); mutated = true; }
+          next.set(s.id, cached);
+        }
+      }
+      return mutated ? next : prev;
+    });
+
+    // Kick off lookups for visible shows we don't have data for yet.
+    // Skip shows already loading/errored to avoid retry storms when the
+    // backend is unhappy.
+    const targets = pagedShows.filter((s) => {
+      if (!s.city || !s.state) return false;
+      const k = travelKey(zip, s.city, s.state);
+      if (travelTimeCache.has(k)) return false;
+      const existing = travelTimes.get(s.id);
+      return existing === undefined; // skip "loading" and "error"
+    });
+
+    if (targets.length === 0) return;
+
+    setTravelTimes((prev) => {
+      const next = new Map(prev);
+      for (const s of targets) next.set(s.id, "loading");
+      return next;
+    });
+
+    for (const s of targets) {
+      const k = travelKey(zip, s.city, s.state);
+      getTravelTime({ originZip: zip, destCity: s.city, destState: s.state })
+        .then((value) => {
+          if (cancelled) return;
+          travelTimeCache.set(k, value);
+          setTravelTimes((prev) => {
+            const next = new Map(prev);
+            next.set(s.id, value);
+            return next;
+          });
+        })
+        .catch(() => {
+          if (cancelled) return;
+          setTravelTimes((prev) => {
+            const next = new Map(prev);
+            next.set(s.id, "error");
+            return next;
+          });
+        });
+    }
+
+    return () => { cancelled = true; };
+    // travelTimes is intentionally absent from deps — including it would
+    // refire the effect every time we update the map and cause an
+    // infinite request loop. We only want to react to zip + visible page.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nearMe?.zip, pagedShows]);
+
   function toggleState(code) {
     setStates((prev) => prev.includes(code) ? prev.filter((s) => s !== code) : [...prev, code]);
   }
@@ -278,7 +364,12 @@ export default function ShowsPage() {
                 <div style={st.gridEmpty}>No shows match your filters.</div>
               ) : (
                 pagedShows.map((s) => (
-                  <ShowCard key={s.id} show={s} onToggle={() => toggleAttending(s)} />
+                  <ShowCard
+                    key={s.id}
+                    show={s}
+                    onToggle={() => toggleAttending(s)}
+                    travelTime={nearMe?.zip ? travelTimes.get(s.id) : null}
+                  />
                 ))
               )}
             </div>
@@ -1071,7 +1162,7 @@ function MultiStateDropdown({ selected, onToggle }) {
 }
 
 // ─── Show card ───────────────────────────────────────────────────────
-function ShowCard({ show, onToggle }) {
+function ShowCard({ show, onToggle, travelTime }) {
   const startDate = show.date ? new Date(`${show.date}T00:00:00`) : null;
   const endDate   = show.endDate && show.endDate !== show.date
     ? new Date(`${show.endDate}T00:00:00`)
@@ -1120,6 +1211,10 @@ function ShowCard({ show, onToggle }) {
             )}
           </div>
         )}
+
+        {travelTime !== null && travelTime !== undefined && (
+          <TravelTime value={travelTime} />
+        )}
       </div>
 
       <div style={st.cardActions}>
@@ -1132,6 +1227,82 @@ function ShowCard({ show, onToggle }) {
         </button>
       </div>
     </article>
+  );
+}
+
+// ─── Travel time row ─────────────────────────────────────────────────
+// Three states:
+//   "loading"  → small rotating spinner (subtle, no label)
+//   "error"    → muted "—" so the layout doesn't shift
+//   { mode }   → animated car or plane gliding in a fixed-width track,
+//                with the duration label trailing it.
+function TravelTime({ value }) {
+  if (value === "loading") {
+    return (
+      <div style={st.travelRow}>
+        <span style={st.travelSpinner} aria-label="Calculating travel time" />
+        <span style={st.travelLabel}>Calculating travel time…</span>
+      </div>
+    );
+  }
+  if (value === "error" || !value) {
+    return (
+      <div style={st.travelRow}>
+        <span style={{ ...st.travelLabel, color: "#475569" }}>Travel time unavailable</span>
+      </div>
+    );
+  }
+
+  const isFly = value.mode === "fly";
+  const label = `${formatDuration(value.durationMinutes)} ${isFly ? "flight" : "drive"}`;
+  return (
+    <div style={st.travelRow}>
+      <div style={st.travelTrack}>
+        {isFly ? <PlaneSvg /> : <CarSvg />}
+      </div>
+      <span style={st.travelLabel}>{label}</span>
+    </div>
+  );
+}
+
+function formatDuration(minutes) {
+  if (!Number.isFinite(minutes) || minutes <= 0) return "—";
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  if (h === 0) return `${m}m`;
+  if (m === 0) return `${h}h`;
+  return `${h}h ${m}m`;
+}
+
+function CarSvg() {
+  // Tiny silhouette — gold body, slightly darker windows, two black wheels.
+  // Sized to sit comfortably within the 64px-wide track so the loop reads
+  // as motion rather than a series of jumps.
+  return (
+    <svg
+      width="28" height="14" viewBox="0 0 28 14" aria-hidden="true"
+      style={{ animation: "travelCarDrive 3s linear infinite", display: "block" }}
+    >
+      <path d="M2 9 L4 5 L18 5 L22 9 L26 9 L26 11 L2 11 Z" fill="#f59e0b" />
+      <path d="M5.5 6 L9 6 L9 8 L5.5 8 Z M10 6 L17 6 L19 8 L10 8 Z" fill="#1e293b" opacity="0.6" />
+      <circle cx="7" cy="11.5" r="1.5" fill="#0f172a" />
+      <circle cx="20" cy="11.5" r="1.5" fill="#0f172a" />
+    </svg>
+  );
+}
+
+function PlaneSvg() {
+  // Stylised side-view jet, gold body. The keyframe lifts it ~4px at the
+  // midpoint so the trip across the track feels like a glide.
+  return (
+    <svg
+      width="30" height="14" viewBox="0 0 30 14" aria-hidden="true"
+      style={{ animation: "travelPlaneFly 3.5s ease-in-out infinite", display: "block" }}
+    >
+      <path d="M2 7 L8 6 L18 4 L25 5 L28 7 L25 9 L18 10 L8 8 Z" fill="#f59e0b" />
+      <path d="M11 4 L13 1 L15 4 Z M11 10 L13 13 L15 10 Z" fill="#f59e0b" opacity="0.85" />
+      <circle cx="22" cy="7" r="0.9" fill="#0f172a" opacity="0.5" />
+    </svg>
   );
 }
 
@@ -2021,6 +2192,38 @@ const st = {
     color: colors.goldLight,
     fontVariantNumeric: "normal",
     fontStyle: "italic",
+  },
+
+  // ── Travel time row ──
+  // The track is fixed-width with overflow:hidden so the SVG's
+  // translateX 0% → 100% loop reads as a continuous animated journey
+  // rather than a popped-out element. Vertical alignment matters here:
+  // SVGs have their own intrinsic baseline so the row uses align-items
+  // center to keep the duration label level with the vehicle.
+  travelRow: {
+    display: "flex", alignItems: "center", gap: "0.6rem",
+    marginTop: "0.45rem",
+  },
+  travelTrack: {
+    width: 64, height: 14,
+    overflow: "hidden",
+    flexShrink: 0,
+    borderRadius: 4,
+    background: "rgba(245,158,11,0.05)",
+  },
+  travelLabel: {
+    color: colors.textMuted,
+    fontSize: "0.75rem",
+    fontVariantNumeric: "tabular-nums",
+    letterSpacing: "0.01em",
+  },
+  travelSpinner: {
+    width: 12, height: 12,
+    border: "1.5px solid rgba(245,158,11,0.25)",
+    borderTopColor: "#f59e0b",
+    borderRadius: "50%",
+    animation: "travelSpin 0.85s linear infinite",
+    flexShrink: 0,
   },
   cardActions: {
     // marginTop: auto pins this to the bottom of the flex column even
