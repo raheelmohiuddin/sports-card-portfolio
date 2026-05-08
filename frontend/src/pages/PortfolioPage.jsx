@@ -993,13 +993,15 @@ function EditCostModal({ card, onClose, onSave }) {
 }
 
 // ─── Empty state ──────────────────────────────────────────────────────
+// No CTA button here — the gold "Add Card" button at the top of the My
+// Cards section is always visible directly above this empty state, so a
+// second button would be redundant.
 function EmptyState() {
   return (
     <div style={st.empty}>
       <div style={st.emptyIcon}>◆</div>
       <h2 style={st.emptyTitle}>Your collection is empty</h2>
       <p style={st.emptySub}>Add your first PSA-graded card to start tracking your portfolio.</p>
-      <Link to="/add-card" style={st.emptyCta}>+ Add Your First Card</Link>
     </div>
   );
 }
@@ -2500,14 +2502,7 @@ const st = {
     fontSize: "1.4rem", fontWeight: 700, color: "#f1f5f9",
     margin: "0 0 0.5rem", letterSpacing: "-0.02em",
   },
-  emptySub: { color: "#64748b", fontSize: "0.92rem", marginBottom: "2rem" },
-  emptyCta: {
-    display: "inline-block",
-    background: "#f59e0b", color: "#0f172a",
-    fontSize: "0.85rem", fontWeight: 800,
-    padding: "0.7rem 1.5rem", borderRadius: 8,
-    textDecoration: "none", letterSpacing: "0.01em",
-  },
+  emptySub: { color: "#64748b", fontSize: "0.92rem" },
 
   // ─── Edit cost modal ───
   editBackdrop: {
