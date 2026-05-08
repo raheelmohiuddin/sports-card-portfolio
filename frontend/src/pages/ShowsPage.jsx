@@ -149,12 +149,26 @@ function CalendarPanel({ attending }) {
   const [expandedDate, setExpandedDate] = useState(null);
 
   // Bucket attending shows by ISO date so the month grid lookup is O(1).
+  // Multi-day shows (endDate set) are bucketed into EVERY day they span,
+  // tagged with `_isStart` / `_isEnd` so the pill renderer can square the
+  // inner edges and round the outer ones — visually connecting the pills
+  // across the date range.
   const byDate = useMemo(() => {
     const m = new Map();
     for (const s of attending) {
       if (!s.date) continue;
-      if (!m.has(s.date)) m.set(s.date, []);
-      m.get(s.date).push(s);
+      const start = new Date(`${s.date}T00:00:00`);
+      const endIso = s.endDate || s.date;
+      const end   = new Date(`${endIso}T00:00:00`);
+      for (const d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+        const iso = toIsoDate(d);
+        if (!m.has(iso)) m.set(iso, []);
+        m.get(iso).push({
+          ...s,
+          _isStart: iso === s.date,
+          _isEnd:   iso === endIso,
+        });
+      }
     }
     return m;
   }, [attending]);
@@ -227,8 +241,18 @@ function CalendarPanel({ attending }) {
                   <div style={st.dayNumber}>{d.getDate()}</div>
                   <div style={st.dayPills}>
                     {dayShows.slice(0, 2).map((s) => (
-                      <div key={s.id} style={st.dayPill} title={s.name}>
-                        {s.name}
+                      <div
+                        key={s.id}
+                        style={{ ...st.dayPill, ...spanPillStyle(s) }}
+                        title={s.endDate && s.endDate !== s.date
+                          ? `${s.name} (${s.date} – ${s.endDate})`
+                          : s.name}
+                      >
+                        {/* Only render the label on the first day so a
+                            multi-day pill reads as one continuous block.
+                            Other days show an empty pill of matching
+                            colour/height for the visual span. */}
+                        {s._isStart ? s.name : " "}
                       </div>
                     ))}
                     {dayShows.length > 2 && (
@@ -267,11 +291,15 @@ function CalendarPanel({ attending }) {
 }
 
 function ExpandedShowRow({ show, compact }) {
+  const isRange = show.endDate && show.endDate !== show.date;
+  const start = show.date    ? new Date(`${show.date}T00:00:00`)    : null;
+  const end   = show.endDate ? new Date(`${show.endDate}T00:00:00`) : null;
+  const dateLabel = compact
+    ? (isRange ? formatDateRange(start, end) : formatDateLine(show.date))
+    : (show.startTime || "—");
   return (
     <div style={st.expandedRow}>
-      <div style={st.expandedDate}>
-        {compact ? formatDateLine(show.date) : show.startTime || "—"}
-      </div>
+      <div style={st.expandedDate}>{dateLabel}</div>
       <div style={st.expandedDetails}>
         <div style={st.expandedName}>{show.name}</div>
         <div style={st.expandedMeta}>
@@ -289,6 +317,24 @@ function ExpandedShowRow({ show, compact }) {
       >TCDB ↗</a>
     </div>
   );
+}
+
+// Shape per-day pill corners so a multi-day pill connects visually:
+// only the first day rounds its left edge and the last day rounds its
+// right edge; middle days have square inner edges.
+function spanPillStyle(s) {
+  if (!s.endDate || s.endDate === s.date) return null;
+  const left  = s._isStart ? 4 : 0;
+  const right = s._isEnd   ? 4 : 0;
+  return {
+    borderTopLeftRadius:    left,
+    borderBottomLeftRadius: left,
+    borderTopRightRadius:   right,
+    borderBottomRightRadius:right,
+    // Negate the cell's grid gap so adjacent days' pills touch.
+    marginLeft:  s._isStart ? 0 : "-0.25rem",
+    marginRight: s._isEnd   ? 0 : "-0.25rem",
+  };
 }
 
 function ToggleBtn({ active, onClick, children }) {
@@ -354,7 +400,10 @@ function FilterBar({
 
 // ─── Show card ───────────────────────────────────────────────────────
 function ShowCard({ show, onToggle }) {
-  const date = show.date ? new Date(`${show.date}T00:00:00`) : null;
+  const date    = show.date ? new Date(`${show.date}T00:00:00`) : null;
+  const endDate = show.endDate && show.endDate !== show.date
+    ? new Date(`${show.endDate}T00:00:00`)
+    : null;
   const days = date ? daysFromToday(date) : null;
   const countdown =
     days == null    ? null :
@@ -371,12 +420,26 @@ function ShowCard({ show, onToggle }) {
           <div style={st.cardDay}>{date ? date.getDate() : "—"}</div>
           <div style={st.cardMonth}>{date ? shortMonth(date) : ""}</div>
         </div>
+        {endDate && (
+          <div style={st.dateThrough} title="Multi-day show">
+            <span style={st.dateThroughArrow}>→</span>
+            <div style={st.dateThroughDay}>{endDate.getDate()}</div>
+            <div style={st.dateThroughMonth}>
+              {sameMonth(date, endDate) ? "" : shortMonth(endDate)}
+            </div>
+          </div>
+        )}
         {show.attending && countdown && (
           <div style={st.countdown}>{countdown}</div>
         )}
       </div>
 
       <h3 style={st.cardName}>{show.name || "Untitled show"}</h3>
+      {endDate && (
+        <div style={st.cardDateRange}>
+          {formatDateRange(date, endDate)}
+        </div>
+      )}
       {show.venue && <div style={st.cardVenue}>{show.venue}</div>}
       <div style={st.cardCity}>
         {show.city ? `${show.city}, ${show.state}` : show.state}
@@ -433,6 +496,21 @@ function formatDateLine(iso) {
 function formatTimeRange(start, end) {
   if (start && end) return `${start} – ${end}`;
   return start || end || "";
+}
+function sameMonth(a, b) {
+  return a && b && a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth();
+}
+// "May 9 – May 11" within a month, "May 30 – Jun 2" across months.
+// Year is suffixed only if start and end are in different years.
+function formatDateRange(start, end) {
+  if (!start || !end) return "";
+  const sameY = start.getFullYear() === end.getFullYear();
+  const left  = `${shortMonth(start)} ${start.getDate()}`;
+  const right = sameMonth(start, end)
+    ? `${end.getDate()}`
+    : `${shortMonth(end)} ${end.getDate()}`;
+  const yearTail = sameY ? `, ${start.getFullYear()}` : `, ${start.getFullYear()} – ${end.getFullYear()}`;
+  return `${left} – ${right}${yearTail}`;
 }
 function daysFromToday(d) {
   const today = startOfDay(new Date());
@@ -785,6 +863,38 @@ const st = {
     fontSize: "0.62rem", fontWeight: 700,
     letterSpacing: "0.12em", textTransform: "uppercase",
     marginTop: "0.1rem",
+  },
+  // Multi-day shows pair the start-date pad with this trailing block:
+  // arrow + end day (+ short month if the run crosses into a new month).
+  dateThrough: {
+    display: "flex", flexDirection: "column", alignItems: "center",
+    color: colors.textMuted,
+    minWidth: 36,
+  },
+  dateThroughArrow: {
+    color: colors.gold,
+    fontSize: "1.1rem", fontWeight: 800,
+    lineHeight: 1,
+    marginBottom: "0.2rem",
+  },
+  dateThroughDay: {
+    color: colors.textPrimary,
+    fontSize: "1.4rem", fontWeight: 800,
+    fontVariantNumeric: "tabular-nums",
+    lineHeight: 1, letterSpacing: "-0.02em",
+  },
+  dateThroughMonth: {
+    color: colors.textMuted,
+    fontSize: "0.62rem", fontWeight: 700,
+    letterSpacing: "0.12em", textTransform: "uppercase",
+    marginTop: "0.1rem",
+  },
+  // "May 9 – May 11" line under the title for multi-day shows.
+  cardDateRange: {
+    color: colors.goldLight,
+    fontSize: "0.78rem", fontWeight: 700,
+    letterSpacing: "0.04em",
+    marginTop: "-0.15rem",
   },
   countdown: {
     background: "rgba(245,158,11,0.14)",

@@ -44,17 +44,18 @@ exports.handler = async (event) => {
           s.state     || null,
           s.country   || "United States",
           s.date      || null,
+          s.endDate   || null,
           s.startTime || null,
           s.endTime   || null,
         );
         placeholders.push(
-          `($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5}, $${base + 6}, $${base + 7}, $${base + 8}, $${base + 9})`
+          `($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5}, $${base + 6}, $${base + 7}, $${base + 8}, $${base + 9}, $${base + 10})`
         );
       });
       if (placeholders.length === 0) continue;
 
       const sql = `
-        INSERT INTO card_shows (tcdb_id, name, venue, city, state, country, show_date, start_time, end_time)
+        INSERT INTO card_shows (tcdb_id, name, venue, city, state, country, show_date, end_date, start_time, end_time)
         VALUES ${placeholders.join(", ")}
         ON CONFLICT (tcdb_id) DO UPDATE SET
           name       = EXCLUDED.name,
@@ -63,6 +64,7 @@ exports.handler = async (event) => {
           state      = EXCLUDED.state,
           country    = EXCLUDED.country,
           show_date  = EXCLUDED.show_date,
+          end_date   = EXCLUDED.end_date,
           start_time = EXCLUDED.start_time,
           end_time   = EXCLUDED.end_time,
           updated_at = NOW()

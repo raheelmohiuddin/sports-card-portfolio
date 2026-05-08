@@ -45,13 +45,13 @@ exports.handler = async (event) => {
   const sql = `
     SELECT
       cs.id, cs.tcdb_id, cs.name, cs.venue, cs.city, cs.state, cs.country,
-      cs.show_date, cs.start_time, cs.end_time,
+      cs.show_date, cs.end_date, cs.start_time, cs.end_time,
       (us.id IS NOT NULL) AS attending,
       us.notes            AS attending_notes
     FROM card_shows cs
     LEFT JOIN user_shows us
       ON us.card_show_id = cs.id AND us.user_id = $1
-    WHERE cs.show_date >= COALESCE($2::date, CURRENT_DATE)
+    WHERE COALESCE(cs.end_date, cs.show_date) >= COALESCE($2::date, CURRENT_DATE)
       AND ($3::date IS NULL OR cs.show_date <= $3::date)
       AND ($4::text IS NULL OR cs.state = $4::text)
       AND ($5::text IS NULL OR cs.name ILIKE $5::text OR cs.city ILIKE $5::text)
@@ -71,6 +71,11 @@ exports.handler = async (event) => {
     date:       r.show_date instanceof Date
                   ? r.show_date.toISOString().slice(0, 10)
                   : r.show_date,
+    endDate:    r.end_date == null
+                  ? null
+                  : (r.end_date instanceof Date
+                      ? r.end_date.toISOString().slice(0, 10)
+                      : r.end_date),
     startTime:  r.start_time,
     endTime:    r.end_time,
     attending:  r.attending,

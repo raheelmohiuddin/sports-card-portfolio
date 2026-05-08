@@ -212,6 +212,17 @@ export class ApiStack extends Construct {
     });
     props.dbSecret.grantRead(migrationShowsTablesFn);
 
+    // Migration: end_date column + consolidate consecutive duplicate shows.
+    const migrationMergeShowsFn = new NodejsFunction(this, "MigrationAddEndDateAndMergeShows", {
+      ...sharedNodejsProps,
+      functionName: "scp-migration-add-end-date-and-merge-shows",
+      entry: path.join(functionsDir, "_migrations/add-end-date-and-merge-shows.js"),
+      // Dedup pass on a few thousand rows finishes well under default
+      // timeout, but bumping for headroom.
+      timeout: cdk.Duration.seconds(120),
+    });
+    props.dbSecret.grantRead(migrationMergeShowsFn);
+
     // ─── Card-shows feature ───
     const importShowsFn = new NodejsFunction(this, "ImportShows", {
       ...sharedNodejsProps,
