@@ -1,7 +1,17 @@
 import { useEffect, useMemo, useState } from "react";
-import { getAdminConsignments, updateAdminConsignment } from "../services/api.js";
+import {
+  getAdminConsignments, updateAdminConsignment,
+  getAdminCard, getAdminCardSales,
+} from "../services/api.js";
 import { colors, adminColors, gradients } from "../utils/theme.js";
 import { AdminTopNav, fmt, fmtDate } from "./AdminPage.jsx";
+import CardModal from "../components/CardModal.jsx";
+
+// CardModal accepts a `loaders` object so it can be driven by the
+// admin-scoped endpoints (not gated on user_id ownership) when an admin
+// opens it from the consignments queue. Defined once at module scope so
+// the reference is stable and CardModal's effects don't churn.
+const ADMIN_LOADERS = { getCard: getAdminCard, getCardSales: getAdminCardSales };
 
 const STATUSES = [
   { value: "pending",   label: "Pending"   },
@@ -39,6 +49,11 @@ export default function AdminConsignmentsPage() {
   // Filter state.
   const [statusFilter, setStatusFilter] = useState("all");
   const [typeFilter,   setTypeFilter]   = useState("all");
+  // Currently-open consignment (drives the CardModal sidebar). The card's
+  // full detail comes from getAdminCard inside CardModal; we just hold the
+  // consignment row here so the admin section in the modal stays in sync
+  // with whatever's in the queue list.
+  const [openConsignment, setOpenConsignment] = useState(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -155,7 +170,12 @@ export default function AdminConsignmentsPage() {
                 </td></tr>
               )}
               {visible?.map((r) => (
-                <ConsignmentRow key={r.id} row={r} onPatch={patchRow} />
+                <ConsignmentRow
+                  key={r.id}
+                  row={r}
+                  onPatch={patchRow}
+                  onOpen={() => setOpenConsignment(r)}
+                />
               ))}
               {!rows && !error && (
                 <tr><td colSpan={COLUMNS.length} style={st.tdEmpty}>Loading…</td></tr>
@@ -164,6 +184,23 @@ export default function AdminConsignmentsPage() {
           </table>
         </div>
       </div>
+
+      {/* CardModal opens on row click. We seed `card` with the slim subset
+          the consignments query already returned (player / year / brand /
+          grade / cert / estimated value) so the modal's initial render
+          isn't blank — then loaders.getCard(id) resolves at +340ms with
+          the full payload (image URL, PSA pop, etc.) and the modal updates.
+          The consignment row drives the read-only Consignment block in the
+          sidebar (admin-side only — the collector ConsignBlock is
+          suppressed when adminConsignment is set). */}
+      {openConsignment && (
+        <CardModal
+          card={openConsignment.card}
+          loaders={ADMIN_LOADERS}
+          adminConsignment={openConsignment}
+          onClose={() => setOpenConsignment(null)}
+        />
+      )}
     </div>
   );
 }
@@ -185,8 +222,9 @@ function FilterDropdown({ label, value, onChange, options }) {
   );
 }
 
-function ConsignmentRow({ row, onPatch }) {
+function ConsignmentRow({ row, onPatch, onOpen }) {
   const [notes, setNotes]     = useState(row.internalNotes ?? "");
+  const [hovered, setHovered] = useState(false);
   // Track whether any cell in this row is in edit/saving mode. Pinned
   // editing keeps the pencil icons visible on every cell of this row
   // even when the cursor leaves — otherwise hover-only would hide the
@@ -203,8 +241,25 @@ function ConsignmentRow({ row, onPatch }) {
     onPatch(row.id, { internalNotes: notes });
   }
 
+  // Open the CardModal sidebar on row click — but only when the click
+  // hasn't landed on (or inside) a form control. The editable status /
+  // sold-price cells contain real <button>/<select>/<input> nodes; the
+  // notes textarea and the column-sort buttons in the header are also
+  // interactive. closest() catches all of them in one check.
+  function handleRowClick(e) {
+    if (isEditing) return;
+    if (e.target.closest("button, select, input, textarea")) return;
+    onOpen?.();
+  }
+
   return (
-    <tr className={`scp-admin-row${isEditing ? " is-editing" : ""}`} style={st.row}>
+    <tr
+      className={`scp-admin-row${isEditing ? " is-editing" : ""}`}
+      style={{ ...st.row, ...(hovered && !isEditing ? st.rowHover : {}) }}
+      onClick={handleRowClick}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+    >
       <td style={st.td}>{fmtDate(row.createdAt)}</td>
       <td style={st.td}>{row.user.givenName  ?? "—"}</td>
       <td style={st.td}>{row.user.familyName ?? "—"}</td>
@@ -551,9 +606,16 @@ const st = {
   },
   // Consistent row height + a single hairline divider — no per-cell
   // borders, no zebra striping, no padding noise. Cells pick up the
-  // shared height/alignment from .row → td chain.
+  // shared height/alignment from .row → td chain. Cursor: pointer hints
+  // that the row opens a sidebar on click; rowHover layers a subtle
+  // violet wash over the row to confirm the click target.
   row: {
     borderBottom: "1px solid rgba(255,255,255,0.04)",
+    cursor: "pointer",
+    transition: "background 0.12s ease",
+  },
+  rowHover: {
+    background: "rgba(167,139,250,0.05)",
   },
   td: {
     height: 56,

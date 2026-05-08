@@ -181,6 +181,26 @@ export async function getAdminConsignments() {
   return res.json();
 }
 
+// Single-card fetchers used by the admin sidebar (CardModal opened from
+// /admin/consignments). Same response shape as getCard / getCardSales —
+// CardModal's `loaders` prop swaps these in for cards the admin doesn't own.
+export async function getAdminCard(id) {
+  const headers = await authHeaders();
+  const res = await fetch(`${API_BASE}/admin/cards/${id}`, {
+    headers,
+    cache: "no-store",
+  });
+  if (!res.ok) throw await readError(res);
+  return res.json();
+}
+
+export async function getAdminCardSales(id) {
+  const headers = await authHeaders();
+  const res = await fetch(`${API_BASE}/admin/cards/${id}/sales`, { headers });
+  if (!res.ok) throw await readError(res);
+  return res.json();
+}
+
 export async function updateAdminConsignment(id, patch) {
   const headers = await authHeaders();
   const res = await fetch(`${API_BASE}/admin/consignments/${id}`, {

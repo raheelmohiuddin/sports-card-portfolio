@@ -245,11 +245,26 @@ export class ApiStack extends Construct {
       environment: adminFnEnv,
     });
 
+    // Admin-scoped single-card lookups — used when an admin clicks a row in
+    // the consignments queue and we open CardModal for a card they don't own.
+    const adminCardFn = new NodejsFunction(this, "AdminCard", {
+      ...sharedNodejsProps,
+      functionName: "scp-admin-card",
+      entry: path.join(functionsDir, "admin/get-card.js"),
+      environment: adminFnEnv,
+    });
+    const adminCardSalesFn = new NodejsFunction(this, "AdminCardSales", {
+      ...sharedNodejsProps,
+      functionName: "scp-admin-card-sales",
+      entry: path.join(functionsDir, "admin/get-card-sales.js"),
+      environment: adminFnEnv,
+    });
+
     // Grant cognito-idp:AdminGetUser to the admin Lambdas for the live
     // fallback in requireAdmin. Wildcard ARN (no CFN ref) to avoid the same
     // circular dependency we hit in auth-stack.ts.
     const cognitoArnWildcard = `arn:aws:cognito-idp:${cdk.Stack.of(this).region}:${cdk.Stack.of(this).account}:userpool/*`;
-    for (const fn of [adminStatsFn, adminCardsFn, adminConsignmentsListFn, adminConsignmentUpdateFn]) {
+    for (const fn of [adminStatsFn, adminCardsFn, adminConsignmentsListFn, adminConsignmentUpdateFn, adminCardFn, adminCardSalesFn]) {
       fn.addToRolePolicy(new iam.PolicyStatement({
         actions: ["cognito-idp:AdminGetUser"],
         resources: [cognitoArnWildcard],
@@ -282,6 +297,8 @@ export class ApiStack extends Construct {
       adminCardsFn,
       adminConsignmentsListFn,
       adminConsignmentUpdateFn,
+      adminCardFn,
+      adminCardSalesFn,
     ];
     for (const fn of [addCardFn, getCardsFn, getCardFn, deleteCardFn, psaLookupFn, portfolioValueFn, portfolioHistoryFn, cardSalesFn, updatePriceFn, updateCardFn, avatarUploadUrlFn, avatarViewUrlFn, ...consignmentAndAdminFns]) {
       props.dbSecret.grantRead(fn);
@@ -447,6 +464,20 @@ export class ApiStack extends Construct {
       path: "/admin/consignments/{id}",
       methods: [apigwv2.HttpMethod.PATCH],
       integration: new apigwv2integrations.HttpLambdaIntegration("AdminConsignmentUpdate", adminConsignmentUpdateFn),
+      ...authRoute,
+    });
+
+    api.addRoutes({
+      path: "/admin/cards/{id}",
+      methods: [apigwv2.HttpMethod.GET],
+      integration: new apigwv2integrations.HttpLambdaIntegration("AdminCard", adminCardFn),
+      ...authRoute,
+    });
+
+    api.addRoutes({
+      path: "/admin/cards/{id}/sales",
+      methods: [apigwv2.HttpMethod.GET],
+      integration: new apigwv2integrations.HttpLambdaIntegration("AdminCardSales", adminCardSalesFn),
       ...authRoute,
     });
 

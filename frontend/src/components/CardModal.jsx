@@ -1,11 +1,30 @@
 import { useEffect, useRef, useState } from "react";
 import { fetchUserAttributes } from "aws-amplify/auth";
-import { getCard, getCardSales } from "../services/api.js";
+import {
+  getCard as defaultGetCard,
+  getCardSales as defaultGetCardSales,
+} from "../services/api.js";
 import { getRarityTier, TIER_LABELS } from "../utils/rarity.js";
 import GhostIcon from "./GhostIcon.jsx";
 import CardPop from "./CardPop.jsx";
 import SalesHistory from "./SalesHistory.jsx";
 import ConsignBlock from "./ConsignBlock.jsx";
+
+const CONSIGNMENT_TYPE_LABEL = { auction: "Auction", private: "Private Sale" };
+const CONSIGNMENT_STATUS_LABEL = {
+  pending: "Pending",
+  in_review: "In Review",
+  listed: "Listed",
+  sold: "Sold",
+  declined: "Declined",
+};
+const CONSIGNMENT_STATUS_COLOR = {
+  pending: "#fbbf24",
+  in_review: "#93c5fd",
+  listed: "#6ee7b7",
+  sold: "#a7f3d0",
+  declined: "#fca5a5",
+};
 
 function isRare(card) {
   return getRarityTier(card) !== null;
@@ -19,7 +38,23 @@ function fmt(n) {
 // Main modal
 // ---------------------------------------------------------------------------
 
-export default function CardModal({ card, onClose }) {
+// Optional `loaders` lets a parent (e.g. /admin/consignments) swap the
+// freshness re-fetch and sales fetch to admin-scoped endpoints that aren't
+// gated on user_id ownership. Defaults preserve the user-scoped behaviour
+// for the portfolio page's normal use of CardModal.
+//
+// `adminConsignment` triggers a read-only consignment details block in the
+// admin view (type / asking / notes / status / sold price). When set, the
+// collector-side ConsignBlock (which is a write-form / status pill) is
+// suppressed since admins manage the workflow through the queue page.
+export default function CardModal({
+  card,
+  onClose,
+  loaders,
+  adminConsignment,
+}) {
+  const getCard      = loaders?.getCard      ?? defaultGetCard;
+  const getCardSales = loaders?.getCardSales ?? defaultGetCardSales;
   // CardPop is always mounted while the sidebar is open — `pop.open` toggles
   // its visibility via opacity + pointer-events. Keeping it mounted skips the
   // React reconciliation that would otherwise run on every zoom click.
@@ -161,6 +196,7 @@ export default function CardModal({ card, onClose }) {
           {/* ── Card image ── */}
           <CardImage
             card={card}
+            getCard={getCard}
             onZoom={(args) => setPop({ open: true, ...args })}
           />
 
@@ -279,17 +315,24 @@ export default function CardModal({ card, onClose }) {
             ? <SalesHistory loading={salesLoading} error={salesError} sales={sales} />
             : <div style={st.salesPlaceholder} />}
 
-          {/* ── Consign this card (collectors only) ── */}
-          {/* consignmentStatus comes from get-cards.js / get-card.js via the
-              `card` prop and tells ConsignBlock whether to show the form
-              CTA or a read-only status pill. */}
-          {hydrated && (
+          {/* ── Consign this card (collectors only) ──
+              Suppressed when adminConsignment is provided — admins use the
+              read-only block below + the queue page for status changes. */}
+          {hydrated && !adminConsignment && (
             <ConsignBlock
               cardId={card.id}
               role={role}
               consignmentStatus={card.consignmentStatus ?? null}
               consignmentSoldPrice={card.consignmentSoldPrice ?? null}
             />
+          )}
+
+          {/* ── Admin consignment details ──
+              Read-only summary of the consignment row the admin clicked.
+              Does NOT duplicate the inline editing in /admin/consignments;
+              this is for context while reviewing the card itself. */}
+          {adminConsignment && (
+            <AdminConsignmentBlock consignment={adminConsignment} />
           )}
         </div>
       </aside>
@@ -311,7 +354,7 @@ export default function CardModal({ card, onClose }) {
 // avoids any CORS-cache issues from the portfolio grid fetch. Deferred
 // past the slide-in animation so the network request + re-render don't
 // compete with the compositor for main-thread time.
-function CardImage({ card, onZoom }) {
+function CardImage({ card, onZoom, getCard }) {
   const [imgUrl, setImgUrl] = useState(card.imageUrl ?? null);
   const [loaded, setLoaded] = useState(false);
   const [errored, setErrored] = useState(false);
@@ -451,6 +494,60 @@ function PopStat({ label, value, highlight, highlightColor = "#d97706" }) {
         {value}
       </span>
     </div>
+  );
+}
+
+// Admin-only consignment summary inside CardModal. Pure read-only —
+// the actual editable controls live in /admin/consignments.
+function AdminConsignmentBlock({ consignment }) {
+  const status = consignment.status;
+  const statusLabel = CONSIGNMENT_STATUS_LABEL[status] ?? status;
+  const statusColor = CONSIGNMENT_STATUS_COLOR[status] ?? "#cbd5e1";
+
+  return (
+    <>
+      <div style={st.sectionHead}>Consignment</div>
+      <div style={st.adminConsignBlock}>
+        <div style={st.adminConsignRow}>
+          <span style={st.adminConsignLabel}>Status</span>
+          <span style={{ ...st.adminConsignValue, color: statusColor, fontWeight: 800 }}>
+            {statusLabel}
+          </span>
+        </div>
+        <div style={st.adminConsignRow}>
+          <span style={st.adminConsignLabel}>Type</span>
+          <span style={st.adminConsignValue}>
+            {CONSIGNMENT_TYPE_LABEL[consignment.type] ?? consignment.type}
+          </span>
+        </div>
+        {consignment.askingPrice != null && (
+          <div style={st.adminConsignRow}>
+            <span style={st.adminConsignLabel}>Asking</span>
+            <span style={st.adminConsignValue}>{fmt(consignment.askingPrice)}</span>
+          </div>
+        )}
+        {status === "sold" && consignment.soldPrice != null && (
+          <div style={st.adminConsignRow}>
+            <span style={st.adminConsignLabel}>Sold For</span>
+            <span style={{ ...st.adminConsignValue, ...st.adminConsignSold }}>
+              {fmt(consignment.soldPrice)}
+            </span>
+          </div>
+        )}
+        {consignment.notes && (
+          <div style={st.adminConsignNotesBlock}>
+            <div style={st.adminConsignLabel}>Collector Notes</div>
+            <div style={st.adminConsignNotes}>{consignment.notes}</div>
+          </div>
+        )}
+        {consignment.internalNotes && (
+          <div style={st.adminConsignNotesBlock}>
+            <div style={st.adminConsignLabel}>Internal Notes</div>
+            <div style={st.adminConsignNotesInternal}>{consignment.internalNotes}</div>
+          </div>
+        )}
+      </div>
+    </>
   );
 }
 
@@ -799,5 +896,52 @@ const st = {
     background: "rgba(255,255,255,0.02)",
     border: "1px solid rgba(255,255,255,0.04)",
     borderRadius: 10,
+  },
+
+  // ── Admin-only consignment summary block ──
+  adminConsignBlock: {
+    background: "rgba(167,139,250,0.06)",
+    border: "1px solid rgba(167,139,250,0.28)",
+    borderRadius: 10,
+    padding: "0.95rem 1.1rem",
+    display: "flex", flexDirection: "column", gap: "0.55rem",
+  },
+  adminConsignRow: {
+    display: "flex", alignItems: "baseline",
+    justifyContent: "space-between", gap: "0.75rem",
+  },
+  adminConsignLabel: {
+    color: "#94a3b8",
+    fontSize: "0.62rem", fontWeight: 700,
+    letterSpacing: "0.16em", textTransform: "uppercase",
+  },
+  adminConsignValue: {
+    color: "#e2e8f0",
+    fontSize: "0.92rem", fontWeight: 700,
+    fontVariantNumeric: "tabular-nums",
+    letterSpacing: "-0.01em",
+  },
+  adminConsignSold: {
+    color: "#fbbf24",
+  },
+  adminConsignNotesBlock: {
+    paddingTop: "0.4rem",
+    borderTop: "1px solid rgba(167,139,250,0.18)",
+    display: "flex", flexDirection: "column", gap: "0.3rem",
+  },
+  adminConsignNotes: {
+    color: "#cbd5e1",
+    fontSize: "0.85rem",
+    lineHeight: 1.5,
+    fontStyle: "italic",
+  },
+  adminConsignNotesInternal: {
+    color: "#c4b5fd",
+    fontSize: "0.85rem",
+    lineHeight: 1.5,
+    background: "rgba(167,139,250,0.08)",
+    border: "1px solid rgba(167,139,250,0.22)",
+    borderRadius: 6,
+    padding: "0.5rem 0.65rem",
   },
 };
