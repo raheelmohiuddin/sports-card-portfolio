@@ -16,17 +16,17 @@ const TYPE_LABEL = { auction: "Auction", private: "Private Sale" };
 // Each sortable column declares a comparator on the row. Default sort is
 // by status rank (pending first), with newest-first as a tiebreaker.
 const COLUMNS = [
-  { key: "createdAt",  label: "Submitted",     align: "left",  get: (r) => new Date(r.createdAt).getTime() },
-  { key: "firstName",  label: "First",         align: "left",  get: (r) => (r.user.givenName  ?? "").toLowerCase() },
-  { key: "lastName",   label: "Last",          align: "left",  get: (r) => (r.user.familyName ?? "").toLowerCase() },
-  { key: "card",       label: "Card",          align: "left",  get: (r) => (`${r.card.year ?? ""} ${r.card.brand ?? ""} ${r.card.playerName ?? ""}`).trim().toLowerCase() },
-  { key: "grade",      label: "Grade",         align: "right", get: (r) => parseFloat(r.card.grade) || 0 },
-  { key: "estimated",  label: "Estimated",     align: "right", get: (r) => r.card.estimatedValue ?? 0 },
-  { key: "asking",     label: "Asking",        align: "right", get: (r) => r.askingPrice ?? 0 },
-  { key: "soldPrice",  label: "Sold Price",    align: "right", get: (r) => r.soldPrice   ?? 0 },
-  { key: "type",       label: "Type",          align: "left",  get: (r) => r.type },
-  { key: "status",     label: "Status",        align: "left",  get: (r) => STATUS_RANK[r.status] ?? 99 },
-  { key: "notes",      label: "Internal Notes",align: "left",  get: (r) => (r.internalNotes ?? "").toLowerCase(), unsortable: true },
+  { key: "createdAt",  label: "Submitted",      get: (r) => new Date(r.createdAt).getTime() },
+  { key: "firstName",  label: "First",          get: (r) => (r.user.givenName  ?? "").toLowerCase() },
+  { key: "lastName",   label: "Last",           get: (r) => (r.user.familyName ?? "").toLowerCase() },
+  { key: "card",       label: "Card",           get: (r) => (`${r.card.year ?? ""} ${r.card.brand ?? ""} ${r.card.playerName ?? ""}`).trim().toLowerCase() },
+  { key: "grade",      label: "Grade",          get: (r) => parseFloat(r.card.grade) || 0 },
+  { key: "estimated",  label: "Estimated",      get: (r) => r.card.estimatedValue ?? 0 },
+  { key: "asking",     label: "Asking",         get: (r) => r.askingPrice ?? 0 },
+  { key: "soldPrice",  label: "Sold Price",     get: (r) => r.soldPrice   ?? 0 },
+  { key: "type",       label: "Type",           get: (r) => r.type },
+  { key: "status",     label: "Status",         get: (r) => STATUS_RANK[r.status] ?? 99 },
+  { key: "notes",      label: "Internal Notes", get: (r) => (r.internalNotes ?? "").toLowerCase(), unsortable: true },
 ];
 
 export default function AdminConsignmentsPage() {
@@ -135,7 +135,7 @@ export default function AdminConsignmentsPage() {
                 {COLUMNS.map((c) => (
                   <th
                     key={c.key}
-                    style={{ ...st.th, textAlign: c.align, ...(c.unsortable ? {} : st.thSortable) }}
+                    style={{ ...st.th, ...(c.unsortable ? {} : st.thSortable) }}
                     onClick={c.unsortable ? undefined : () => toggleSort(c.key)}
                   >
                     {c.label}
@@ -186,11 +186,16 @@ function FilterDropdown({ label, value, onChange, options }) {
 }
 
 function ConsignmentRow({ row, onPatch }) {
-  const [notes, setNotes] = useState(row.internalNotes ?? "");
+  const [notes, setNotes]     = useState(row.internalNotes ?? "");
+  // Track whether any cell in this row is in edit/saving mode. Pinned
+  // editing keeps the pencil icons visible on every cell of this row
+  // even when the cursor leaves — otherwise hover-only would hide the
+  // active cell's controls mid-edit.
+  const [statusEditing, setStatusEditing] = useState(false);
+  const [priceEditing,  setPriceEditing]  = useState(false);
+  const isEditing = statusEditing || priceEditing;
   const cardLabel = [row.card.year, row.card.brand, row.card.playerName].filter(Boolean).join(" ") || "—";
 
-  // Resync the notes textarea when the row prop changes (e.g. refetch
-  // after an error rolls back state).
   useEffect(() => { setNotes(row.internalNotes ?? ""); }, [row.id, row.internalNotes]);
 
   function commitNotes() {
@@ -199,25 +204,24 @@ function ConsignmentRow({ row, onPatch }) {
   }
 
   return (
-    <tr style={st.row}>
+    <tr className={`scp-admin-row${isEditing ? " is-editing" : ""}`} style={st.row}>
       <td style={st.td}>{fmtDate(row.createdAt)}</td>
       <td style={st.td}>{row.user.givenName  ?? "—"}</td>
       <td style={st.td}>{row.user.familyName ?? "—"}</td>
-      <td style={st.tdStrong}>
-        {cardLabel}
-        {row.card.certNumber && <span style={st.cert}> · {row.card.certNumber}</span>}
+      <td style={st.tdCard}>
+        <div>{cardLabel}</div>
+        {row.card.certNumber && <div style={st.cert}>{row.card.certNumber}</div>}
         {row.notes && <div style={st.subnote}>{row.notes}</div>}
       </td>
-      <td style={{ ...st.td, ...st.tdRight }}>{row.card.grade ?? "—"}</td>
-      <td style={{ ...st.td, ...st.tdRight }}>{fmt(row.card.estimatedValue)}</td>
-      <td style={{ ...st.td, ...st.tdRight, ...st.tdValue }}>{fmt(row.askingPrice)}</td>
-      {/* Sold Price — editable only when status is "sold". Click-to-edit
-          pattern with confirm/cancel buttons; non-sold rows render "—". */}
-      <td style={{ ...st.td, ...st.tdRight }}>
+      <td style={st.td}>{row.card.grade ?? "—"}</td>
+      <td style={st.td}>{fmt(row.card.estimatedValue)}</td>
+      <td style={{ ...st.td, ...st.tdValue }}>{fmt(row.askingPrice)}</td>
+      <td style={st.td}>
         <EditableSoldPrice
           value={row.soldPrice}
           enabled={row.status === "sold"}
           onSave={(next) => onPatch(row.id, { soldPrice: next })}
+          setEditing={setPriceEditing}
         />
       </td>
       <td style={st.td}>{TYPE_LABEL[row.type] ?? row.type}</td>
@@ -225,6 +229,7 @@ function ConsignmentRow({ row, onPatch }) {
         <EditableStatus
           value={row.status}
           onSave={(next) => onPatch(row.id, { status: next })}
+          setEditing={setStatusEditing}
         />
       </td>
       <td style={st.td}>
@@ -241,19 +246,38 @@ function ConsignmentRow({ row, onPatch }) {
   );
 }
 
-// ─── Editable status (display chip → select + ✓/✗) ───────────────────
+// ─── Editable status (text → select + ✓/✗) ───────────────────────────
 const STATUS_LABEL = Object.fromEntries(STATUSES.map((s) => [s.value, s.label]));
 
-function EditableStatus({ value, onSave }) {
+// Color the value text per status — same hue family as the previous chip,
+// just without the box. Keeps the visual signal at a glance.
+function statusTextColor(s) {
+  switch (s) {
+    case "pending":   return "#fbbf24";
+    case "in_review": return "#93c5fd";
+    case "listed":    return "#6ee7b7";
+    case "sold":      return "#a7f3d0";
+    case "declined":  return "#fca5a5";
+    default:          return "#cbd5e1";
+  }
+}
+
+function EditableStatus({ value, onSave, setEditing }) {
   const [mode, setMode]   = useState("display"); // display | edit | saving | success
   const [draft, setDraft] = useState(value);
 
-  // Resync draft when value changes from the outside while in display mode.
   useEffect(() => {
     if (mode === "display") setDraft(value);
   }, [value, mode]);
 
-  // Auto-clear success flash after a short beat.
+  // Bubble edit-mode up to the row so we can keep the icon visible until
+  // the admin commits or cancels (otherwise hover-only would hide it
+  // mid-edit if the cursor moves elsewhere).
+  useEffect(() => {
+    setEditing?.(mode === "edit" || mode === "saving");
+  }, [mode, setEditing]);
+
+  // Auto-clear the success flash.
   useEffect(() => {
     if (mode !== "success") return;
     const t = setTimeout(() => setMode("display"), 1200);
@@ -262,52 +286,46 @@ function EditableStatus({ value, onSave }) {
 
   if (mode === "display" || mode === "success") {
     return (
-      <button
-        type="button"
-        onClick={() => setMode("edit")}
-        style={{ ...st.statusChip, ...statusStyle(value) }}
-        title="Click to edit"
-      >
-        <span>{STATUS_LABEL[value] ?? value}</span>
-        {mode === "success" ? <span style={st.successFlash}>✓</span> : <span style={st.editHint}>✎</span>}
-      </button>
+      <span style={st.cellInline}>
+        <span style={{ ...st.cellText, color: statusTextColor(value) }}>
+          {STATUS_LABEL[value] ?? value}
+        </span>
+        {mode === "success"
+          ? <span style={st.successFlash} aria-label="Saved">✓</span>
+          : <EditIcon onClick={() => setMode("edit")} ariaLabel="Edit status" />}
+      </span>
     );
   }
 
   const busy = mode === "saving";
-
   async function confirm() {
     if (draft === value) { setMode("display"); return; }
     setMode("saving");
-    try {
-      await onSave(draft);
-      setMode("success");
-    } catch {
-      setMode("edit");
-    }
+    try { await onSave(draft); setMode("success"); }
+    catch { setMode("edit"); }
   }
   function cancel() { setDraft(value); setMode("display"); }
 
   return (
-    <div style={st.editWrap}>
+    <span style={st.cellInline}>
       <select
         autoFocus
         value={draft}
         onChange={(e) => setDraft(e.target.value)}
         disabled={busy}
-        style={{ ...st.select, ...statusStyle(draft) }}
+        style={{ ...st.bareSelect, color: statusTextColor(draft) }}
       >
         {STATUSES.map((s) => (
           <option key={s.value} value={s.value} style={{ color: "#0f172a" }}>{s.label}</option>
         ))}
       </select>
       <ConfirmCancel busy={busy} onConfirm={confirm} onCancel={cancel} />
-    </div>
+    </span>
   );
 }
 
-// ─── Editable sold price (formatted display → input + ✓/✗) ────────────
-function EditableSoldPrice({ value, enabled, onSave }) {
+// ─── Editable sold price (text → input + ✓/✗) ────────────────────────
+function EditableSoldPrice({ value, enabled, onSave, setEditing }) {
   const [mode, setMode]   = useState("display");
   const [draft, setDraft] = useState(value != null ? String(value) : "");
 
@@ -316,43 +334,39 @@ function EditableSoldPrice({ value, enabled, onSave }) {
   }, [value, mode]);
 
   useEffect(() => {
+    setEditing?.(mode === "edit" || mode === "saving");
+  }, [mode, setEditing]);
+
+  useEffect(() => {
     if (mode !== "success") return;
     const t = setTimeout(() => setMode("display"), 1200);
     return () => clearTimeout(t);
   }, [mode]);
 
-  // Sold-price column is only meaningful when status is "sold". Show "—"
-  // and don't make it interactive otherwise.
   if (!enabled) return <span style={st.tdMuted}>—</span>;
 
   if (mode === "display" || mode === "success") {
     return (
-      <button
-        type="button"
-        onClick={() => setMode("edit")}
-        style={{ ...st.priceDisplay, ...(value == null ? st.priceDisplayEmpty : {}) }}
-        title="Click to edit"
-      >
-        <span>{value != null ? fmt(value) : "Set price"}</span>
-        {mode === "success" ? <span style={st.successFlash}>✓</span> : <span style={st.editHint}>✎</span>}
-      </button>
+      <span style={st.cellInline}>
+        <span style={value != null ? st.priceText : st.priceTextEmpty}>
+          {value != null ? fmt(value) : "—"}
+        </span>
+        {mode === "success"
+          ? <span style={st.successFlash} aria-label="Saved">✓</span>
+          : <EditIcon onClick={() => setMode("edit")} ariaLabel="Edit sold price" />}
+      </span>
     );
   }
 
   const busy = mode === "saving";
-
   async function confirm() {
     const trimmed = draft.trim();
     const next = trimmed === "" ? null : parseFloat(trimmed);
     if (next != null && (Number.isNaN(next) || next < 0)) return;
     if (next === (value ?? null)) { setMode("display"); return; }
     setMode("saving");
-    try {
-      await onSave(next);
-      setMode("success");
-    } catch {
-      setMode("edit");
-    }
+    try { await onSave(next); setMode("success"); }
+    catch { setMode("edit"); }
   }
   function cancel() {
     setDraft(value != null ? String(value) : "");
@@ -360,25 +374,38 @@ function EditableSoldPrice({ value, enabled, onSave }) {
   }
 
   return (
-    <div style={st.editWrap}>
-      <div style={st.priceInputWrap}>
-        <span style={st.priceInputDollar}>$</span>
-        <input
-          autoFocus
-          type="number" min="0" step="0.01" inputMode="decimal"
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter")  confirm();
-            if (e.key === "Escape") cancel();
-          }}
-          disabled={busy}
-          placeholder="0.00"
-          style={st.priceInput}
-        />
-      </div>
+    <span style={st.cellInline}>
+      <span style={st.priceInputDollar}>$</span>
+      <input
+        autoFocus
+        type="number" min="0" step="0.01" inputMode="decimal"
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter")  confirm();
+          if (e.key === "Escape") cancel();
+        }}
+        disabled={busy}
+        placeholder="0.00"
+        style={st.bareInput}
+      />
       <ConfirmCancel busy={busy} onConfirm={confirm} onCancel={cancel} />
-    </div>
+    </span>
+  );
+}
+
+// Small gold pencil — the only edit-mode trigger. Hover-only visibility
+// is owned by the .scp-edit-icon CSS class (rule lives in index.css).
+function EditIcon({ onClick, ariaLabel }) {
+  return (
+    <button
+      type="button"
+      className="scp-edit-icon"
+      onClick={onClick}
+      style={st.editIcon}
+      aria-label={ariaLabel}
+      title={ariaLabel}
+    >✎</button>
   );
 }
 
@@ -408,17 +435,6 @@ function ConfirmCancel({ busy, onConfirm, onCancel }) {
       </button>
     </>
   );
-}
-
-function statusStyle(s) {
-  switch (s) {
-    case "pending":   return { background: "rgba(245,158,11,0.12)",  color: "#fbbf24", borderColor: "rgba(245,158,11,0.4)"  };
-    case "in_review": return { background: "rgba(96,165,250,0.12)",  color: "#93c5fd", borderColor: "rgba(96,165,250,0.4)"  };
-    case "listed":    return { background: "rgba(16,185,129,0.12)",  color: "#6ee7b7", borderColor: "rgba(16,185,129,0.4)"  };
-    case "sold":      return { background: "rgba(16,185,129,0.18)",  color: "#a7f3d0", borderColor: "rgba(16,185,129,0.55)" };
-    case "declined":  return { background: "rgba(248,113,113,0.12)", color: "#fca5a5", borderColor: "rgba(248,113,113,0.4)" };
-    default:          return {};
-  }
 }
 
 const st = {
@@ -493,32 +509,53 @@ const st = {
     borderCollapse: "collapse",
     fontSize: "0.84rem",
   },
+  // Centered headers — the matching cell styles also center, so each
+  // value sits directly under its header label.
   th: {
-    padding: "0.7rem 0.9rem",
+    height: 44,
+    padding: "0 0.75rem",
     fontSize: "0.62rem", fontWeight: 700,
     letterSpacing: "0.16em", textTransform: "uppercase",
     color: colors.textFaint,
     borderBottom: `1px solid ${adminColors.border}`,
     background: "rgba(15,23,42,0.6)",
+    textAlign: "center",
+    verticalAlign: "middle",
     userSelect: "none",
   },
-  thSortable: {
-    cursor: "pointer",
-  },
+  thSortable: { cursor: "pointer" },
   sortMark: {
     display: "inline-block",
     marginLeft: "0.35rem",
     color: adminColors.accentLight,
     minWidth: "0.7em",
   },
-  row: { borderBottom: "1px solid rgba(255,255,255,0.04)", verticalAlign: "top" },
-  td: { padding: "0.7rem 0.9rem", color: colors.textSecondary },
-  tdRight: { textAlign: "right", fontVariantNumeric: "tabular-nums" },
+  // Consistent row height + a single hairline divider — no per-cell
+  // borders, no zebra striping, no padding noise. Cells pick up the
+  // shared height/alignment from .row → td chain.
+  row: {
+    borderBottom: "1px solid rgba(255,255,255,0.04)",
+  },
+  td: {
+    height: 56,
+    padding: "0 0.75rem",
+    color: colors.textSecondary,
+    textAlign: "center",
+    verticalAlign: "middle",
+    fontVariantNumeric: "tabular-nums",
+  },
   tdMuted: { color: colors.textVeryFaint },
-  tdStrong: {
-    padding: "0.7rem 0.9rem",
-    color: colors.textPrimary, fontWeight: 600,
-    minWidth: 220,
+  // The Card column carries multi-line content (label + cert + maybe
+  // collector note), so it gets a slightly different rhythm — still
+  // center-aligned but with stacked lines.
+  tdCard: {
+    height: 56,
+    padding: "0.5rem 0.75rem",
+    color: colors.textPrimary,
+    fontWeight: 600,
+    textAlign: "center",
+    verticalAlign: "middle",
+    minWidth: 200,
   },
   tdValue: { color: adminColors.accentLight, fontWeight: 700 },
   tdEmpty: {
@@ -528,146 +565,124 @@ const st = {
   cert: {
     color: colors.textFaint, fontWeight: 500,
     fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
-    fontSize: "0.78rem",
+    fontSize: "0.74rem",
+    marginTop: "0.15rem",
   },
   subnote: {
     color: colors.textMuted, fontWeight: 400,
-    fontSize: "0.78rem", marginTop: "0.3rem",
+    fontSize: "0.74rem", marginTop: "0.2rem",
     fontStyle: "italic",
   },
 
-  select: {
-    fontSize: "0.78rem", fontWeight: 700,
-    padding: "0.3rem 0.6rem",
-    borderRadius: 6,
-    border: "1px solid",
-    cursor: "pointer",
-    fontFamily: "inherit",
+  // ── Editable cells: borderless display + borderless edit ──
+  // Inline wrapper that places the value text + the (hover-only) pencil
+  // icon, or the input/select + ✓/✗ buttons, on a single centered line.
+  cellInline: {
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: "0.4rem",
+  },
+  cellText: {
+    fontWeight: 700,
     letterSpacing: "0.04em", textTransform: "uppercase",
+    fontSize: "0.78rem",
   },
-
-  // ── Editable cells (status / sold price) ──
-  // Common wrapper while in edit mode — input/select sits next to the
-  // confirm/cancel button pair, all on one line.
-  editWrap: {
-    display: "inline-flex", alignItems: "center",
-    gap: "0.3rem",
-  },
-  // Display-mode status chip — visually identical to the status select
-  // (same colors per status), but a button so the click target is obvious
-  // and an explicit pencil hint shows it's actionable.
-  statusChip: {
-    display: "inline-flex", alignItems: "center", gap: "0.4rem",
-    fontSize: "0.78rem", fontWeight: 700,
-    padding: "0.3rem 0.6rem",
-    borderRadius: 6,
-    border: "1px solid",
-    cursor: "pointer",
-    fontFamily: "inherit",
-    letterSpacing: "0.04em", textTransform: "uppercase",
-  },
-  // Display-mode sold price — gold realized number, dashed placeholder
-  // when no price has been entered yet.
-  priceDisplay: {
-    display: "inline-flex", alignItems: "center", gap: "0.4rem",
-    background: "rgba(245,158,11,0.08)",
-    border: "1px solid rgba(245,158,11,0.32)",
-    borderRadius: 6,
-    padding: "0.3rem 0.6rem",
-    fontSize: "0.86rem", fontWeight: 800,
+  priceText: {
     color: "#fbbf24",
-    fontFamily: "inherit",
+    fontWeight: 700,
     fontVariantNumeric: "tabular-nums",
-    cursor: "pointer",
+    fontSize: "0.86rem",
   },
-  priceDisplayEmpty: {
+  priceTextEmpty: {
+    color: colors.textVeryFaint,
+    fontVariantNumeric: "tabular-nums",
+    fontSize: "0.86rem",
+  },
+  // Native select stripped of all chrome — same color/size as the
+  // display text so the cell's visual weight doesn't shift on click.
+  bareSelect: {
+    appearance: "none",
+    WebkitAppearance: "none",
+    MozAppearance: "none",
     background: "transparent",
-    border: "1px dashed rgba(245,158,11,0.45)",
-    color: "#94a3b8",
-    fontWeight: 600,
-    fontSize: "0.76rem",
-    letterSpacing: "0.04em",
+    border: "none",
+    outline: "none",
+    cursor: "pointer",
+    fontFamily: "inherit",
+    fontWeight: 700,
+    fontSize: "0.78rem",
+    letterSpacing: "0.04em", textTransform: "uppercase",
+    padding: 0,
+    textAlign: "center",
+    textAlignLast: "center", // selected option centering for some browsers
   },
-  // Hint icon next to a display-mode value — only shows on hover via
-  // opacity transition would be ideal, but inline styles can't do :hover,
-  // so a low-opacity always-on glyph is good enough.
-  editHint: {
-    color: "rgba(255,255,255,0.35)",
-    fontSize: "0.7rem",
-    marginLeft: "0.15rem",
-  },
-  // Brief success flash after a successful save.
-  successFlash: {
-    color: "#10b981",
-    fontWeight: 900,
-    fontSize: "0.85rem",
-  },
-
-  // ── Dollar-prefix input (edit mode for sold price) ──
-  priceInputWrap: {
-    display: "inline-flex", alignItems: "center",
-    background: "rgba(245,158,11,0.08)",
-    border: "1px solid rgba(245,158,11,0.45)",
-    borderRadius: 6,
-    paddingLeft: "0.5rem",
-    overflow: "hidden",
-  },
+  // $ glyph that visually leads the price input.
   priceInputDollar: {
     color: "#fbbf24",
-    fontSize: "0.84rem",
-    fontWeight: 800,
-    marginRight: "0.15rem",
+    fontSize: "0.86rem",
+    fontWeight: 700,
+    marginRight: "-0.1rem",
   },
-  priceInput: {
+  bareInput: {
     width: 90,
     background: "transparent",
     color: "#fbbf24",
     border: "none",
     outline: "none",
-    padding: "0.3rem 0.5rem 0.3rem 0",
+    padding: 0,
     fontSize: "0.86rem", fontWeight: 700,
     fontFamily: "inherit",
     fontVariantNumeric: "tabular-nums",
-    textAlign: "right",
+    textAlign: "center",
+  },
+
+  // The hover-only pencil. Inline style sets size + color; the .scp-edit-icon
+  // class (in index.css) handles opacity transitions on row hover.
+  editIcon: {
+    width: 22, height: 22,
+    display: "inline-flex", alignItems: "center", justifyContent: "center",
+    background: "transparent",
+    border: "none",
+    color: "#f59e0b",
+    cursor: "pointer",
+    fontSize: "0.78rem",
+    padding: 0,
+    fontFamily: "inherit",
+  },
+  // Brief success flash — green check that replaces the pencil after save.
+  successFlash: {
+    color: "#10b981",
+    fontWeight: 900,
+    fontSize: "0.85rem",
+    width: 22, height: 22,
+    display: "inline-flex", alignItems: "center", justifyContent: "center",
   },
 
   // ── Confirm (✓) / Cancel (✕) icon buttons ──
-  // Square-ish 26px buttons that read as "save" / "discard" — green for
-  // confirm, red for cancel, both on subtle tinted backgrounds so they
-  // sit comfortably on the dark page.
   iconBtn: {
-    width: 26, height: 26,
+    width: 22, height: 22,
     display: "inline-flex", alignItems: "center", justifyContent: "center",
-    border: "1px solid",
-    borderRadius: 6,
+    background: "transparent",
+    border: "none",
     cursor: "pointer",
     fontFamily: "inherit",
-    fontSize: "0.78rem", fontWeight: 800,
+    fontSize: "0.95rem", fontWeight: 800,
     padding: 0,
-    transition: "background 0.12s, border-color 0.12s, transform 0.05s",
   },
-  iconBtnConfirm: {
-    color: "#6ee7b7",
-    background: "rgba(16,185,129,0.12)",
-    borderColor: "rgba(16,185,129,0.45)",
-  },
-  iconBtnCancel: {
-    color: "#fca5a5",
-    background: "rgba(248,113,113,0.10)",
-    borderColor: "rgba(248,113,113,0.45)",
-  },
-  iconBtnBusy: {
-    opacity: 0.6,
-    cursor: "wait",
-  },
+  iconBtnConfirm: { color: "#10b981" },
+  iconBtnCancel:  { color: "#f87171" },
+  iconBtnBusy:    { opacity: 0.6, cursor: "wait" },
+
   notes: {
     width: 220,
     fontFamily: "inherit", fontSize: "0.78rem",
-    background: "rgba(15,23,42,0.7)",
+    background: "rgba(15,23,42,0.6)",
     color: colors.textSecondary,
-    border: "1px solid rgba(255,255,255,0.08)",
+    border: "1px solid rgba(255,255,255,0.06)",
     borderRadius: 6,
-    padding: "0.4rem 0.5rem",
+    padding: "0.4rem 0.55rem",
     resize: "vertical",
+    textAlign: "left",
   },
 };

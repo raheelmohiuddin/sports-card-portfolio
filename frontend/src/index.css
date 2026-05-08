@@ -195,6 +195,20 @@ a { color: inherit; text-decoration: none; }
   .scp-floating-cards { display: none !important; }
 }
 
+/* Admin consignments table — show the inline edit icon only when the
+   row is hovered (or when the icon receives keyboard focus, so tab
+   navigation still surfaces it). Inline styles can't do :hover; this
+   rule lives here and works against the className we set on the row + icon. */
+.scp-admin-row .scp-edit-icon {
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+.scp-admin-row:hover .scp-edit-icon,
+.scp-admin-row .scp-edit-icon:focus,
+.scp-admin-row.is-editing .scp-edit-icon {
+  opacity: 1;
+}
+
 /* Hide number input spinners */
 input[type="number"]::-webkit-outer-spin-button,
 input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
