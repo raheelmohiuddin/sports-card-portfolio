@@ -24,7 +24,8 @@ const STATES = [
 ];
 const STATE_NAME = Object.fromEntries(STATES);
 
-const NEAR_ME_KEY = "scp.userState";
+const NEAR_ME_ZIP_KEY    = "scp.nearMe.zip";
+const NEAR_ME_RADIUS_KEY = "scp.nearMe.radiusMiles";
 const DAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTH_NAMES = [
   "January", "February", "March", "April", "May", "June",
@@ -56,6 +57,16 @@ export default function ShowsPage() {
   const [toDate, setToDate]         = useState(() => toIsoDate(endOfMonth(new Date())));
   const [q, setQ]                   = useState("");
   const [qApplied, setQApplied]     = useState("");
+
+  // Near Me — proximity (zip → coords → Haversine radius). Holds:
+  //   • whether the inline panel is mounted (Near Me button toggles it),
+  //   • the active center coords + radius (drives /shows API params),
+  //   • the zip the user typed (for display in the active "x" pill).
+  // Declared up here (not next to the other Near Me handlers below) so
+  // the fetch effect can read nearMe without hitting a temporal dead zone.
+  const [nearMeOpen, setNearMeOpen] = useState(false);
+  const [nearMe, setNearMe]         = useState(null);
+  // { zip, radiusMiles, centerLat, centerLng }
 
   // Whenever the calendar moves, snap from/to to that month's bounds.
   // The user can still type custom dates afterwards; their values stick
@@ -194,14 +205,8 @@ export default function ShowsPage() {
     }
   }
 
-  // Near Me — proximity (zip → coords → Haversine radius). Holds:
-  //   • whether the inline panel is mounted (Near Me button toggles it),
-  //   • the active center coords + radius (drives /shows API params),
-  //   • the zip the user typed (for display in the active "x" pill).
-  // Cleared via the gold X next to the Near Me button when active.
-  const [nearMeOpen, setNearMeOpen] = useState(false);
-  const [nearMe, setNearMe]         = useState(null);
-  // { zip, radiusMiles, centerLat, centerLng }
+  // Near Me handlers — state itself lives near the top of the component
+  // (alongside the other filters) so the fetch effect can read it.
   function applyNearMe(next) { setNearMe(next); setNearMeOpen(false); }
   function clearNearMe()     { setNearMe(null); }
 
