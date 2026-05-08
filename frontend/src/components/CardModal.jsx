@@ -236,19 +236,25 @@ export default function CardModal({
             </tbody>
           </table>
 
-          {/* ── Population ── */}
-          {(card.psaPopulation !== null || card.psaPopulationHigher !== null) && (
+          {/* ── Population ──
+              Loose `!= null` (not strict `!== null`) so undefined behaves
+              the same as null — important when CardModal is opened with a
+              partial card stub (e.g. from /admin/consignments where the
+              row carries only id/name/year/brand/grade/cert/value). With
+              strict !==, `undefined !== null` → true, then we'd call
+              `.toLocaleString()` on undefined and unmount the whole page. */}
+          {(card.psaPopulation != null || card.psaPopulationHigher != null) && (
             <>
               <div style={st.sectionHead}>PSA Population</div>
               <div style={{ ...st.popBlock, ...(rare ? st.popBlockRare : {}) }}>
-                {card.psaPopulation !== null && (
+                {card.psaPopulation != null && (
                   <PopStat
                     label="At grade"
                     value={card.psaPopulation.toLocaleString()}
                     highlight={rare}
                   />
                 )}
-                {card.psaPopulationHigher !== null && (
+                {card.psaPopulationHigher != null && (
                   <PopStat
                     label="Graded higher"
                     value={card.psaPopulationHigher.toLocaleString()}
@@ -263,7 +269,7 @@ export default function CardModal({
           {/* ── Headline value ──
               Sold → green "Sold For" label, no auto-pricing context (the
               sale is the truth). Held → existing market-value layout. */}
-          {displayValue !== null && (
+          {displayValue != null && (
             <>
               <div style={st.sectionHead}>{sold ? "Sold For" : "Market Value"}</div>
               <div style={st.priceBlock}>

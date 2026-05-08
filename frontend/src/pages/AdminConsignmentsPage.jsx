@@ -246,10 +246,19 @@ function ConsignmentRow({ row, onPatch, onOpen }) {
   // sold-price cells contain real <button>/<select>/<input> nodes; the
   // notes textarea and the column-sort buttons in the header are also
   // interactive. closest() catches all of them in one check.
+  //
+  // try/catch so a thrown error here can't unmount the page silently;
+  // the log lets us see the exact card payload going into CardModal
+  // when something goes wrong opening the sidebar.
   function handleRowClick(e) {
-    if (isEditing) return;
-    if (e.target.closest("button, select, input, textarea")) return;
-    onOpen?.();
+    try {
+      if (isEditing) return;
+      if (e.target.closest("button, select, input, textarea")) return;
+      console.log("admin row click — card payload:", row.card, "consignment:", row);
+      onOpen?.();
+    } catch (err) {
+      console.error("admin row click handler threw:", err);
+    }
   }
 
   return (
