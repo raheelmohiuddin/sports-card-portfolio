@@ -193,82 +193,6 @@ export default function ShowsPage() {
     });
   }
 
-  // Travel-time per visible show. Only fetches for shows on the current
-  // page (so we don't burn Google quota on shows the user can't see) and
-  // only when Near Me is active — without a zip there's no origin to
-  // compute from. Map<showId, "loading" | "error" | result>.
-  const [travelTimes, setTravelTimes] = useState(() => new Map());
-  useEffect(() => {
-    const zip = nearMe?.zip;
-    if (!zip) return;
-    let cancelled = false;
-
-    // Pull from the module cache for any show we can answer immediately.
-    // Pre-seed state with cached results so the SVG appears on the first
-    // paint of the page.
-    setTravelTimes((prev) => {
-      let next = prev;
-      let mutated = false;
-      for (const s of pagedShows) {
-        if (!s.city || !s.state) continue;
-        const k = travelKey(zip, s.city, s.state);
-        const cached = travelTimeCache.get(k);
-        if (cached && next.get(s.id) !== cached) {
-          if (!mutated) { next = new Map(prev); mutated = true; }
-          next.set(s.id, cached);
-        }
-      }
-      return mutated ? next : prev;
-    });
-
-    // Kick off lookups for visible shows we don't have data for yet.
-    // Skip shows already loading/errored to avoid retry storms when the
-    // backend is unhappy.
-    const targets = pagedShows.filter((s) => {
-      if (!s.city || !s.state) return false;
-      const k = travelKey(zip, s.city, s.state);
-      if (travelTimeCache.has(k)) return false;
-      const existing = travelTimes.get(s.id);
-      return existing === undefined; // skip "loading" and "error"
-    });
-
-    if (targets.length === 0) return;
-
-    setTravelTimes((prev) => {
-      const next = new Map(prev);
-      for (const s of targets) next.set(s.id, "loading");
-      return next;
-    });
-
-    for (const s of targets) {
-      const k = travelKey(zip, s.city, s.state);
-      getTravelTime({ originZip: zip, destCity: s.city, destState: s.state })
-        .then((value) => {
-          if (cancelled) return;
-          travelTimeCache.set(k, value);
-          setTravelTimes((prev) => {
-            const next = new Map(prev);
-            next.set(s.id, value);
-            return next;
-          });
-        })
-        .catch(() => {
-          if (cancelled) return;
-          setTravelTimes((prev) => {
-            const next = new Map(prev);
-            next.set(s.id, "error");
-            return next;
-          });
-        });
-    }
-
-    return () => { cancelled = true; };
-    // travelTimes is intentionally absent from deps — including it would
-    // refire the effect every time we update the map and cause an
-    // infinite request loop. We only want to react to zip + visible page.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [nearMe?.zip, pagedShows]);
-
   function toggleState(code) {
     setStates((prev) => prev.includes(code) ? prev.filter((s) => s !== code) : [...prev, code]);
   }
@@ -315,6 +239,7 @@ export default function ShowsPage() {
           setCursor={setCursor}
           attending={attending}
           onToggleAttending={toggleAttending}
+          userZip={nearMe?.zip ?? null}
         />
 
         {/* ── Browse + filter ── */}
@@ -364,12 +289,7 @@ export default function ShowsPage() {
                 <div style={st.gridEmpty}>No shows match your filters.</div>
               ) : (
                 pagedShows.map((s) => (
-                  <ShowCard
-                    key={s.id}
-                    show={s}
-                    onToggle={() => toggleAttending(s)}
-                    travelTime={nearMe?.zip ? travelTimes.get(s.id) : null}
-                  />
+                  <ShowCard key={s.id} show={s} onToggle={() => toggleAttending(s)} />
                 ))
               )}
             </div>
@@ -393,7 +313,7 @@ export default function ShowsPage() {
 // ─── Calendar panel ──────────────────────────────────────────────────
 // cursor + setCursor are controlled by ShowsPage so navigating months
 // can drive the grid's date-range filter at the same time.
-function CalendarPanel({ cursor, setCursor, attending, onToggleAttending }) {
+function CalendarPanel({ cursor, setCursor, attending, onToggleAttending, userZip }) {
   const today = useMemo(() => startOfDay(new Date()), []);
   const [viewMode, setViewMode] = useState("month"); // month | list
   const [expandedDate, setExpandedDate] = useState(null);
@@ -529,6 +449,7 @@ function CalendarPanel({ cursor, setCursor, attending, onToggleAttending }) {
                     key={s.id}
                     show={s}
                     clickedDate={expandedDate}
+                    userZip={userZip}
                     onRemove={(show) => {
                       // Toggle off + close the popover. Optimistic
                       // update in onToggleAttending makes the show
@@ -647,7 +568,7 @@ function isShowToday(show) {
   return y === today.getFullYear() && (m - 1) === today.getMonth() && d === today.getDate();
 }
 
-function ExpandedShowRow({ show, compact, clickedDate, onRemove }) {
+function ExpandedShowRow({ show, compact, clickedDate, userZip, onRemove }) {
   const isRange = show.endDate && show.endDate !== show.date;
   const start = show.date    ? new Date(`${show.date}T00:00:00`)    : null;
   const end   = show.endDate ? new Date(`${show.endDate}T00:00:00`) : null;
@@ -678,6 +599,28 @@ function ExpandedShowRow({ show, compact, clickedDate, onRemove }) {
   // duplicate the info.
   const showMetaTime = !showsAsMultiDay && show.startTime;
 
+  // Travel time — popover-only (skipped in compact list view), and only
+  // when the user has Near Me active. The module-scoped cache means
+  // re-opening the same popover hits memory; the API call only fires
+  // for the (zip, city, state) triples we haven't seen this session.
+  const [travel, setTravel] = useState(null);
+  useEffect(() => {
+    if (compact || !userZip || !show.city || !show.state) { setTravel(null); return; }
+    const k = travelKey(userZip, show.city, show.state);
+    const cached = travelTimeCache.get(k);
+    if (cached) { setTravel(cached); return; }
+    let cancelled = false;
+    setTravel("loading");
+    getTravelTime({ originZip: userZip, destCity: show.city, destState: show.state })
+      .then((value) => {
+        if (cancelled) return;
+        travelTimeCache.set(k, value);
+        setTravel(value);
+      })
+      .catch(() => { if (!cancelled) setTravel("error"); });
+    return () => { cancelled = true; };
+  }, [userZip, show.id, show.city, show.state, compact]);
+
   return (
     <div style={st.expandedRow}>
       <div style={st.expandedTopLine}>
@@ -700,6 +643,7 @@ function ExpandedShowRow({ show, compact, clickedDate, onRemove }) {
               <span> · {formatTimeRange(show.startTime, show.endTime)}</span>
             )}
           </div>
+          {travel !== null && <TravelTime value={travel} />}
         </div>
       </div>
       {/* Live countdown only in the popover (not the compact list view). */}
@@ -1162,7 +1106,7 @@ function MultiStateDropdown({ selected, onToggle }) {
 }
 
 // ─── Show card ───────────────────────────────────────────────────────
-function ShowCard({ show, onToggle, travelTime }) {
+function ShowCard({ show, onToggle }) {
   const startDate = show.date ? new Date(`${show.date}T00:00:00`) : null;
   const endDate   = show.endDate && show.endDate !== show.date
     ? new Date(`${show.endDate}T00:00:00`)
@@ -1210,10 +1154,6 @@ function ShowCard({ show, onToggle, travelTime }) {
               <span style={st.cardTimeVary}> · Times vary by day</span>
             )}
           </div>
-        )}
-
-        {travelTime !== null && travelTime !== undefined && (
-          <TravelTime value={travelTime} />
         )}
       </div>
 
