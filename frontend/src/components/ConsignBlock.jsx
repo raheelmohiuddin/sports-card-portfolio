@@ -17,13 +17,14 @@ import { createConsignment } from "../services/api.js";
 //
 // Hidden entirely for admin users — admins shouldn't consign their own
 // collection, and they manage status via the admin portal anyway.
-export default function ConsignBlock({ cardId, role, consignmentStatus, consignmentSoldPrice }) {
-  const [stage, setStage]   = useState("collapsed"); // collapsed | form
-  const [type, setType]     = useState("auction");
-  const [price, setPrice]   = useState("");
-  const [notes, setNotes]   = useState("");
-  const [busy, setBusy]     = useState(false);
-  const [error, setError]   = useState(null);
+export default function ConsignBlock({ cardId, role, consignmentStatus, consignmentSoldPrice, onConsigned }) {
+  const [stage, setStage]       = useState("collapsed"); // collapsed | form
+  const [type, setType]         = useState("auction");
+  const [platform, setPlatform] = useState("fanatics");  // auction-only
+  const [price, setPrice]       = useState("");          // private-only
+  const [notes, setNotes]       = useState("");
+  const [busy, setBusy]         = useState(false);
+  const [error, setError]       = useState(null);
   // Local-state mirror of the persisted status. Seeds from props; flips
   // to "pending" optimistically the moment a submit succeeds. The next
   // time getCards/getCard runs, props will carry the real value and
@@ -34,6 +35,8 @@ export default function ConsignBlock({ cardId, role, consignmentStatus, consignm
 
   if (status) return <StatusPill status={status} soldPrice={consignmentSoldPrice ?? null} />;
 
+  const isAuction = type === "auction";
+
   async function handleSubmit(e) {
     e.preventDefault();
     setBusy(true); setError(null);
@@ -41,13 +44,17 @@ export default function ConsignBlock({ cardId, role, consignmentStatus, consignm
       await createConsignment({
         cardId,
         type,
-        askingPrice: price === "" ? null : parseFloat(price),
+        askingPrice:     isAuction ? null     : (price === "" ? null : parseFloat(price)),
+        auctionPlatform: isAuction ? platform : null,
         notes: notes || null,
       });
       // Optimistically mark as pending — the API returned 201 with status
       // "pending", and we drop into the same pill render path the parent
       // would land on after a refresh.
       setStatus("pending");
+      // Tell the parent so it can patch the card in its list state, so
+      // closing + re-opening the sidebar still shows the pending pill.
+      onConsigned?.("pending");
     } catch (err) {
       setError(err?.message ?? "Submission failed");
     } finally {
@@ -83,15 +90,29 @@ export default function ConsignBlock({ cardId, role, consignmentStatus, consignm
         </select>
       </label>
 
-      <label style={st.label}>
-        <span style={st.labelText}>Asking Price <span style={st.optional}>· optional</span></span>
-        <input
-          type="number" min="0" step="0.01" inputMode="decimal"
-          value={price} onChange={(e) => setPrice(e.target.value)}
-          placeholder="0.00"
-          style={st.input}
-        />
-      </label>
+      {isAuction ? (
+        <label style={st.label}>
+          <span style={st.labelText}>Auction Platform</span>
+          <select
+            value={platform}
+            onChange={(e) => setPlatform(e.target.value)}
+            style={st.input}
+          >
+            <option value="fanatics">Fanatics</option>
+            <option value="ebay">eBay</option>
+          </select>
+        </label>
+      ) : (
+        <label style={st.label}>
+          <span style={st.labelText}>Asking Price <span style={st.optional}>· optional</span></span>
+          <input
+            type="number" min="0" step="0.01" inputMode="decimal"
+            value={price} onChange={(e) => setPrice(e.target.value)}
+            placeholder="0.00"
+            style={st.input}
+          />
+        </label>
+      )}
 
       <label style={st.label}>
         <span style={st.labelText}>Notes <span style={st.optional}>· optional</span></span>

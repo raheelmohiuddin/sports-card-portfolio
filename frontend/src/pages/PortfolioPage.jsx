@@ -292,7 +292,13 @@ export default function PortfolioPage() {
         )}
       </div>
 
-      {selectedCard && <CardModal card={selectedCard} onClose={() => setSelectedCard(null)} />}
+      {selectedCard && (
+        <CardModal
+          card={selectedCard}
+          onClose={() => setSelectedCard(null)}
+          onCardUpdate={handleCardUpdate}
+        />
+      )}
       {editingCard && (
         <EditCostModal
           card={editingCard}

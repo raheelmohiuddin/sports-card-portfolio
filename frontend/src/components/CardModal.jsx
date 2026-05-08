@@ -52,6 +52,7 @@ export default function CardModal({
   onClose,
   loaders,
   adminConsignment,
+  onCardUpdate,
 }) {
   const getCard      = loaders?.getCard      ?? defaultGetCard;
   const getCardSales = loaders?.getCardSales ?? defaultGetCardSales;
@@ -330,6 +331,7 @@ export default function CardModal({
               role={role}
               consignmentStatus={card.consignmentStatus ?? null}
               consignmentSoldPrice={card.consignmentSoldPrice ?? null}
+              onConsigned={(status) => onCardUpdate?.(card.id, { consignmentStatus: status })}
             />
           )}
 

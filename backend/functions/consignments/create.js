@@ -16,6 +16,7 @@ const ADMIN_EMAIL = process.env.ADMIN_EMAIL;
 const SENDER_EMAIL = process.env.SENDER_EMAIL ?? ADMIN_EMAIL;
 
 const VALID_TYPES = new Set(["auction", "private"]);
+const VALID_AUCTION_PLATFORMS = new Set(["fanatics", "ebay"]);
 
 exports.handler = async (event) => {
   const claims = event.requestContext?.authorizer?.jwt?.claims;
@@ -25,16 +26,27 @@ exports.handler = async (event) => {
   try { body = JSON.parse(event.body ?? "{}"); }
   catch { return json(400, { error: "Invalid JSON body" }); }
 
-  const { cardId, type, askingPrice, notes } = body;
+  const { cardId, type, askingPrice, auctionPlatform, notes } = body;
 
   if (!isValidId(cardId)) return json(400, { error: "cardId required" });
   if (!VALID_TYPES.has(type)) return json(400, { error: "type must be 'auction' or 'private'" });
 
-  const askProvided = askingPrice !== null && askingPrice !== undefined && askingPrice !== "";
-  if (askProvided && !isValidPrice(askingPrice)) {
-    return json(400, { error: "askingPrice must be a non-negative number under 10,000,000" });
+  // Auction → platform required, asking price ignored (auctions don't take
+  // an upfront ask). Private sale → optional asking price, no platform.
+  let auctionPlatformValue = null;
+  let askingValue = null;
+  if (type === "auction") {
+    if (!auctionPlatform || !VALID_AUCTION_PLATFORMS.has(auctionPlatform)) {
+      return json(400, { error: "auctionPlatform must be 'fanatics' or 'ebay'" });
+    }
+    auctionPlatformValue = auctionPlatform;
+  } else {
+    const askProvided = askingPrice !== null && askingPrice !== undefined && askingPrice !== "";
+    if (askProvided && !isValidPrice(askingPrice)) {
+      return json(400, { error: "askingPrice must be a non-negative number under 10,000,000" });
+    }
+    askingValue = askProvided ? parseFloat(askingPrice) : null;
   }
-  const askingValue = askProvided ? parseFloat(askingPrice) : null;
   const notesValue = sanitize(notes, 2000);
 
   const db = await getPool();
@@ -62,10 +74,10 @@ exports.handler = async (event) => {
   let consignment;
   try {
     const insert = await db.query(
-      `INSERT INTO consignments (user_id, card_id, type, asking_price, notes)
-       VALUES ($1, $2, $3, $4, $5)
+      `INSERT INTO consignments (user_id, card_id, type, asking_price, auction_platform, notes)
+       VALUES ($1, $2, $3, $4, $5, $6)
        RETURNING id, status, created_at`,
-      [userId, cardId, type, askingValue, notesValue]
+      [userId, cardId, type, askingValue, auctionPlatformValue, notesValue]
     );
     consignment = insert.rows[0];
   } catch (err) {

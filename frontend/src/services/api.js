@@ -164,12 +164,12 @@ export async function updateCardPrice(id, manualPrice) {
 }
 
 // ─── Consignments (collector) ─────────────────────────────────────────
-export async function createConsignment({ cardId, type, askingPrice, notes }) {
+export async function createConsignment({ cardId, type, askingPrice, auctionPlatform, notes }) {
   const headers = await authHeaders();
   const res = await fetch(`${API_BASE}/consignments`, {
     method: "POST",
     headers,
-    body: JSON.stringify({ cardId, type, askingPrice, notes }),
+    body: JSON.stringify({ cardId, type, askingPrice, auctionPlatform, notes }),
   });
   if (!res.ok) throw await readError(res);
   return res.json();

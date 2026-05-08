@@ -256,6 +256,14 @@ export class ApiStack extends Construct {
     });
     props.dbSecret.grantRead(migrationShowCoordsFn);
 
+    // Migration: auction_platform column on consignments.
+    const migrationAuctionPlatformFn = new NodejsFunction(this, "MigrationAddAuctionPlatform", {
+      ...sharedNodejsProps,
+      functionName: "scp-migration-add-auction-platform",
+      entry: path.join(functionsDir, "_migrations/add-auction-platform.js"),
+    });
+    props.dbSecret.grantRead(migrationAuctionPlatformFn);
+
     // Helper Lambda for the local geocoding pipeline — accepts a payload
     // of city/state → coords mappings and applies them as UPDATEs.
     // Direct-invoke only (no API route).
