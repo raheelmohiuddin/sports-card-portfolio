@@ -68,7 +68,10 @@ export default function NavHeader() {
               <NavLink to="/" label="Home" active={pathname === "/"} />
               <NavLink to="/about" label="About" active={pathname === "/about"} />
               {isAuth && (
-                <NavLink to="/portfolio" label="My Portfolio" active={pathname === "/portfolio"} badge="BETA" />
+                <>
+                  <NavLink to="/portfolio" label="My Portfolio" active={pathname === "/portfolio"} badge="BETA" />
+                  <NavLink to="/shows"     label="My Shows"     active={pathname.startsWith("/shows")} />
+                </>
               )}
             </nav>
 
@@ -330,12 +333,20 @@ function MobileMenu({ pathname, isAuth, username, email, role, onSignOut }) {
         <MobileItem to="/"          label="Home"        active={pathname === "/"}          onClick={() => go("/")} />
         <MobileItem to="/about"     label="About"       active={pathname === "/about"}     onClick={() => go("/about")} />
         {isAuth && (
-          <MobileItem
-            to="/portfolio"
-            label={<>My Portfolio <sup style={st.betaBadge}>BETA</sup></>}
-            active={pathname === "/portfolio"}
-            onClick={() => go("/portfolio")}
-          />
+          <>
+            <MobileItem
+              to="/portfolio"
+              label={<>My Portfolio <sup style={st.betaBadge}>BETA</sup></>}
+              active={pathname === "/portfolio"}
+              onClick={() => go("/portfolio")}
+            />
+            <MobileItem
+              to="/shows"
+              label="My Shows"
+              active={pathname.startsWith("/shows")}
+              onClick={() => go("/shows")}
+            />
+          </>
         )}
 
         {isAuth && (

@@ -1,0 +1,75 @@
+// GET /shows — upcoming shows joined to user_shows so each row carries
+// an `attending` boolean and the user's notes (if any). One round-trip
+// drives the full /shows page; the calendar, grid, filters, and toggle
+// state all read from this response.
+//
+// Query params (all optional):
+//   state   — 2-letter US code, exact match
+//   from    — YYYY-MM-DD, defaults to today
+//   to      — YYYY-MM-DD, no upper bound by default
+//   q       — case-insensitive substring match against name OR city
+//
+// Hard limit of 1000 rows. With ~5k upcoming shows nationwide that's
+// enough headroom for a default state-filtered query; client can narrow
+// further with state + date range.
+const { getPool, ensureUser } = require("../_db");
+const { json } = require("../_response");
+
+exports.handler = async (event) => {
+  const claims = event.requestContext?.authorizer?.jwt?.claims;
+  if (!claims) return json(401, { error: "Unauthorized" });
+
+  const db = await getPool();
+  const userId = await ensureUser(
+    db,
+    claims.sub,
+    claims.email,
+    claims.given_name ?? null,
+    claims.family_name ?? null,
+  );
+
+  const qs = event.queryStringParameters ?? {};
+  const state = (qs.state ?? "").trim().toUpperCase() || null;
+  const from  = (qs.from  ?? "").trim() || null;
+  const to    = (qs.to    ?? "").trim() || null;
+  const q     = (qs.q     ?? "").trim() || null;
+  const qLike = q ? `%${q}%` : null;
+
+  const params = [userId, from, to, state, qLike];
+  const sql = `
+    SELECT
+      cs.id, cs.tcdb_id, cs.name, cs.venue, cs.city, cs.state, cs.country,
+      cs.show_date, cs.start_time, cs.end_time,
+      (us.id IS NOT NULL) AS attending,
+      us.notes            AS attending_notes
+    FROM card_shows cs
+    LEFT JOIN user_shows us
+      ON us.card_show_id = cs.id AND us.user_id = $1
+    WHERE cs.show_date >= COALESCE($2::date, CURRENT_DATE)
+      AND ($3::date IS NULL OR cs.show_date <= $3::date)
+      AND ($4 IS NULL OR cs.state = $4)
+      AND ($5 IS NULL OR cs.name ILIKE $5 OR cs.city ILIKE $5)
+    ORDER BY cs.show_date ASC, cs.start_time ASC NULLS LAST
+    LIMIT 1000
+  `;
+  const res = await db.query(sql, params);
+
+  const shows = res.rows.map((r) => ({
+    id:         r.id,
+    tcdbId:     r.tcdb_id,
+    name:       r.name,
+    venue:      r.venue,
+    city:       r.city,
+    state:      r.state,
+    country:    r.country,
+    date:       r.show_date instanceof Date
+                  ? r.show_date.toISOString().slice(0, 10)
+                  : r.show_date,
+    startTime:  r.start_time,
+    endTime:    r.end_time,
+    attending:  r.attending,
+    attendingNotes: r.attending_notes ?? null,
+  }));
+
+  return json(200, shows);
+};

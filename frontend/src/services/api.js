@@ -181,6 +181,43 @@ export async function getAdminConsignments() {
   return res.json();
 }
 
+// ─── Card shows ───────────────────────────────────────────────────────
+// state, from, to, q are all optional. Server defaults from to today and
+// returns an `attending` flag per show joined to user_shows.
+export async function getShows({ state, from, to, q } = {}) {
+  const headers = await authHeaders();
+  const params = new URLSearchParams();
+  if (state) params.set("state", state);
+  if (from)  params.set("from",  from);
+  if (to)    params.set("to",    to);
+  if (q)     params.set("q",     q);
+  const qs = params.toString();
+  const res = await fetch(`${API_BASE}/shows${qs ? `?${qs}` : ""}`, { headers });
+  if (!res.ok) throw await readError(res);
+  return res.json();
+}
+
+export async function markAttending(showId, notes) {
+  const headers = await authHeaders();
+  const res = await fetch(`${API_BASE}/shows/${showId}/attending`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify(notes != null ? { notes } : {}),
+  });
+  if (!res.ok) throw await readError(res);
+  return res.json();
+}
+
+export async function unmarkAttending(showId) {
+  const headers = await authHeaders();
+  const res = await fetch(`${API_BASE}/shows/${showId}/attending`, {
+    method: "DELETE",
+    headers,
+  });
+  if (!res.ok) throw await readError(res);
+  return res.json();
+}
+
 // Single-card fetchers used by the admin sidebar (CardModal opened from
 // /admin/consignments). Same response shape as getCard / getCardSales —
 // CardModal's `loaders` prop swaps these in for cards the admin doesn't own.

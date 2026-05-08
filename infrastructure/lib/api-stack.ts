@@ -204,6 +204,38 @@ export class ApiStack extends Construct {
     });
     props.dbSecret.grantRead(migrationSoldPriceFn);
 
+    // Migration: card_shows + user_shows tables.
+    const migrationShowsTablesFn = new NodejsFunction(this, "MigrationAddShowsTables", {
+      ...sharedNodejsProps,
+      functionName: "scp-migration-add-shows-tables",
+      entry: path.join(functionsDir, "_migrations/add-shows-tables.js"),
+    });
+    props.dbSecret.grantRead(migrationShowsTablesFn);
+
+    // ─── Card-shows feature ───
+    const importShowsFn = new NodejsFunction(this, "ImportShows", {
+      ...sharedNodejsProps,
+      functionName: "scp-import-shows",
+      entry: path.join(functionsDir, "shows/import-shows.js"),
+      // Bulk insert can take a moment if the payload is large.
+      timeout: cdk.Duration.seconds(60),
+    });
+    const listShowsFn = new NodejsFunction(this, "ListShows", {
+      ...sharedNodejsProps,
+      functionName: "scp-list-shows",
+      entry: path.join(functionsDir, "shows/list-shows.js"),
+    });
+    const markAttendingFn = new NodejsFunction(this, "MarkAttending", {
+      ...sharedNodejsProps,
+      functionName: "scp-mark-attending",
+      entry: path.join(functionsDir, "shows/mark-attending.js"),
+    });
+    const unmarkAttendingFn = new NodejsFunction(this, "UnmarkAttending", {
+      ...sharedNodejsProps,
+      functionName: "scp-unmark-attending",
+      entry: path.join(functionsDir, "shows/unmark-attending.js"),
+    });
+
     // ─── Consignment + admin functions ───
     const createConsignmentFn = new NodejsFunction(this, "CreateConsignment", {
       ...sharedNodejsProps,
@@ -299,6 +331,10 @@ export class ApiStack extends Construct {
       adminConsignmentUpdateFn,
       adminCardFn,
       adminCardSalesFn,
+      importShowsFn,
+      listShowsFn,
+      markAttendingFn,
+      unmarkAttendingFn,
     ];
     for (const fn of [addCardFn, getCardsFn, getCardFn, deleteCardFn, psaLookupFn, portfolioValueFn, portfolioHistoryFn, cardSalesFn, updatePriceFn, updateCardFn, avatarUploadUrlFn, avatarViewUrlFn, ...consignmentAndAdminFns]) {
       props.dbSecret.grantRead(fn);
@@ -478,6 +514,25 @@ export class ApiStack extends Construct {
       path: "/admin/cards/{id}/sales",
       methods: [apigwv2.HttpMethod.GET],
       integration: new apigwv2integrations.HttpLambdaIntegration("AdminCardSales", adminCardSalesFn),
+      ...authRoute,
+    });
+
+    api.addRoutes({
+      path: "/shows",
+      methods: [apigwv2.HttpMethod.GET],
+      integration: new apigwv2integrations.HttpLambdaIntegration("ListShows", listShowsFn),
+      ...authRoute,
+    });
+    api.addRoutes({
+      path: "/shows/{id}/attending",
+      methods: [apigwv2.HttpMethod.POST],
+      integration: new apigwv2integrations.HttpLambdaIntegration("MarkAttending", markAttendingFn),
+      ...authRoute,
+    });
+    api.addRoutes({
+      path: "/shows/{id}/attending",
+      methods: [apigwv2.HttpMethod.DELETE],
+      integration: new apigwv2integrations.HttpLambdaIntegration("UnmarkAttending", unmarkAttendingFn),
       ...authRoute,
     });
 

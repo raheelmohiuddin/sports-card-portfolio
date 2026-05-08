@@ -13,6 +13,7 @@ import PortfolioPage from "./pages/PortfolioPage.jsx";
 import AddCardPage from "./pages/AddCardPage.jsx";
 import AdminPage from "./pages/AdminPage.jsx";
 import AdminConsignmentsPage from "./pages/AdminConsignmentsPage.jsx";
+import ShowsPage from "./pages/ShowsPage.jsx";
 
 function ProtectedRoute({ children }) {
   const { authStatus } = useAuthenticator((ctx) => [ctx.authStatus]);
@@ -50,6 +51,7 @@ export default function App() {
           <Route path="/add-card"  element={<ProtectedRoute><AddCardPage /></ProtectedRoute>} />
           <Route path="/profile"   element={<ProtectedRoute><ProfilePage /></ProtectedRoute>} />
           <Route path="/settings"  element={<ProtectedRoute><SettingsPage /></ProtectedRoute>} />
+          <Route path="/shows"     element={<ProtectedRoute><ShowsPage /></ProtectedRoute>} />
           {/* Admin routes — AdminGuard handles unauth + non-admin redirects.
               Wrapped in <main className="container"> through ProtectedRoute is
               wrong here because the admin pages own a full-bleed sub-nav; we
