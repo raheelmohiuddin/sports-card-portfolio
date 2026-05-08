@@ -155,7 +155,10 @@ export default function ShowsPage() {
         {error && <div style={st.errorBanner}>{error}</div>}
 
         {/* ── Calendar / list view ── */}
-        <CalendarPanel attending={attending} />
+        <CalendarPanel
+          attending={attending}
+          onToggleAttending={toggleAttending}
+        />
 
         {/* ── Browse + filter ── */}
         <FilterBar
@@ -198,7 +201,7 @@ export default function ShowsPage() {
 }
 
 // ─── Calendar panel ──────────────────────────────────────────────────
-function CalendarPanel({ attending }) {
+function CalendarPanel({ attending, onToggleAttending }) {
   const today = useMemo(() => startOfDay(new Date()), []);
   const [viewMode, setViewMode] = useState("month"); // month | list
   const [cursor, setCursor]     = useState(() => startOfMonth(new Date()));
@@ -331,7 +334,20 @@ function CalendarPanel({ attending }) {
               </div>
               <div style={st.expandedList}>
                 {expandedShows.map((s) => (
-                  <ExpandedShowRow key={s.id} show={s} />
+                  <ExpandedShowRow
+                    key={s.id}
+                    show={s}
+                    onRemove={(show) => {
+                      // Toggle off + close the popover. Optimistic
+                      // update in onToggleAttending makes the show
+                      // disappear from the calendar/byDate map on
+                      // the next render; clearing expandedDate
+                      // collapses the popover at the same time so
+                      // the row doesn't briefly show "0 attending".
+                      onToggleAttending?.(show);
+                      setExpandedDate(null);
+                    }}
+                  />
                 ))}
               </div>
             </div>
@@ -350,7 +366,7 @@ function CalendarPanel({ attending }) {
   );
 }
 
-function ExpandedShowRow({ show, compact }) {
+function ExpandedShowRow({ show, compact, onRemove }) {
   const isRange = show.endDate && show.endDate !== show.date;
   const start = show.date    ? new Date(`${show.date}T00:00:00`)    : null;
   const end   = show.endDate ? new Date(`${show.endDate}T00:00:00`) : null;
@@ -361,23 +377,47 @@ function ExpandedShowRow({ show, compact }) {
     : (show.startTime || "—");
   return (
     <div style={st.expandedRow}>
-      <div style={st.expandedDate}>{dateLabel}</div>
-      <div style={st.expandedDetails}>
-        <div style={st.expandedName}>{show.name}</div>
-        <div style={st.expandedMeta}>
-          {[show.venue, show.city ? `${show.city}, ${show.state}` : show.state]
-            .filter(Boolean).join(" · ")}
-          {show.startTime && (
-            <span> · {formatTimeRange(show.startTime, show.endTime)}</span>
-          )}
+      <div style={st.expandedTopLine}>
+        <div style={st.expandedDate}>{dateLabel}</div>
+        <div style={st.expandedDetails}>
+          <div style={st.expandedName}>{show.name}</div>
+          <div style={st.expandedMeta}>
+            {[show.venue, show.city ? `${show.city}, ${show.state}` : show.state]
+              .filter(Boolean).join(" · ")}
+            {show.startTime && (
+              <span> · {formatTimeRange(show.startTime, show.endTime)}</span>
+            )}
+          </div>
         </div>
       </div>
-      <a
-        href={`https://www.tcdb.com/CardShows.cfm?MODE=VIEW&ID=${show.tcdbId}`}
-        target="_blank" rel="noreferrer"
-        style={st.expandedLink}
-      >TCDB ↗</a>
+      {onRemove && (
+        <div style={st.expandedActions}>
+          <RemoveAttendingButton onClick={() => onRemove(show)} />
+        </div>
+      )}
     </div>
+  );
+}
+
+// Subtle red-outlined button used inside the calendar click popover
+// to let the user un-attend a show without leaving the calendar.
+// Hover state needs onMouseEnter/Leave (CSS :hover doesn't reach
+// inline styles) — small price for the dark-aesthetic match.
+function RemoveAttendingButton({ onClick }) {
+  const [hover, setHover] = useState(false);
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      style={{
+        ...st.removeAttendingBtn,
+        ...(hover ? st.removeAttendingBtnHover : {}),
+      }}
+    >
+      Remove from Attending
+    </button>
   );
 }
 
@@ -971,13 +1011,46 @@ const st = {
     display: "flex", flexDirection: "column",
     gap: "0.4rem",
   },
+  // Calendar click popover row. Vertical stack: top line shows date
+  // + name + meta; below sits the optional Remove from Attending
+  // button (rendered only when onRemove is passed — list-view rows
+  // skip it).
   expandedRow: {
+    display: "flex", flexDirection: "column",
+    gap: "0.6rem",
+    padding: "0.7rem 0",
+    borderTop: `1px solid ${colors.borderSoft}`,
+  },
+  expandedTopLine: {
     display: "grid",
-    gridTemplateColumns: "100px 1fr auto",
+    gridTemplateColumns: "100px 1fr",
     alignItems: "center",
     gap: "0.85rem",
-    padding: "0.55rem 0",
-    borderTop: `1px solid ${colors.borderSoft}`,
+  },
+  expandedActions: {
+    display: "flex",
+    justifyContent: "flex-start",
+  },
+  // ── Remove from Attending button ──
+  // Subtle red outline, fills red on hover. Spec verbatim from the
+  // user request (border 1px #f87171, color #f87171, transparent bg,
+  // hover state inverts to filled). State-driven hover because inline
+  // styles can't address :hover.
+  removeAttendingBtn: {
+    background: "transparent",
+    color: "#f87171",
+    border: "1px solid #f87171",
+    borderRadius: 6,
+    padding: "0.4rem 0.85rem",
+    fontSize: "0.7rem", fontWeight: 800,
+    letterSpacing: "0.1em", textTransform: "uppercase",
+    cursor: "pointer",
+    fontFamily: "inherit",
+    transition: "background 0.12s, color 0.12s",
+  },
+  removeAttendingBtnHover: {
+    background: "#f87171",
+    color: "#0f172a",
   },
   expandedDate: {
     color: colors.goldLight,
@@ -996,15 +1069,6 @@ const st = {
     fontSize: "0.78rem",
     marginTop: "0.15rem",
     overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-  },
-  expandedLink: {
-    color: colors.goldLight,
-    fontSize: "0.72rem", fontWeight: 700,
-    letterSpacing: "0.08em", textTransform: "uppercase",
-    textDecoration: "none",
-    padding: "0.3rem 0.6rem",
-    border: `1px solid ${colors.borderGold}`,
-    borderRadius: 999,
   },
   listView: {
     display: "flex", flexDirection: "column",
