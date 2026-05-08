@@ -910,8 +910,13 @@ function FilterBar({
           {/* Active proximity pill — shows the current zip + radius
               with a gold X to clear. Only renders when nearMe is set. */}
           {nearMe && (
-            <span style={st.nearMeActivePill} title={`Within ${nearMe.radiusMiles} mi of ${nearMe.zip}`}>
-              {nearMe.zip} · {nearMe.radiusMiles}mi
+            <span
+              style={st.nearMeActivePill}
+              title={nearMe.radiusMiles
+                ? `Within ${nearMe.radiusMiles} mi of ${nearMe.zip}`
+                : `Sorted by distance from ${nearMe.zip}`}
+            >
+              {nearMe.zip} · {nearMe.radiusMiles ? `${nearMe.radiusMiles}mi` : "Any"}
               <button
                 type="button"
                 onClick={onNearMeClear}
@@ -968,12 +973,25 @@ function FilterBar({
 // {country, state, city} — no coordinates. We use zippopotam.us instead
 // (free, HTTPS, returns latitude + longitude in a single call) so the
 // downstream Haversine filter actually has inputs to work with.
+// Radius sentinel: "any" means no distance cutoff (still sort by
+// distance on the server). Numeric strings ("25", "50", ...) parse to
+// the radiusMiles value sent to /shows.
+function parseRadius(raw) {
+  if (raw === "any") return null;
+  const n = parseInt(raw, 10);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
 function NearMePanel({ onApply }) {
   const [zip, setZip]       = useState(() => localStorage.getItem(NEAR_ME_ZIP_KEY) ?? "");
-  const [radius, setRadius] = useState(() => parseInt(localStorage.getItem(NEAR_ME_RADIUS_KEY) ?? "50", 10));
+  // Radius is stored as a string ("any" | "25" | "50" | "100" | "250")
+  // because <select> values are strings; keeps round-trip with the
+  // <option value> tags clean. Default "any" per the spec — entering a
+  // zip code shows every show sorted nearest-first by default.
+  const [radius, setRadius] = useState(() => localStorage.getItem(NEAR_ME_RADIUS_KEY) ?? "any");
   const [error, setError]   = useState(null);
   const [zipFocused, setZipFocused] = useState(false);
-  const lastRef = useRef({ zip: "", radius: 0 });
+  const lastRef = useRef({ zip: "", radius: "" });
 
   async function runLookup(z, r) {
     if (!/^\d{5}$/.test(z)) return;
@@ -996,9 +1014,14 @@ function NearMePanel({ onApply }) {
       lastRef.current = { zip: z, radius: r };
       try {
         localStorage.setItem(NEAR_ME_ZIP_KEY,    z);
-        localStorage.setItem(NEAR_ME_RADIUS_KEY, String(r));
+        localStorage.setItem(NEAR_ME_RADIUS_KEY, r);
       } catch {}
-      onApply({ zip: z, radiusMiles: r, centerLat: lat, centerLng: lng });
+      onApply({
+        zip: z,
+        radiusMiles: parseRadius(r),  // null when r === "any"
+        centerLat: lat,
+        centerLng: lng,
+      });
     } catch {
       setError("Network error.");
     }
@@ -1028,16 +1051,17 @@ function NearMePanel({ onApply }) {
         value={radius}
         aria-label="Search radius"
         onChange={(e) => {
-          const next = parseInt(e.target.value, 10);
+          const next = e.target.value;
           setRadius(next);
           if (zip.length === 5) runLookup(zip, next);
         }}
         style={st.nearMeRadiusSelect}
       >
-        <option value={25}  style={{ background: "#0f172a", color: "#fff" }}>25mi</option>
-        <option value={50}  style={{ background: "#0f172a", color: "#fff" }}>50mi</option>
-        <option value={100} style={{ background: "#0f172a", color: "#fff" }}>100mi</option>
-        <option value={250} style={{ background: "#0f172a", color: "#fff" }}>250mi</option>
+        <option value="any" style={{ background: "#0f172a", color: "#fff" }}>Any</option>
+        <option value="25"  style={{ background: "#0f172a", color: "#fff" }}>25mi</option>
+        <option value="50"  style={{ background: "#0f172a", color: "#fff" }}>50mi</option>
+        <option value="100" style={{ background: "#0f172a", color: "#fff" }}>100mi</option>
+        <option value="250" style={{ background: "#0f172a", color: "#fff" }}>250mi</option>
       </select>
       {error && <span style={st.nearMeInlineError}>{error}</span>}
     </div>

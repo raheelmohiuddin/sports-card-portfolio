@@ -209,10 +209,15 @@ export async function getShows({ states, from, to, q, centerLat, centerLng, radi
   if (from)  params.set("from",  from);
   if (to)    params.set("to",    to);
   if (q)     params.set("q",     q);
-  if (Number.isFinite(centerLat) && Number.isFinite(centerLng) && Number.isFinite(radiusMiles)) {
-    params.set("centerLat",   String(centerLat));
-    params.set("centerLng",   String(centerLng));
-    params.set("radiusMiles", String(radiusMiles));
+  // Center coords drive the sort (nearest-first) on the server even
+  // when no radius cutoff is set ("Any" option). Radius is only sent
+  // when it's a positive number — the absence is the "any" signal.
+  if (Number.isFinite(centerLat) && Number.isFinite(centerLng)) {
+    params.set("centerLat", String(centerLat));
+    params.set("centerLng", String(centerLng));
+    if (Number.isFinite(radiusMiles) && radiusMiles > 0) {
+      params.set("radiusMiles", String(radiusMiles));
+    }
   }
   const qs = params.toString();
   const res = await fetch(`${API_BASE}/shows${qs ? `?${qs}` : ""}`, { headers });
