@@ -339,6 +339,19 @@ function spanPillStyle(s) {
   };
 }
 
+// Stacked WEEKDAY / DAY / MONTH pill — restored from the first
+// ShowsPage commit (673b333). Used for both start and end dates so the
+// two pills are visually identical in multi-day shows.
+function DatePill({ d }) {
+  return (
+    <div style={st.dateBox}>
+      <div style={st.dateWeekday}>{d ? weekday(d).toUpperCase() : "—"}</div>
+      <div style={st.dateDay}>{d ? d.getDate() : "—"}</div>
+      <div style={st.dateMonth}>{d ? shortMonth(d) : ""}</div>
+    </div>
+  );
+}
+
 function ToggleBtn({ active, onClick, children }) {
   return (
     <button
@@ -424,21 +437,15 @@ function ShowCard({ show, onToggle }) {
         </div>
       )}
 
-      {/* Date header — both dates sit inside matching dark/gold-bordered
-          boxes. Multi-day adds `dateBoxSplit` (flex:1) so the two boxes
-          take equal width and visually mirror each other; the arrow is
-          fixed-width and naturally centered between them. Single-day
-          renders only the left box, content-sized + left-aligned. */}
+      {/* Date header — restored to the original stacked WEEKDAY / DAY /
+          MONTH pill style. Multi-day adds a gold arrow + a matching pill
+          for the end date; single-day renders only the start pill. */}
       <div style={st.dateRow}>
-        <div style={{ ...st.dateBox, ...(endDate ? st.dateBoxSplit : {}) }}>
-          {formatDateLabel(date)}
-        </div>
+        <DatePill d={date} />
         {endDate && (
           <>
             <div style={st.dateArrow} aria-hidden>→</div>
-            <div style={{ ...st.dateBox, ...st.dateBoxSplit }}>
-              {formatDateLabel(endDate)}
-            </div>
+            <DatePill d={endDate} />
           </>
         )}
       </div>
@@ -828,30 +835,44 @@ const st = {
     paddingLeft: "calc(1.2rem - 2px)",
     boxShadow: "0 0 0 1px rgba(245,158,11,0.15), 0 8px 24px rgba(245,158,11,0.08)",
   },
-  // ── Date header (boxed dates flanking a gold arrow) ──
-  // Each date sits in its own dark / gold-bordered box. Multi-day pairs
-  // get `dateBoxSplit` so flex:1 balances the two boxes to identical
-  // widths regardless of their text length; single-day boxes stay
-  // content-sized at the left of the row.
+  // ── Date header (original stacked-pill spec, restored verbatim) ──
+  // dateBox / dateWeekday / dateDay / dateMonth match the
+  // cardDateBlock / cardWeekday / cardDay / cardMonth values from the
+  // first ShowsPage commit (673b333) so single-day cards look exactly
+  // like they did on launch. Both pills share the same style; the gold
+  // arrow lives between them in multi-day shows.
   dateRow: {
     display: "flex", alignItems: "center",
     gap: "0.65rem",
   },
   dateBox: {
+    display: "flex", flexDirection: "column",
+    alignItems: "center",
     background: "rgba(15,23,42,0.6)",
-    border: `1px solid ${colors.borderGold}`,
+    border: `1px solid ${colors.borderSoft}`,
     borderRadius: 8,
-    padding: "0.5rem 0.95rem",
-    textAlign: "center",
-    color: colors.textPrimary,
-    fontSize: "0.95rem", fontWeight: 700,
-    letterSpacing: "0.01em",
-    fontVariantNumeric: "tabular-nums",
-    whiteSpace: "nowrap",
+    padding: "0.35rem 0.6rem",
+    minWidth: 56,
   },
-  dateBoxSplit: { flex: 1 },
+  dateWeekday: {
+    color: colors.gold,
+    fontSize: "0.6rem", fontWeight: 800,
+    letterSpacing: "0.18em",
+  },
+  dateDay: {
+    color: colors.textPrimary,
+    fontSize: "1.4rem", fontWeight: 800,
+    fontVariantNumeric: "tabular-nums",
+    lineHeight: 1, letterSpacing: "-0.02em",
+    marginTop: "0.1rem",
+  },
+  dateMonth: {
+    color: colors.textMuted,
+    fontSize: "0.62rem", fontWeight: 700,
+    letterSpacing: "0.12em", textTransform: "uppercase",
+    marginTop: "0.1rem",
+  },
   dateArrow: {
-    flex: "0 0 auto",
     color: colors.gold, // #f59e0b
     fontSize: "1.25rem", fontWeight: 800,
     lineHeight: 1,
