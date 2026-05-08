@@ -895,93 +895,83 @@ function NearMePanel({ onApply, onClose }) {
   const [zip, setZip]       = useState(() => localStorage.getItem(NEAR_ME_ZIP_KEY) ?? "");
   const [radius, setRadius] = useState(() => parseInt(localStorage.getItem(NEAR_ME_RADIUS_KEY) ?? "50", 10));
   const [error, setError]   = useState(null);
-  const [busy, setBusy]     = useState(false);
-  const wrapRef             = useRef(null);
+  // Track the last-searched (zip, radius) tuple so we don't re-fire on
+  // every keystroke or radius reselection when the inputs are unchanged.
+  const lastRef = useRef({ zip: "", radius: 0 });
+  const wrapRef = useRef(null);
 
-  // Click-outside dismissal — bound while the panel is mounted.
   useEffect(() => {
-    function onMouseDown(e) {
-      if (!wrapRef.current?.contains(e.target)) onClose();
-    }
+    function onMouseDown(e) { if (!wrapRef.current?.contains(e.target)) onClose(); }
     document.addEventListener("mousedown", onMouseDown);
     return () => document.removeEventListener("mousedown", onMouseDown);
   }, [onClose]);
 
-  // Escape dismissal.
   useEffect(() => {
     function onKey(e) { if (e.key === "Escape") onClose(); }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
-  async function handleSearch() {
+  async function runSearch(z, r) {
+    if (!/^\d{5}$/.test(z)) return;
+    if (z === lastRef.current.zip && r === lastRef.current.radius) return;
     setError(null);
-    if (!/^\d{5}$/.test(zip)) {
-      setError("Enter a valid 5-digit US zip code.");
-      return;
-    }
-    setBusy(true);
     try {
-      const res = await fetch(`https://api.zippopotam.us/us/${zip}`);
+      const res = await fetch(`https://api.zippopotam.us/us/${z}`);
       if (!res.ok) {
-        setError(res.status === 404 ? "Zip code not found." : `Lookup failed (${res.status}).`);
+        setError(res.status === 404 ? "Zip not found." : "Lookup failed.");
         return;
       }
       const data = await res.json();
       const stateAbbr = data?.places?.[0]?.["state abbreviation"];
-      if (!stateAbbr) {
-        setError("Couldn't determine state from this zip.");
-        return;
-      }
-      onApply({ zip, radius, stateAbbr });
+      if (!stateAbbr) { setError("Couldn't resolve state."); return; }
+      lastRef.current = { zip: z, radius: r };
+      onApply({ zip: z, radius: r, stateAbbr });
     } catch {
-      setError("Network error — check your connection.");
-    } finally {
-      setBusy(false);
+      setError("Network error.");
     }
   }
 
   return (
     <div ref={wrapRef} style={st.nearMePanel} role="dialog" aria-label="Near Me filter">
-      <div style={st.nearMeRow}>
-        <label style={st.nearMeFieldLabel}>Zip Code</label>
+      <div style={st.nearMeInputRow}>
         <input
           type="text"
           inputMode="numeric"
           maxLength={5}
           autoFocus
           value={zip}
-          onChange={(e) => setZip(e.target.value.replace(/[^\d]/g, ""))}
-          onKeyDown={(e) => { if (e.key === "Enter") handleSearch(); }}
-          placeholder="e.g. 19103"
+          placeholder="Zip"
+          aria-label="Zip code"
+          onChange={(e) => {
+            const next = e.target.value.replace(/[^\d]/g, "");
+            setZip(next);
+            setError(null);
+            // Auto-fire as soon as the user finishes typing 5 digits.
+            if (next.length === 5) runSearch(next, radius);
+          }}
+          onBlur={() => { if (zip.length === 5) runSearch(zip, radius); }}
           style={st.nearMeInput}
         />
-      </div>
-      <div style={st.nearMeRow}>
-        <label style={st.nearMeFieldLabel}>Radius</label>
         <select
           value={radius}
-          onChange={(e) => setRadius(parseInt(e.target.value, 10))}
+          aria-label="Search radius"
+          onChange={(e) => {
+            const next = parseInt(e.target.value, 10);
+            setRadius(next);
+            // If a complete zip is already entered, re-run with the new
+            // radius right away so the user doesn't have to re-type.
+            if (zip.length === 5) runSearch(zip, next);
+          }}
           style={st.nearMeSelect}
         >
-          <option value={25}  style={{ color: "#0f172a" }}>25 miles</option>
-          <option value={50}  style={{ color: "#0f172a" }}>50 miles</option>
-          <option value={100} style={{ color: "#0f172a" }}>100 miles</option>
-          <option value={250} style={{ color: "#0f172a" }}>250 miles</option>
+          <option value={25}  style={{ color: "#0f172a" }}>25 mi</option>
+          <option value={50}  style={{ color: "#0f172a" }}>50 mi</option>
+          <option value={100} style={{ color: "#0f172a" }}>100 mi</option>
+          <option value={250} style={{ color: "#0f172a" }}>250 mi</option>
         </select>
       </div>
       {error && <div style={st.nearMeError}>{error}</div>}
-      <div style={st.nearMeActions}>
-        <button type="button" onClick={onClose} style={st.nearMeCancel}>Cancel</button>
-        <button
-          type="button"
-          onClick={handleSearch}
-          disabled={busy}
-          style={{ ...st.nearMeSearchBtn, ...(busy ? st.nearMeSearchBtnBusy : {}) }}
-        >
-          {busy ? "Searching…" : "Search"}
-        </button>
-      </div>
     </div>
   );
 }
@@ -1573,50 +1563,47 @@ const st = {
     boxShadow: "0 0 0 2px rgba(245,158,11,0.55), 0 4px 12px rgba(245,158,11,0.25)",
   },
   // ── Near Me inline prompt ──
-  // Anchored below the button via top: calc(100% + 8px); right:0
-  // so it expands leftward and stays inside the filter bar's bounds.
-  // Gold border per spec; dark gradient body matches the rest of the
-  // app's panels.
+  // Stripped to the bare minimum: just the two compact inputs side by
+  // side, no panel chrome (the inputs carry their own dark backgrounds
+  // so they're visible without a wrapping box). Anchored below the
+  // button via top: calc(100% + 8px); right:0 so the row hangs to the
+  // left of the trigger and stays inside the filter bar bounds.
   nearMePanel: {
     position: "absolute",
     top: "calc(100% + 8px)",
     right: 0,
-    width: 280,
-    background: "linear-gradient(160deg, #0f172a 0%, #0a0f1f 100%)",
-    border: `1px solid ${colors.borderGold}`,
-    borderRadius: 10,
-    boxShadow: "0 12px 32px rgba(0,0,0,0.55), 0 0 0 1px rgba(245,158,11,0.08), 0 0 28px rgba(245,158,11,0.06)",
-    padding: "0.95rem 1rem 0.85rem",
+    background: "transparent",
+    padding: 0,
+    border: "none",
+    boxShadow: "none",
     zIndex: 70,
-    display: "flex", flexDirection: "column", gap: "0.7rem",
+    display: "flex", flexDirection: "column",
+    gap: 4,
   },
-  nearMeRow: {
-    display: "flex", flexDirection: "column", gap: "0.3rem",
-  },
-  nearMeFieldLabel: {
-    color: colors.textFaint,
-    fontSize: "0.62rem", fontWeight: 700,
-    letterSpacing: "0.16em", textTransform: "uppercase",
+  nearMeInputRow: {
+    display: "flex", alignItems: "center",
+    gap: 6,
   },
   nearMeInput: {
-    background: "rgba(15,23,42,0.7)",
-    color: colors.textPrimary,
-    border: `1px solid ${colors.borderGold}`,
-    borderRadius: 6,
-    padding: "0.5rem 0.7rem",
-    fontSize: "0.92rem", fontWeight: 700,
+    width: 100,
+    height: 28,
+    padding: "2px 8px",
+    borderRadius: 4,
+    background: "rgba(15,23,42,0.8)",
+    color: "#fff",
+    border: "1px solid rgba(255,255,255,0.15)",
+    fontSize: 12,
     fontFamily: "inherit",
     fontVariantNumeric: "tabular-nums",
     letterSpacing: "0.04em",
     outline: "none",
+    boxSizing: "border-box",
   },
-  // Compact inline selector — sized small per spec (28px / 12px / 2px 8px)
-  // and stripped of native chrome via appearance:none so the styling
-  // looks consistent across browsers. Matches the dark-input palette
-  // (slate bg, white text, hairline white border) rather than the gold
-  // input style — keeps the gold restricted to the zip field as the
-  // primary action input.
+  // Matches nearMeInput visually — same height/font/padding/radius and
+  // border, just narrower. appearance:none strips the native dropdown
+  // chrome so it reads as a tight inline pill, not a form element.
   nearMeSelect: {
+    width: 90,
     height: 28,
     padding: "2px 8px",
     borderRadius: 4,
@@ -1632,44 +1619,14 @@ const st = {
     boxSizing: "border-box",
     outline: "none",
   },
+  // Tiny inline error — only renders when there's an issue with the
+  // zip lookup. Sized to fit under the 100+90px input row.
   nearMeError: {
     color: "#fca5a5",
-    fontSize: "0.72rem",
-    background: "rgba(248,113,113,0.08)",
-    border: "1px solid rgba(248,113,113,0.32)",
-    borderRadius: 6,
-    padding: "0.4rem 0.55rem",
-  },
-  nearMeActions: {
-    display: "flex", justifyContent: "flex-end", gap: "0.5rem",
-    marginTop: "0.15rem",
-  },
-  nearMeCancel: {
-    background: "transparent",
-    color: colors.textMuted,
-    border: `1px solid ${colors.borderSoft}`,
-    borderRadius: 6,
-    padding: "0.4rem 0.85rem",
-    fontFamily: "inherit",
-    fontSize: "0.72rem", fontWeight: 700,
-    letterSpacing: "0.1em", textTransform: "uppercase",
-    cursor: "pointer",
-  },
-  nearMeSearchBtn: {
-    background: gradients.goldPill,
-    color: "#0f172a",
-    border: "none",
-    borderRadius: 6,
-    padding: "0.4rem 1rem",
-    fontFamily: "inherit",
-    fontSize: "0.72rem", fontWeight: 800,
-    letterSpacing: "0.1em", textTransform: "uppercase",
-    cursor: "pointer",
-    boxShadow: "0 4px 10px rgba(245,158,11,0.2)",
-  },
-  nearMeSearchBtnBusy: {
-    opacity: 0.7,
-    cursor: "wait",
+    fontSize: 11,
+    fontWeight: 600,
+    letterSpacing: "0.02em",
+    maxWidth: 196,
   },
   filterMeta: {
     marginTop: "0.85rem",
