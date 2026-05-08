@@ -145,7 +145,43 @@ const services = {
     // account"). It's set post-confirmation on UsernameSetupPage.
     const username = generatePrimaryUsername();
     rememberSignupUsername(username);
-    return signUp({ ...input, username });
+
+    // TEMP diagnostic — dump the input shape Amplify hands us so we can see
+    // exactly where the form-field values land. Remove once stable.
+    console.log("handleSignUp input:", JSON.stringify(input, (_k, v) =>
+      typeof v === "string" && v.length > 4 ? `${v.slice(0, 2)}…(${v.length})` : v
+    ));
+
+    // Defensively normalise the userAttributes so we never spread away
+    // given_name / family_name. Amplify v6's Authenticator should put them
+    // under input.options.userAttributes, but some Authenticator versions
+    // place form-field values at the top level of `input` instead. We pick
+    // up both shapes and merge so signUp always receives the Cognito-required
+    // attributes (given_name, family_name, email).
+    const fromOptions = input?.options?.userAttributes ?? {};
+    const fromTopLevel = {};
+    for (const k of ["email", "given_name", "family_name", "name"]) {
+      if (input?.[k] != null) fromTopLevel[k] = input[k];
+    }
+    const userAttributes = {
+      ...fromTopLevel,
+      ...fromOptions,
+    };
+
+    if (!userAttributes.given_name || !userAttributes.family_name) {
+      console.error("handleSignUp: given_name/family_name missing from input", {
+        userAttributesKeys: Object.keys(userAttributes),
+      });
+    }
+
+    return signUp({
+      username,
+      password: input.password,
+      options: {
+        ...(input?.options ?? {}),
+        userAttributes,
+      },
+    });
   },
   async handleConfirmSignUp(input) {
     const stored = recallSignupUsername();
