@@ -1086,6 +1086,14 @@ const st = {
     padding: "0.45rem 0.65rem",
     fontSize: "0.85rem",
     fontFamily: "inherit",
+    // color-scheme: dark tells the browser to render native form
+    // controls (including the date picker popup) in dark mode, so the
+    // calendar that opens from <input type="date"> isn't a stark white
+    // panel against our dark page. accent-color paints the picker's
+    // selection highlight gold to match the rest of the app.
+    // The trigger icon's color comes from CSS in index.css.
+    colorScheme: "dark",
+    accentColor: "#f59e0b",
   },
   nearMeBtn: {
     background: gradients.goldPill,
