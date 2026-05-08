@@ -295,7 +295,9 @@ function ExpandedShowRow({ show, compact }) {
   const start = show.date    ? new Date(`${show.date}T00:00:00`)    : null;
   const end   = show.endDate ? new Date(`${show.endDate}T00:00:00`) : null;
   const dateLabel = compact
-    ? (isRange ? formatDateRange(start, end) : formatDateLine(show.date))
+    ? (isRange
+        ? `${formatDateLabel(start)} → ${formatDateLabel(end)}`
+        : formatDateLine(show.date))
     : (show.startTime || "—");
   return (
     <div style={st.expandedRow}>
@@ -414,32 +416,32 @@ function ShowCard({ show, onToggle }) {
 
   return (
     <article style={{ ...st.card, ...(show.attending ? st.cardAttending : {}) }}>
-      <div style={st.cardTopRow}>
-        <div style={st.cardDateBlock}>
-          <div style={st.cardWeekday}>{date ? weekday(date).toUpperCase() : "—"}</div>
-          <div style={st.cardDay}>{date ? date.getDate() : "—"}</div>
-          <div style={st.cardMonth}>{date ? shortMonth(date) : ""}</div>
+      {/* Countdown lives on its own line above the date row so the
+          three-element date layout (start | → | end) stays balanced. */}
+      {show.attending && countdown && (
+        <div style={st.countdownRow}>
+          <span style={st.countdown}>{countdown}</span>
+        </div>
+      )}
+
+      {/* Date header — 3 cells via flex:1 sides + a fixed-width middle.
+          Single-day shows render only the left cell; the row stays the
+          same shape so cards line up uniformly in the grid. */}
+      <div style={st.dateRow}>
+        <div style={{ ...st.dateText, ...st.dateTextLeft }}>
+          {formatDateLabel(date)}
         </div>
         {endDate && (
-          <div style={st.dateThrough} title="Multi-day show">
-            <span style={st.dateThroughArrow}>→</span>
-            <div style={st.dateThroughDay}>{endDate.getDate()}</div>
-            <div style={st.dateThroughMonth}>
-              {sameMonth(date, endDate) ? "" : shortMonth(endDate)}
+          <>
+            <div style={st.dateArrow} aria-hidden>→</div>
+            <div style={{ ...st.dateText, ...st.dateTextRight }}>
+              {formatDateLabel(endDate)}
             </div>
-          </div>
-        )}
-        {show.attending && countdown && (
-          <div style={st.countdown}>{countdown}</div>
+          </>
         )}
       </div>
 
       <h3 style={st.cardName}>{show.name || "Untitled show"}</h3>
-      {endDate && (
-        <div style={st.cardDateRange}>
-          {formatDateRange(date, endDate)}
-        </div>
-      )}
       {show.venue && <div style={st.cardVenue}>{show.venue}</div>}
       <div style={st.cardCity}>
         {show.city ? `${show.city}, ${show.state}` : show.state}
@@ -497,20 +499,11 @@ function formatTimeRange(start, end) {
   if (start && end) return `${start} – ${end}`;
   return start || end || "";
 }
-function sameMonth(a, b) {
-  return a && b && a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth();
-}
-// "May 9 – May 11" within a month, "May 30 – Jun 2" across months.
-// Year is suffixed only if start and end are in different years.
-function formatDateRange(start, end) {
-  if (!start || !end) return "";
-  const sameY = start.getFullYear() === end.getFullYear();
-  const left  = `${shortMonth(start)} ${start.getDate()}`;
-  const right = sameMonth(start, end)
-    ? `${end.getDate()}`
-    : `${shortMonth(end)} ${end.getDate()}`;
-  const yearTail = sameY ? `, ${start.getFullYear()}` : `, ${start.getFullYear()} – ${end.getFullYear()}`;
-  return `${left} – ${right}${yearTail}`;
+// Compact label used in both the start and end cells of the date row,
+// so multi-day shows have visually identical date typography.
+function formatDateLabel(d) {
+  if (!d) return "—";
+  return `${weekday(d)} ${shortMonth(d)} ${d.getDate()}`;
 }
 function daysFromToday(d) {
   const today = startOfDay(new Date());
@@ -833,68 +826,40 @@ const st = {
     paddingLeft: "calc(1.2rem - 2px)",
     boxShadow: "0 0 0 1px rgba(245,158,11,0.15), 0 8px 24px rgba(245,158,11,0.08)",
   },
-  cardTopRow: {
-    display: "flex", alignItems: "flex-start",
-    justifyContent: "space-between", gap: "0.5rem",
+  // ── Date header (3-cell flex: start | arrow | end) ──
+  // Equal-flex sides anchor the dates to the card's outer edges so a
+  // multi-day pair lines up under the same x-coords as adjacent cards
+  // in the grid. The arrow sits in the middle as a fixed-width cell.
+  // For single-day shows the arrow + end cell are simply not rendered;
+  // the start cell stays flex:1 / left-aligned so the row's height is
+  // identical across cards.
+  dateRow: {
+    display: "flex", alignItems: "center",
+    gap: "0.5rem",
   },
-  cardDateBlock: {
-    display: "flex", flexDirection: "column",
-    alignItems: "center",
-    background: "rgba(15,23,42,0.6)",
-    border: `1px solid ${colors.borderSoft}`,
-    borderRadius: 8,
-    padding: "0.35rem 0.6rem",
-    minWidth: 56,
-  },
-  cardWeekday: {
-    color: colors.gold,
-    fontSize: "0.6rem", fontWeight: 800,
-    letterSpacing: "0.18em",
-  },
-  cardDay: {
+  dateText: {
+    flex: 1,
     color: colors.textPrimary,
-    fontSize: "1.4rem", fontWeight: 800,
+    fontSize: "1.05rem", fontWeight: 700,
+    letterSpacing: "-0.01em",
     fontVariantNumeric: "tabular-nums",
-    lineHeight: 1, letterSpacing: "-0.02em",
-    marginTop: "0.1rem",
+    whiteSpace: "nowrap",
   },
-  cardMonth: {
-    color: colors.textMuted,
-    fontSize: "0.62rem", fontWeight: 700,
-    letterSpacing: "0.12em", textTransform: "uppercase",
-    marginTop: "0.1rem",
-  },
-  // Multi-day shows pair the start-date pad with this trailing block:
-  // arrow + end day (+ short month if the run crosses into a new month).
-  dateThrough: {
-    display: "flex", flexDirection: "column", alignItems: "center",
-    color: colors.textMuted,
-    minWidth: 36,
-  },
-  dateThroughArrow: {
-    color: colors.gold,
-    fontSize: "1.1rem", fontWeight: 800,
+  dateTextLeft:  { textAlign: "left"  },
+  dateTextRight: { textAlign: "right" },
+  dateArrow: {
+    flex: "0 0 auto",
+    color: colors.gold, // #f59e0b
+    fontSize: "1.2rem", fontWeight: 800,
     lineHeight: 1,
-    marginBottom: "0.2rem",
   },
-  dateThroughDay: {
-    color: colors.textPrimary,
-    fontSize: "1.4rem", fontWeight: 800,
-    fontVariantNumeric: "tabular-nums",
-    lineHeight: 1, letterSpacing: "-0.02em",
-  },
-  dateThroughMonth: {
-    color: colors.textMuted,
-    fontSize: "0.62rem", fontWeight: 700,
-    letterSpacing: "0.12em", textTransform: "uppercase",
-    marginTop: "0.1rem",
-  },
-  // "May 9 – May 11" line under the title for multi-day shows.
-  cardDateRange: {
-    color: colors.goldLight,
-    fontSize: "0.78rem", fontWeight: 700,
-    letterSpacing: "0.04em",
-    marginTop: "-0.15rem",
+
+  // ── Countdown ──
+  // Lives on its own line above the date row so the three-element
+  // date layout stays balanced. Right-aligned, small badge.
+  countdownRow: {
+    display: "flex", justifyContent: "flex-end",
+    marginBottom: "-0.1rem",
   },
   countdown: {
     background: "rgba(245,158,11,0.14)",
