@@ -697,11 +697,6 @@ function ShowCard({ show, onToggle }) {
         >
           {show.attending ? "✓ Attending" : "I'm Attending"}
         </button>
-        <a
-          href={`https://www.tcdb.com/CardShows.cfm?MODE=VIEW&ID=${show.tcdbId}`}
-          target="_blank" rel="noreferrer"
-          style={st.tcdbLink}
-        >View on TCDB ↗</a>
       </div>
     </article>
   );
@@ -1352,18 +1347,20 @@ const st = {
     // marginTop: auto pins this to the bottom of the flex column even
     // when cardBody content is short — combined with grid auto-rows: 1fr
     // this gives all tiles in a row the same height + same button position.
+    // justifyContent: center sits the (only) button at the horizontal
+    // midline since the TCDB link was removed.
     marginTop: "auto",
     paddingTop: "1rem",
-    display: "flex", alignItems: "center", justifyContent: "space-between",
-    gap: "0.7rem",
+    display: "flex", alignItems: "center", justifyContent: "center",
   },
   attendBtn: {
-    flex: 1,
+    // Content-sized so cardActions' justifyContent: center actually
+    // centers the button (flex:1 would stretch it to full row width).
     background: "transparent",
     color: colors.goldLight,
     border: `1px solid ${colors.borderGold}`,
     borderRadius: 8,
-    padding: "0.5rem 0.9rem",
+    padding: "0.55rem 1.4rem",
     fontSize: "0.74rem", fontWeight: 800,
     letterSpacing: "0.08em", textTransform: "uppercase",
     cursor: "pointer",
@@ -1374,12 +1371,5 @@ const st = {
     background: gradients.goldPill,
     color: "#0f172a",
     boxShadow: "0 4px 12px rgba(245,158,11,0.2)",
-  },
-  tcdbLink: {
-    color: colors.textMuted,
-    fontSize: "0.7rem", fontWeight: 700,
-    letterSpacing: "0.08em",
-    textDecoration: "none",
-    whiteSpace: "nowrap",
   },
 };
