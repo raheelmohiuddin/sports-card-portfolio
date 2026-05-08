@@ -1008,13 +1008,24 @@ function NearMePanel({ onApply, onClear }) {
   const [zip, setZip]       = useState(() => localStorage.getItem(NEAR_ME_ZIP_KEY) ?? "");
   // Radius is stored as a string ("any" | "25" | "50" | "100" | "250")
   // because <select> values are strings; keeps round-trip with the
-  // <option value> tags clean. Default "any" per the spec — entering a
-  // zip code shows every show sorted nearest-first by default.
+  // <option value> tags clean. Default "any" — but the auto-fire gate
+  // below treats the *un-touched* default as "no radius selected yet"
+  // so a fresh open won't run the search until the user explicitly
+  // picks an option from the dropdown (even if that pick happens to
+  // be Any).
   const [radius, setRadius] = useState(() => localStorage.getItem(NEAR_ME_RADIUS_KEY) ?? "any");
+  // True once the user has interacted with the radius dropdown at
+  // least once — gates the auto-fire so a fresh 5-digit zip alone
+  // isn't enough. Initialised true when localStorage already has a
+  // radius preference, since that means the user committed in some
+  // prior session and any further edit should re-apply immediately.
+  const [radiusTouched, setRadiusTouched] = useState(
+    () => localStorage.getItem(NEAR_ME_RADIUS_KEY) !== null
+  );
   const [error, setError]   = useState(null);
   const [zipFocused, setZipFocused] = useState(false);
   // De-dupes back-to-back fires for the same (zip, radius) pair — auto-
-  // trigger on 5-digit input PLUS Enter PLUS radius change can otherwise
+  // trigger on a zip change PLUS Enter PLUS radius change can otherwise
   // run the same network call twice in a row.
   const lastRef = useRef({ zip: "", radius: "" });
 
@@ -1055,6 +1066,7 @@ function NearMePanel({ onApply, onClear }) {
   function reset() {
     setZip("");
     setRadius("any");
+    setRadiusTouched(false);
     setError(null);
     lastRef.current = { zip: "", radius: "" };
     try {
@@ -1086,11 +1098,16 @@ function NearMePanel({ onApply, onClear }) {
             if (next) localStorage.setItem(NEAR_ME_ZIP_KEY, next);
             else      localStorage.removeItem(NEAR_ME_ZIP_KEY);
           } catch {}
-          // Auto-fire as soon as the zip becomes 5 digits.
-          if (next.length === 5) runLookup(next, radius);
+          // Auto-fire only when BOTH gates are open: zip is 5 digits
+          // AND the user has actually picked a radius (default "Any"
+          // before any interaction doesn't count).
+          if (next.length === 5 && radiusTouched) runLookup(next, radius);
         }}
         onKeyDown={(e) => {
-          if (e.key === "Enter") { e.preventDefault(); runLookup(zip, radius); }
+          if (e.key === "Enter" && radiusTouched) {
+            e.preventDefault();
+            runLookup(zip, radius);
+          }
         }}
         style={{ ...st.nearMeZipInput, ...(zipFocused ? st.nearMeZipInputFocus : {}) }}
       />
@@ -1100,8 +1117,12 @@ function NearMePanel({ onApply, onClear }) {
         onChange={(e) => {
           const next = e.target.value;
           setRadius(next);
+          // First-touch flips the gate; subsequent radius changes
+          // simply re-fire (the lookup is de-duped via lastRef).
+          setRadiusTouched(true);
           try { localStorage.setItem(NEAR_ME_RADIUS_KEY, next); } catch {}
-          // Re-fire with the new radius if we have a valid zip already.
+          // Re-fire with the new radius if we have a valid zip — and
+          // since the user just touched radius, the gate is now open.
           if (zip.length === 5) runLookup(zip, next);
         }}
         style={st.nearMeRadiusSelect}
