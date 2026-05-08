@@ -120,12 +120,35 @@ export default function ShowsPage() {
   }, [statesKey, fromDate, toDate, qApplied]);
 
   // ── Pagination ──
-  // PAGE_SIZE is fixed at 30 per spec. currentPage resets to 1 every
-  // time the active filter set changes (so a new fetch always lands
-  // the user on page 1) — the existing fetch effect deps below are
-  // the canonical "filter changed" signal, so we mirror them here.
+  // PAGE_SIZE is fixed at 30 per spec.
+  //
+  // Reset to page 1 only on filters that aren't "calendar nav". States
+  // and search query reset; calendar nav (which moves fromDate/toDate
+  // via the cursor effect) is handled by the per-month memory below
+  // instead, so coming back to a previously-visited month restores the
+  // page the user was on.
   const [currentPage, setCurrentPage] = useState(1);
-  useEffect(() => { setCurrentPage(1); }, [statesKey, fromDate, toDate, qApplied]);
+  useEffect(() => { setCurrentPage(1); }, [statesKey, qApplied]);
+
+  // Per-month pagination memory. Map<"YYYY-MM", number> kept in a ref
+  // so updates don't re-render. On cursor change: stash the current
+  // page under the OLD month's key, restore the NEW month's saved
+  // page (defaulting to 1 on first visit). Lifetime = component (so
+  // it survives navigation between months but not a page refresh).
+  const pageByMonthRef = useRef(new Map());
+  const prevCursorForPageRef = useRef(cursor);
+  useEffect(() => {
+    const oldCursor = prevCursorForPageRef.current;
+    if (oldCursor.getTime() !== cursor.getTime()) {
+      pageByMonthRef.current.set(monthKey(oldCursor), currentPage);
+      const restored = pageByMonthRef.current.get(monthKey(cursor)) ?? 1;
+      setCurrentPage(restored);
+    }
+    prevCursorForPageRef.current = cursor;
+    // currentPage intentionally absent from deps — we only save/restore
+    // when the cursor moves; mid-month page clicks shouldn't re-run this.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cursor]);
 
   const PAGE_SIZE = 30;
   const totalPages = Math.max(1, Math.ceil(shows.length / PAGE_SIZE));
@@ -226,6 +249,20 @@ export default function ShowsPage() {
             (even when shows is empty) and just transitions opacity
             during refetches, so layout stays stable. */}
         <div ref={gridWrapRef} style={st.gridWrap}>
+          {/* Top pagination — same state, same handler, automatically
+              in sync with the bottom bar. Lives inside gridWrap so the
+              scroll-to-top on page change lands above this bar (user
+              sees pagination → grid → pagination). */}
+          {hasLoadedOnce && totalPages > 1 && (
+            <div style={st.paginationTop}>
+              <Pagination
+                currentPage={currentPage}
+                totalPages={totalPages}
+                onChange={changePage}
+              />
+            </div>
+          )}
+
           {!hasLoadedOnce ? (
             <div style={st.stateMsg}>Loading shows…</div>
           ) : (
@@ -239,12 +276,15 @@ export default function ShowsPage() {
               )}
             </div>
           )}
+
           {hasLoadedOnce && totalPages > 1 && (
-            <Pagination
-              currentPage={currentPage}
-              totalPages={totalPages}
-              onChange={changePage}
-            />
+            <div style={st.paginationBottom}>
+              <Pagination
+                currentPage={currentPage}
+                totalPages={totalPages}
+                onChange={changePage}
+              />
+            </div>
           )}
         </div>
       </div>
@@ -846,6 +886,10 @@ function startOfMonth(d) {
 function endOfMonth(d) {
   return new Date(d.getFullYear(), d.getMonth() + 1, 0);
 }
+// "YYYY-MM" — stable key for per-month pagination memory.
+function monthKey(d) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
 function sameDay(a, b) {
   return a.getFullYear() === b.getFullYear()
       && a.getMonth()    === b.getMonth()
@@ -1399,15 +1443,22 @@ const st = {
   },
 
   // ── Pagination ──
-  // Dark pill row at the bottom of the grid. Active page picks up the
-  // gold-pill gradient; inactive cells are subtle dark with a hover
-  // effect handled via the .scp-page-btn class in index.css (inline
-  // styles can't address :hover). Disabled prev/next dim to 0.35.
+  // Dark pill row rendered above AND below the grid. Active page picks
+  // up the gold-pill gradient; inactive cells are subtle dark with a
+  // hover effect handled via the .scp-page-btn class in index.css
+  // (inline styles can't address :hover). Disabled prev/next dim to
+  // 0.35. The wrapping divs in the render apply spacing — keeps the
+  // bar's own style placement-agnostic.
   pagination: {
     display: "flex", alignItems: "center", justifyContent: "center",
     gap: "0.45rem",
-    marginTop: "1.75rem",
     flexWrap: "wrap",
+  },
+  paginationTop: {
+    marginBottom: "1.25rem",
+  },
+  paginationBottom: {
+    marginTop: "1.75rem",
   },
   pageBtn: {
     background: "rgba(15,23,42,0.6)",
