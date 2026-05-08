@@ -12,6 +12,9 @@ import CardModal from "../components/CardModal.jsx";
 import GhostIcon from "../components/GhostIcon.jsx";
 import { getRarityTier, TIER_LABELS, TIER_COLORS } from "../utils/rarity.js";
 import { gradients } from "../utils/theme.js";
+import {
+  isSold, effectiveValue, cardPnl, summarizePortfolio,
+} from "../utils/portfolio.js";
 
 // Slice palette — gold-dominant with cool/jewel accents for variety.
 // Order matters: top categories get the gold tones first.
@@ -75,23 +78,36 @@ export default function PortfolioPage() {
     setSelectedCard((prev) => (prev?.id === id ? { ...prev, ...patch } : prev));
     setCards((prev) => {
       const next = prev.map((c) => (c.id === id ? { ...c, ...patch } : c));
-      const newTotal = next.reduce((sum, c) => sum + (c.estimatedValue ?? 0), 0);
+      // Use effectiveValue so sold cards count their realized soldPrice
+      // instead of the (now-irrelevant) estimatedValue.
+      const newTotal = next.reduce((sum, c) => sum + (effectiveValue(c) ?? 0), 0);
       setTotalValue(Math.round(newTotal * 100) / 100);
       return next;
     });
   }
 
-  const cardCount     = cards.length;
-  const rareCount     = useMemo(() => cards.filter(isRare).length, [cards]);
-  const ghostCount    = useMemo(
+  const cardCount  = cards.length;
+  const rareCount  = useMemo(() => cards.filter(isRare).length, [cards]);
+  const ghostCount = useMemo(
     () => cards.filter((c) => getRarityTier(c) === "ghost").length,
     [cards]
   );
-  const avgValue      = cardCount > 0 && totalValue !== null ? totalValue / cardCount : null;
-  const totalInvested = useMemo(() => cards.reduce((s, c) => s + (c.myCost ?? 0), 0), [cards]);
+
+  // Realized vs unrealized split — sold cards (with admin-entered sold_price)
+  // contribute to realized; everything else contributes to unrealized. The
+  // helper handles missing cost/value gracefully.
+  const summary = useMemo(() => summarizePortfolio(cards), [cards]);
+  const totalInvested = summary.totalInvested;
   const hasCost       = totalInvested > 0;
-  const pnl           = hasCost && totalValue !== null ? totalValue - totalInvested : null;
-  const pnlPct        = hasCost && pnl !== null ? (pnl / totalInvested) * 100 : null;
+  const pnl           = hasCost ? summary.totalPnl : null;
+  const pnlPct        = hasCost && pnl != null ? (pnl / totalInvested) * 100 : null;
+  const realizedPnl   = summary.hasSoldCost ? summary.realizedPnl   : null;
+  const unrealizedPnl = summary.hasHeldCost ? summary.unrealizedPnl : null;
+  // Display total uses effectiveValue per card (soldPrice for sold, else
+  // estimatedValue) — the API's getPortfolioValue total only sums cards
+  // table estimatedValue and would miss sold cards' realized exit price.
+  const displayTotalValue = cards.length > 0 ? summary.totalValue : totalValue;
+  const avgValue          = cardCount > 0 && displayTotalValue ? displayTotalValue / cardCount : null;
   const alerts        = useMemo(() => cards.filter((c) => c.targetReached), [cards]);
   const achievedMilestones = useMemo(
     () => computeMilestones(totalValue, cardCount, rareCount, ghostCount),
@@ -181,10 +197,12 @@ export default function PortfolioPage() {
         {tab === "dashboard" && (
           <>
             <HeroStats
-              totalValue={totalValue}
+              totalValue={displayTotalValue}
               totalInvested={totalInvested}
               pnl={pnl}
               pnlPct={pnlPct}
+              realizedPnl={realizedPnl}
+              unrealizedPnl={unrealizedPnl}
               hasCost={hasCost}
               cardCount={cardCount}
               avgValue={avgValue}
@@ -291,7 +309,7 @@ export default function PortfolioPage() {
 }
 
 // ─── Hero stats bar ────────────────────────────────────────────────────
-function HeroStats({ totalValue, totalInvested, pnl, pnlPct, hasCost, cardCount, avgValue, rareCount, loading, milestones }) {
+function HeroStats({ totalValue, totalInvested, pnl, pnlPct, realizedPnl, unrealizedPnl, hasCost, cardCount, avgValue, rareCount, loading, milestones }) {
   const positive = pnl != null && pnl >= 0;
   const pnlColor = positive ? "#10b981" : "#f87171";
 
@@ -331,6 +349,34 @@ function HeroStats({ totalValue, totalInvested, pnl, pnlPct, hasCost, cardCount,
               <span style={st.heroPnlLabel}>Total Return</span>
             </div>
           </div>
+
+          {/* Realized + Unrealized split — only renders the rows that have
+              data (e.g. no sold cards → no Realized line). Realized in
+              green/red per direction; Unrealized in blue regardless of
+              direction so it reads as "paper gains" distinct from realized. */}
+          {(realizedPnl != null || unrealizedPnl != null) && (
+            <div style={st.heroSplitRow}>
+              {realizedPnl != null && (
+                <div style={st.heroSplitItem}>
+                  <span style={st.heroSplitLabel}>Realized</span>
+                  <span style={{
+                    ...st.heroSplitValue,
+                    color: realizedPnl >= 0 ? "#10b981" : "#f87171",
+                  }}>
+                    {realizedPnl >= 0 ? "+" : "−"}{fmtUsd(Math.abs(realizedPnl))}
+                  </span>
+                </div>
+              )}
+              {unrealizedPnl != null && (
+                <div style={st.heroSplitItem}>
+                  <span style={st.heroSplitLabel}>Unrealized</span>
+                  <span style={{ ...st.heroSplitValue, color: "#60a5fa" }}>
+                    {unrealizedPnl >= 0 ? "+" : "−"}{fmtUsd(Math.abs(unrealizedPnl))}
+                  </span>
+                </div>
+              )}
+            </div>
+          )}
 
           <div style={st.heroDivider} />
 
@@ -556,8 +602,10 @@ function parseGrade(g) {
 }
 
 function pnlOf(c) {
-  if (c.myCost == null || c.estimatedValue == null) return -Infinity;
-  return c.estimatedValue - c.myCost;
+  // Sort uses the same realized-vs-unrealized split as displays: sold cards
+  // ranked by soldPrice - cost, others by estimatedValue - cost.
+  const v = cardPnl(c);
+  return v == null ? -Infinity : v;
 }
 
 function sortCards(cards, sortBy) {
@@ -568,9 +616,9 @@ function sortCards(cards, sortBy) {
     case "grade-desc":
       return out.sort((a, b) => parseGrade(b.grade) - parseGrade(a.grade));
     case "value-desc":
-      return out.sort((a, b) => (b.estimatedValue ?? 0) - (a.estimatedValue ?? 0));
+      return out.sort((a, b) => (effectiveValue(b) ?? 0) - (effectiveValue(a) ?? 0));
     case "value-asc":
-      return out.sort((a, b) => (a.estimatedValue ?? 0) - (b.estimatedValue ?? 0));
+      return out.sort((a, b) => (effectiveValue(a) ?? 0) - (effectiveValue(b) ?? 0));
     case "pnl-desc":
       return out.sort((a, b) => pnlOf(b) - pnlOf(a));
     case "date-asc":
@@ -743,9 +791,9 @@ function CardListRow({ card, highlighted, onOpen, onEdit, onDelete }) {
     return () => clearTimeout(t);
   }, [highlighted]);
 
-  const pnl = card.myCost != null && card.estimatedValue != null
-    ? card.estimatedValue - card.myCost
-    : null;
+  const sold = isSold(card);
+  const value = effectiveValue(card);
+  const pnl = cardPnl(card);
   const pnlPositive = pnl != null && pnl >= 0;
   const tier = getRarityTier(card);
 
@@ -778,7 +826,8 @@ function CardListRow({ card, highlighted, onOpen, onEdit, onDelete }) {
         <div style={st.listNameTop}>
           <span style={st.listNameMain}>{card.playerName ?? "Unknown"}</span>
           {tier && <TierFlag tier={tier} />}
-          {card.targetReached && <span style={st.listFlagTarget}>TARGET</span>}
+          {sold && <span style={st.listFlagSold}>SOLD</span>}
+          {!sold && card.targetReached && <span style={st.listFlagTarget}>TARGET</span>}
         </div>
         <div style={st.listNameMeta}>
           {card.cardNumber ? `#${card.cardNumber} · ` : ""}Cert {card.certNumber}
@@ -792,8 +841,15 @@ function CardListRow({ card, highlighted, onOpen, onEdit, onDelete }) {
       <div style={{ ...st.listCell, ...st.listMoney, textAlign: "right" }}>
         {card.myCost != null ? fmtUsd(card.myCost) : "—"}
       </div>
-      <div style={{ ...st.listCell, ...st.listMoney, textAlign: "right", color: "#f59e0b", fontWeight: 700 }}>
-        {card.estimatedValue != null ? fmtUsd(card.estimatedValue) : "—"}
+      {/* Sold cards show their realized soldPrice in green; held cards show
+          estimatedValue in gold. */}
+      <div style={{
+        ...st.listCell, ...st.listMoney,
+        textAlign: "right",
+        color: sold ? "#6ee7b7" : "#f59e0b",
+        fontWeight: 700,
+      }}>
+        {value != null ? fmtUsd(value) : "—"}
       </div>
       <div style={{ ...st.listCell, ...st.listMoney, textAlign: "right" }}>
         {pnl != null ? (
@@ -1119,8 +1175,12 @@ function CardTile({ card, index, highlighted, onOpen, onEdit, onDelete, onCardUp
         {/* Rarity ribbon — Ghost / Ultra Rare / Rare */}
         {tier && <TierRibbon tier={tier} />}
 
-        {/* Target-reached pulsing badge */}
-        {card.targetReached && (
+        {/* SOLD diagonal stamp — takes precedence over target-hit since the
+            card is no longer in active portfolio rotation. */}
+        {isSold(card) && <div style={st.soldStamp}>SOLD</div>}
+
+        {/* Target-reached pulsing badge — suppressed for sold cards. */}
+        {!isSold(card) && card.targetReached && (
           <div style={st.targetBadge} title={`Target hit · $${card.targetPrice}`}>
             <span style={st.targetBadgeDot} />
             TARGET HIT
@@ -1152,16 +1212,19 @@ function CardTile({ card, index, highlighted, onOpen, onEdit, onDelete, onCardUp
 }
 
 // Slim P&L line under the value — only renders when myCost is set.
+// Sold cards label this "Realized" with green/red P&L; held cards use
+// the implicit "unrealized" reading and color-code the same way for
+// per-card legibility (the realized vs unrealized split is most useful
+// at the portfolio level, not per-tile).
 function CostLine({ card }) {
   if (card.myCost == null) return null;
-  const value = card.estimatedValue;
-  const hasValue = value != null;
-  const pnl     = hasValue ? value - card.myCost : null;
+  const sold     = isSold(card);
+  const pnl      = cardPnl(card);
   const positive = pnl != null && pnl >= 0;
   const arrow    = positive ? "↑" : "↓";
   return (
     <div style={st.costLine}>
-      <span style={st.costLineLabel}>Cost</span>
+      <span style={st.costLineLabel}>{sold ? "Realized" : "Cost"}</span>
       <span style={st.costLineValue}>{fmtUsd(card.myCost)}</span>
       {pnl != null && (
         <span style={{
@@ -1233,7 +1296,20 @@ function PricingValue({ card, onCardUpdate }) {
     }
   }
 
-  const display = card.estimatedValue ?? card.avgSalePrice;
+  // For sold cards, show the realized soldPrice — never editable, never the
+  // stale estimatedValue. For everything else, the existing manual/auto
+  // chain holds.
+  const sold = isSold(card);
+  const display = sold ? card.consignmentSoldPrice : (card.estimatedValue ?? card.avgSalePrice);
+
+  // Sold cards short-circuit the editor: the realized price is fixed.
+  if (sold) {
+    return (
+      <span style={st.priceSold} title="Realized sale price">
+        {fmtUsd(display)}
+      </span>
+    );
+  }
 
   if (editing) {
     return (
@@ -1938,6 +2014,17 @@ const st = {
     border: "1px solid rgba(245,158,11,0.5)",
     padding: "0.05rem 0.3rem", borderRadius: 3,
   },
+  // Green SOLD flag for the list-row name column. Lives next to TARGET so
+  // they share visual language (small caps, square badge) but a different
+  // colour family so the meaning is immediately readable.
+  listFlagSold: {
+    flexShrink: 0,
+    fontSize: "0.55rem", fontWeight: 800, letterSpacing: "0.1em",
+    color: "#6ee7b7",
+    background: "rgba(16,185,129,0.18)",
+    border: "1px solid rgba(16,185,129,0.55)",
+    padding: "0.05rem 0.3rem", borderRadius: 3,
+  },
   listCell: {
     fontSize: "0.82rem", color: "#cbd5e1",
     overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
@@ -2053,6 +2140,25 @@ const st = {
     display: "grid",
     gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
     gap: "1rem",
+  },
+  // ── Realized + unrealized split (under the headline P&L) ──
+  heroSplitRow: {
+    display: "flex", gap: "1.25rem",
+    marginTop: "0.85rem",
+    flexWrap: "wrap",
+  },
+  heroSplitItem: {
+    display: "flex", alignItems: "baseline", gap: "0.5rem",
+  },
+  heroSplitLabel: {
+    color: "#64748b",
+    fontSize: "0.62rem", fontWeight: 700,
+    letterSpacing: "0.16em", textTransform: "uppercase",
+  },
+  heroSplitValue: {
+    fontSize: "1rem", fontWeight: 800,
+    fontVariantNumeric: "tabular-nums",
+    letterSpacing: "-0.01em",
   },
   heroDivider: {
     height: 1,
@@ -2451,6 +2557,30 @@ const st = {
     fontSize: "0.72rem", fontWeight: 600,
     color: "#94a3b8", cursor: "pointer",
     letterSpacing: "0.04em",
+  },
+  // Realized sale price — same visual weight as priceBtn, green not gold,
+  // and not a button (sold cards aren't editable).
+  priceSold: {
+    fontSize: "1.1rem", fontWeight: 700,
+    color: "#6ee7b7",
+    fontVariantNumeric: "tabular-nums",
+    letterSpacing: "-0.01em",
+    cursor: "default",
+  },
+  // Diagonal SOLD stamp on the card image — bold green pill that reads
+  // "this card has left the portfolio (and made you money)".
+  soldStamp: {
+    position: "absolute",
+    top: 12, right: 12,
+    fontSize: "0.65rem", fontWeight: 900,
+    letterSpacing: "0.18em",
+    color: "#0f172a",
+    background: "linear-gradient(135deg, #34d399, #10b981)",
+    padding: "0.25rem 0.65rem",
+    borderRadius: 4,
+    boxShadow: "0 4px 14px rgba(16,185,129,0.5), 0 0 0 1px rgba(16,185,129,0.85)",
+    transform: "rotate(8deg)",
+    zIndex: 4,
   },
 
   // ── Inline editor ──

@@ -7,7 +7,7 @@
 const { getPool } = require("../_db");
 const { json } = require("../_response");
 const { requireAdmin } = require("../_admin");
-const { isValidId, sanitize } = require("../_validate");
+const { isValidId, sanitize, isValidPrice } = require("../_validate");
 
 const VALID_STATUSES = new Set(["pending", "in_review", "listed", "sold", "declined"]);
 
@@ -23,7 +23,7 @@ exports.handler = async (event) => {
   try { body = JSON.parse(event.body ?? "{}"); }
   catch { return json(400, { error: "Invalid JSON body" }); }
 
-  const { status, internalNotes } = body;
+  const { status, internalNotes, soldPrice } = body;
   const sets = [];
   const params = [];
   let p = 1;
@@ -39,6 +39,16 @@ exports.handler = async (event) => {
     sets.push(`internal_notes = $${p++}`);
     params.push(sanitize(internalNotes, 5000));
   }
+  // soldPrice — nullable; admin clears it by sending null. We don't gate
+  // on status here (admin might set price BEFORE flipping status to sold),
+  // but the value is only surfaced to collectors when status is "sold".
+  if (soldPrice !== undefined) {
+    if (soldPrice !== null && !isValidPrice(soldPrice)) {
+      return json(400, { error: "soldPrice must be a non-negative number under 10,000,000" });
+    }
+    sets.push(`sold_price = $${p++}`);
+    params.push(soldPrice === null ? null : parseFloat(soldPrice));
+  }
 
   if (sets.length === 0) return json(400, { error: "Nothing to update" });
 
@@ -48,7 +58,7 @@ exports.handler = async (event) => {
   const result = await db.query(
     `UPDATE consignments SET ${sets.join(", ")}
      WHERE id = $${p}
-     RETURNING id, status, internal_notes, updated_at`,
+     RETURNING id, status, internal_notes, sold_price, updated_at`,
     params
   );
   if (result.rowCount === 0) return json(404, { error: "Not found" });
@@ -58,6 +68,7 @@ exports.handler = async (event) => {
     id:            row.id,
     status:        row.status,
     internalNotes: row.internal_notes,
+    soldPrice:     row.sold_price != null ? parseFloat(row.sold_price) : null,
     updatedAt:     row.updated_at,
   });
 };

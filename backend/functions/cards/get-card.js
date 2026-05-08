@@ -37,10 +37,11 @@ exports.handler = async (event) => {
             c.estimated_value, c.avg_sale_price, c.last_sale_price,
             c.num_sales, c.price_source, c.value_last_updated,
             c.added_at,
-            cn.status AS consignment_status
+            cn.status     AS consignment_status,
+            cn.sold_price AS consignment_sold_price
      FROM cards c
      LEFT JOIN LATERAL (
-       SELECT status FROM consignments
+       SELECT status, sold_price FROM consignments
        WHERE card_id = c.id
        ORDER BY created_at DESC
        LIMIT 1
@@ -88,6 +89,7 @@ exports.handler = async (event) => {
       priceSource:      manualPrice !== null ? "manual" : (row.price_source ?? null),
       valueLastUpdated: row.value_last_updated ?? null,
       addedAt:          row.added_at,
-      consignmentStatus: row.consignment_status ?? null,
+      consignmentStatus:     row.consignment_status     ?? null,
+      consignmentSoldPrice:  row.consignment_sold_price != null ? parseFloat(row.consignment_sold_price) : null,
   });
 };

@@ -133,7 +133,12 @@ export default function CardModal({ card, onClose }) {
     return () => { cancelled = true; };
   }, [card.id, hydrated]);
 
-  const displayValue = card.estimatedValue ?? card.avgSalePrice;
+  // Sold cards display their realized soldPrice as the headline value;
+  // everything else falls back to the existing manual/auto chain.
+  const sold = card.consignmentStatus === "sold" && card.consignmentSoldPrice != null;
+  const displayValue = sold
+    ? card.consignmentSoldPrice
+    : (card.estimatedValue ?? card.avgSalePrice);
 
   return (
     <>
@@ -219,21 +224,29 @@ export default function CardModal({ card, onClose }) {
             </>
           )}
 
-          {/* ── Market value ── */}
+          {/* ── Headline value ──
+              Sold → green "Sold For" label, no auto-pricing context (the
+              sale is the truth). Held → existing market-value layout. */}
           {displayValue !== null && (
             <>
-              <div style={st.sectionHead}>Market Value</div>
+              <div style={st.sectionHead}>{sold ? "Sold For" : "Market Value"}</div>
               <div style={st.priceBlock}>
-                <div style={st.mainPrice}>{fmt(displayValue)}</div>
-                <div style={st.priceDetails}>
-                  {card.avgSalePrice  && <span>Avg {fmt(card.avgSalePrice)}</span>}
-                  {card.lastSalePrice && <><span style={st.dot}>·</span><span>Last {fmt(card.lastSalePrice)}</span></>}
-                  {card.numSales      && <><span style={st.dot}>·</span><span>{card.numSales} sales</span></>}
+                <div style={{ ...st.mainPrice, ...(sold ? st.mainPriceSold : {}) }}>
+                  {fmt(displayValue)}
                 </div>
-                {card.priceSource && (
-                  <span style={{ ...st.sourceBadge, ...sourceBadgeStyle(card.priceSource) }}>
-                    {badgeLabel(card.priceSource)}
-                  </span>
+                {!sold && (
+                  <>
+                    <div style={st.priceDetails}>
+                      {card.avgSalePrice  && <span>Avg {fmt(card.avgSalePrice)}</span>}
+                      {card.lastSalePrice && <><span style={st.dot}>·</span><span>Last {fmt(card.lastSalePrice)}</span></>}
+                      {card.numSales      && <><span style={st.dot}>·</span><span>{card.numSales} sales</span></>}
+                    </div>
+                    {card.priceSource && (
+                      <span style={{ ...st.sourceBadge, ...sourceBadgeStyle(card.priceSource) }}>
+                        {badgeLabel(card.priceSource)}
+                      </span>
+                    )}
+                  </>
                 )}
               </div>
             </>
@@ -275,6 +288,7 @@ export default function CardModal({ card, onClose }) {
               cardId={card.id}
               role={role}
               consignmentStatus={card.consignmentStatus ?? null}
+              consignmentSoldPrice={card.consignmentSoldPrice ?? null}
             />
           )}
         </div>
@@ -442,10 +456,15 @@ function PopStat({ label, value, highlight, highlightColor = "#d97706" }) {
 
 function CostAndPnl({ card, displayValue }) {
   if (card.myCost == null) return null;
+  const sold      = card.consignmentStatus === "sold" && card.consignmentSoldPrice != null;
   const hasValue  = displayValue != null;
   const pnl       = hasValue ? displayValue - card.myCost : null;
   const positive  = pnl != null && pnl >= 0;
   const pnlPct    = hasValue && card.myCost > 0 ? (pnl / card.myCost) * 100 : null;
+  // Label semantics: "profit/loss" feels right for sold (it's settled);
+  // "gain/loss" reads better for unrealized paper movement.
+  const pnlLabel  = sold ? (positive ? "realized profit" : "realized loss")
+                         : (positive ? "unrealized gain" : "unrealized loss");
 
   return (
     <>
@@ -464,7 +483,7 @@ function CostAndPnl({ card, displayValue }) {
                 ({positive ? "+" : "−"}{Math.abs(pnlPct).toFixed(1)}%)
               </span>
             )}
-            <span style={st.pnlLabel}>{positive ? "profit" : "loss"}</span>
+            <span style={st.pnlLabel}>{pnlLabel}</span>
           </div>
         )}
       </div>
@@ -701,6 +720,11 @@ const st = {
     fontVariantNumeric: "tabular-nums",
     letterSpacing: "-0.02em",
     textShadow: "0 0 32px rgba(245,158,11,0.18)",
+  },
+  // Realized exit — green instead of gold, shadow tinted to match.
+  mainPriceSold: {
+    color: "#10b981",
+    textShadow: "0 0 32px rgba(16,185,129,0.22)",
   },
   priceDetails: {
     display: "flex", alignItems: "center", flexWrap: "wrap", gap: "0.3rem",

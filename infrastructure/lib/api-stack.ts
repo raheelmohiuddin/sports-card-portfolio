@@ -196,6 +196,14 @@ export class ApiStack extends Construct {
     });
     props.dbSecret.grantRead(migrationTruncateFn);
 
+    // Migration: sold_price column on consignments.
+    const migrationSoldPriceFn = new NodejsFunction(this, "MigrationAddSoldPrice", {
+      ...sharedNodejsProps,
+      functionName: "scp-migration-add-sold-price",
+      entry: path.join(functionsDir, "_migrations/add-sold-price.js"),
+    });
+    props.dbSecret.grantRead(migrationSoldPriceFn);
+
     // ─── Consignment + admin functions ───
     const createConsignmentFn = new NodejsFunction(this, "CreateConsignment", {
       ...sharedNodejsProps,

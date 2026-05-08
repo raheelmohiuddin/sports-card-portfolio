@@ -17,7 +17,7 @@ import { createConsignment } from "../services/api.js";
 //
 // Hidden entirely for admin users — admins shouldn't consign their own
 // collection, and they manage status via the admin portal anyway.
-export default function ConsignBlock({ cardId, role, consignmentStatus }) {
+export default function ConsignBlock({ cardId, role, consignmentStatus, consignmentSoldPrice }) {
   const [stage, setStage]   = useState("collapsed"); // collapsed | form
   const [type, setType]     = useState("auction");
   const [price, setPrice]   = useState("");
@@ -32,7 +32,7 @@ export default function ConsignBlock({ cardId, role, consignmentStatus }) {
 
   if (role === "admin") return null;
 
-  if (status) return <StatusPill status={status} />;
+  if (status) return <StatusPill status={status} soldPrice={consignmentSoldPrice ?? null} />;
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -115,7 +115,9 @@ export default function ConsignBlock({ cardId, role, consignmentStatus }) {
 // ─── Read-only status pill ──────────────────────────────────────────
 // Used once a consignment exists for the card. Colors per status follow
 // the spec: pending=amber, in_review=blue, listed/sold=green, declined=red.
-function StatusPill({ status }) {
+// When status === "sold" and the admin has entered a sold price, we show
+// it prominently in gold below the pill — the realized exit value.
+function StatusPill({ status, soldPrice }) {
   const variant = STATUS_VARIANTS[status];
   if (!variant) return null;
   return (
@@ -124,6 +126,14 @@ function StatusPill({ status }) {
         <span style={{ ...st.statusDot, background: variant.dotColor }} />
         <span>{variant.label}</span>
       </div>
+
+      {status === "sold" && soldPrice != null && (
+        <div style={st.soldBlock}>
+          <div style={st.soldLabel}>Sold For</div>
+          <div style={st.soldValue}>{fmtUsd(soldPrice)}</div>
+        </div>
+      )}
+
       {status === "declined" && (
         <p style={st.statusNote}>
           Contact us to discuss options.
@@ -131,6 +141,11 @@ function StatusPill({ status }) {
       )}
     </div>
   );
+}
+
+function fmtUsd(n) {
+  if (n == null) return "—";
+  return `$${parseFloat(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
 const STATUS_VARIANTS = {
@@ -270,5 +285,27 @@ const st = {
     color: "#94a3b8",
     fontSize: "0.78rem",
     letterSpacing: "0.01em",
+  },
+
+  // ── Sold price block (only when status=sold + admin has entered price) ──
+  soldBlock: {
+    marginTop: "0.75rem",
+    padding: "0.85rem 1rem",
+    background: "rgba(245,158,11,0.08)",
+    border: "1px solid rgba(245,158,11,0.32)",
+    borderRadius: 10,
+  },
+  soldLabel: {
+    color: "#94a3b8",
+    fontSize: "0.6rem", fontWeight: 700,
+    letterSpacing: "0.18em", textTransform: "uppercase",
+    marginBottom: "0.35rem",
+  },
+  soldValue: {
+    fontSize: "1.65rem", fontWeight: 800,
+    color: "#f59e0b",
+    fontVariantNumeric: "tabular-nums",
+    letterSpacing: "-0.02em",
+    textShadow: "0 0 32px rgba(245,158,11,0.18)",
   },
 };
