@@ -459,6 +459,95 @@ function CalendarPanel({ cursor, setCursor, attending, onToggleAttending }) {
   );
 }
 
+// Live countdown to the show's start time, ticking every second.
+// `setInterval` is gated behind `target` (no scheduling if we can't
+// build a real Date — e.g. show with no date), and the cleanup
+// `clearInterval` runs on unmount and on target change so the timer
+// can't leak across remounts when the popover swaps shows. The
+// hh/mm/ss values are zero-padded for stable digit width; days are
+// not (they grow naturally and tabular-nums handles alignment).
+function Countdown({ show }) {
+  const target = useMemo(() => showStartDateTime(show), [show.date, show.startTime]);
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    if (!target) return;
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [target?.getTime()]);
+
+  if (!target) return null;
+
+  const diff = diffToCountdown(target.getTime(), now);
+  if (!diff) {
+    return <div style={st.countdownPassed}>Show has passed</div>;
+  }
+
+  const today = isShowToday(show);
+  return (
+    <div style={{ ...st.countdownRow, ...(today ? st.countdownTodayRow : {}) }}>
+      <CountdownUnit value={diff.days}            unit="d" />
+      <CountdownUnit value={pad2(diff.hours)}     unit="h" />
+      <CountdownUnit value={pad2(diff.mins)}      unit="m" />
+      <CountdownUnit value={pad2(diff.secs)}      unit="s" />
+    </div>
+  );
+}
+
+function CountdownUnit({ value, unit }) {
+  return (
+    <span style={st.countdownUnit}>
+      <span style={st.countdownNum}>{value}</span>
+      <span style={st.countdownLabel}>{unit}</span>
+    </span>
+  );
+}
+
+function pad2(n) { return String(n).padStart(2, "0"); }
+
+// Parse "9:00 AM" / "10:30 PM" / "9 AM" → { h: 0-23, m: 0-59 }.
+// Falls back to midnight on unparseable input so the countdown still
+// works for shows whose start time is missing — they'll just count
+// down to start-of-day.
+function parseTime(timeStr) {
+  if (!timeStr) return { h: 0, m: 0 };
+  const m = String(timeStr).trim().match(/^(\d{1,2})(?::(\d{2}))?\s*(AM|PM)?/i);
+  if (!m) return { h: 0, m: 0 };
+  let h = parseInt(m[1], 10);
+  const min = parseInt(m[2] || "0", 10);
+  const ampm = (m[3] || "").toUpperCase();
+  if (ampm === "PM" && h < 12) h += 12;
+  if (ampm === "AM" && h === 12) h = 0;
+  return { h: Math.min(23, Math.max(0, h)), m: Math.min(59, Math.max(0, min)) };
+}
+
+function showStartDateTime(show) {
+  if (!show?.date) return null;
+  const [y, mo, d] = show.date.split("-").map(Number);
+  const { h, m } = parseTime(show.startTime);
+  const dt = new Date(y, mo - 1, d, h, m, 0, 0);
+  return Number.isNaN(dt.getTime()) ? null : dt;
+}
+
+function diffToCountdown(targetMs, nowMs) {
+  const ms = targetMs - nowMs;
+  if (ms <= 0) return null;
+  const totalSec = Math.floor(ms / 1000);
+  return {
+    days:  Math.floor(totalSec / 86400),
+    hours: Math.floor((totalSec % 86400) / 3600),
+    mins:  Math.floor((totalSec % 3600) / 60),
+    secs:  totalSec % 60,
+  };
+}
+
+function isShowToday(show) {
+  if (!show?.date) return false;
+  const today = new Date();
+  const [y, m, d] = show.date.split("-").map(Number);
+  return y === today.getFullYear() && (m - 1) === today.getMonth() && d === today.getDate();
+}
+
 function ExpandedShowRow({ show, compact, onRemove }) {
   const isRange = show.endDate && show.endDate !== show.date;
   const start = show.date    ? new Date(`${show.date}T00:00:00`)    : null;
@@ -483,6 +572,8 @@ function ExpandedShowRow({ show, compact, onRemove }) {
           </div>
         </div>
       </div>
+      {/* Live countdown only in the popover (not the compact list view). */}
+      {!compact && <Countdown show={show} />}
       {onRemove && (
         <div style={st.expandedActions}>
           <RemoveAttendingButton onClick={() => onRemove(show)} />
@@ -1207,6 +1298,41 @@ const st = {
     display: "flex",
     justifyContent: "flex-start",
   },
+  // ── Live countdown ──
+  // Big tabular gold digits + small letter labels, with a soft glow.
+  // Today gets a brighter palette + the scp-countdown-pulse keyframe
+  // (defined in index.css) for emphasis. countdownPassed is the muted
+  // "Show has passed" fallback once the start time has elapsed.
+  countdownRow: {
+    display: "flex", alignItems: "baseline",
+    gap: "1rem",
+    color: "#fbbf24",
+    fontVariantNumeric: "tabular-nums",
+    letterSpacing: "-0.01em",
+    textShadow: "0 0 18px rgba(245,158,11,0.28)",
+  },
+  countdownTodayRow: {
+    color: "#fde68a",
+    animation: "scp-countdown-pulse 1.4s ease-in-out infinite",
+  },
+  countdownUnit: {
+    display: "inline-flex", alignItems: "baseline", gap: "0.2rem",
+  },
+  countdownNum: {
+    fontSize: "1.5rem", fontWeight: 800,
+    lineHeight: 1,
+  },
+  countdownLabel: {
+    fontSize: "0.65rem", fontWeight: 800,
+    letterSpacing: "0.16em", textTransform: "uppercase",
+    color: "rgba(251,191,36,0.6)",
+  },
+  countdownPassed: {
+    color: colors.textVeryFaint,
+    fontSize: "0.78rem",
+    fontStyle: "italic",
+  },
+
   // ── Remove from Attending button ──
   // Subtle red outline, fills red on hover. Spec verbatim from the
   // user request (border 1px #f87171, color #f87171, transparent bg,

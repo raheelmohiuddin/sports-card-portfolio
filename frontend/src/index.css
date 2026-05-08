@@ -215,6 +215,21 @@ a { color: inherit; text-decoration: none; }
   to { transform: rotate(360deg); }
 }
 
+/* Live countdown for "today" shows in the calendar popover — pulses
+   the gold glow and slightly dims/restores the digits so the eye
+   keeps catching it without flicker. Used only when the show's start
+   date matches today's date. */
+@keyframes scp-countdown-pulse {
+  0%, 100% {
+    text-shadow: 0 0 16px rgba(251,191,36,0.4);
+    opacity: 1;
+  }
+  50% {
+    text-shadow: 0 0 30px rgba(251,191,36,0.85);
+    opacity: 0.94;
+  }
+}
+
 /* /shows pagination buttons — subtle hover lifting on inactive
    buttons. Active (gold) and disabled buttons are excluded. Inline
    styles can't address :hover, so the rule lives here. */
