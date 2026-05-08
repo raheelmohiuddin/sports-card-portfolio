@@ -926,7 +926,7 @@ function FilterBar({
             </span>
           )}
           {nearMeOpen && (
-            <NearMePanel onApply={onNearMeApply} onClear={onNearMeClear} hasActive={!!nearMe} />
+            <NearMePanel onApply={onNearMeApply} onClear={onNearMeClear} />
           )}
         </div>
       </div>
@@ -982,7 +982,7 @@ function parseRadius(raw) {
   return Number.isFinite(n) && n > 0 ? n : null;
 }
 
-function NearMePanel({ onApply, onClear, hasActive }) {
+function NearMePanel({ onApply, onClear }) {
   const [zip, setZip]       = useState(() => localStorage.getItem(NEAR_ME_ZIP_KEY) ?? "");
   // Radius is stored as a string ("any" | "25" | "50" | "100" | "250")
   // because <select> values are strings; keeps round-trip with the
@@ -990,19 +990,18 @@ function NearMePanel({ onApply, onClear, hasActive }) {
   // zip code shows every show sorted nearest-first by default.
   const [radius, setRadius] = useState(() => localStorage.getItem(NEAR_ME_RADIUS_KEY) ?? "any");
   const [error, setError]   = useState(null);
-  const [busy,  setBusy]    = useState(false);
   const [zipFocused, setZipFocused] = useState(false);
+  // De-dupes back-to-back fires for the same (zip, radius) pair — auto-
+  // trigger on 5-digit input PLUS Enter PLUS radius change can otherwise
+  // run the same network call twice in a row.
+  const lastRef = useRef({ zip: "", radius: "" });
 
-  async function submit() {
-    if (busy) return;
-    if (!/^\d{5}$/.test(zip)) {
-      setError("Enter a 5-digit zip code.");
-      return;
-    }
+  async function runLookup(z, r) {
+    if (!/^\d{5}$/.test(z)) return;
+    if (z === lastRef.current.zip && r === lastRef.current.radius) return;
     setError(null);
-    setBusy(true);
     try {
-      const res = await fetch(`https://api.zippopotam.us/us/${zip}`);
+      const res = await fetch(`https://api.zippopotam.us/us/${z}`);
       if (!res.ok) {
         setError(res.status === 404 ? "Zip not found." : "Lookup failed.");
         return;
@@ -1015,32 +1014,20 @@ function NearMePanel({ onApply, onClear, hasActive }) {
         setError("Couldn't read coordinates from zip.");
         return;
       }
+      lastRef.current = { zip: z, radius: r };
       try {
-        localStorage.setItem(NEAR_ME_ZIP_KEY,    zip);
-        localStorage.setItem(NEAR_ME_RADIUS_KEY, radius);
+        localStorage.setItem(NEAR_ME_ZIP_KEY,    z);
+        localStorage.setItem(NEAR_ME_RADIUS_KEY, r);
       } catch {}
       onApply({
-        zip,
-        radiusMiles: parseRadius(radius),  // null when radius === "any"
+        zip: z,
+        radiusMiles: parseRadius(r),  // null when r === "any"
         centerLat: lat,
         centerLng: lng,
       });
     } catch {
       setError("Network error.");
-    } finally {
-      setBusy(false);
     }
-  }
-
-  function clear() {
-    setZip("");
-    setRadius("any");
-    setError(null);
-    try {
-      localStorage.removeItem(NEAR_ME_ZIP_KEY);
-      localStorage.removeItem(NEAR_ME_RADIUS_KEY);
-    } catch {}
-    if (hasActive) onClear?.();
   }
 
   return (
@@ -1057,18 +1044,37 @@ function NearMePanel({ onApply, onClear, hasActive }) {
           onFocus={() => setZipFocused(true)}
           onBlur={() => setZipFocused(false)}
           onChange={(e) => {
-            setZip(e.target.value.replace(/[^\d]/g, ""));
+            const next = e.target.value.replace(/[^\d]/g, "");
+            setZip(next);
             setError(null);
+            // Empty input → drop the active filter so the grid resets
+            // to its default sort. lastRef is reset too so re-typing the
+            // same zip later actually re-fires.
+            if (next.length === 0) {
+              lastRef.current = { zip: "", radius: "" };
+              try {
+                localStorage.removeItem(NEAR_ME_ZIP_KEY);
+              } catch {}
+              onClear?.();
+              return;
+            }
+            // Auto-fire as soon as the zip becomes 5 digits.
+            if (next.length === 5) runLookup(next, radius);
           }}
           onKeyDown={(e) => {
-            if (e.key === "Enter") { e.preventDefault(); submit(); }
+            if (e.key === "Enter") { e.preventDefault(); runLookup(zip, radius); }
           }}
           style={{ ...st.nearMeZipInput, ...(zipFocused ? st.nearMeZipInputFocus : {}) }}
         />
         <select
           value={radius}
           aria-label="Search radius"
-          onChange={(e) => setRadius(e.target.value)}
+          onChange={(e) => {
+            const next = e.target.value;
+            setRadius(next);
+            // Re-fire with the new radius if we have a valid zip already.
+            if (zip.length === 5) runLookup(zip, next);
+          }}
           style={st.nearMeRadiusSelect}
         >
           <option value="any" style={{ background: "#0f172a", color: "#fff" }}>Any</option>
@@ -1077,21 +1083,6 @@ function NearMePanel({ onApply, onClear, hasActive }) {
           <option value="100" style={{ background: "#0f172a", color: "#fff" }}>100mi</option>
           <option value="250" style={{ background: "#0f172a", color: "#fff" }}>250mi</option>
         </select>
-        <button
-          type="button"
-          onClick={submit}
-          disabled={busy}
-          aria-label="Apply Near Me filter"
-          title="Apply"
-          style={st.nearMeApplyBtn}
-        >✓</button>
-        <button
-          type="button"
-          onClick={clear}
-          aria-label="Clear Near Me filter"
-          title="Clear"
-          style={st.nearMeClearBtn}
-        >×</button>
       </div>
       {error && <div style={st.nearMeInlineError}>{error}</div>}
     </div>
@@ -1883,34 +1874,6 @@ const st = {
     MozAppearance: "none",
     boxSizing: "border-box",
     outline: "none",
-  },
-  // Filled gold submit button — matches the active-action affordance.
-  nearMeApplyBtn: {
-    width: 28, height: 28,
-    borderRadius: 4,
-    border: "none",
-    background: "#f59e0b",
-    color: "#000",
-    fontSize: 14, fontWeight: 700, lineHeight: 1,
-    cursor: "pointer",
-    fontFamily: "inherit",
-    padding: 0,
-    boxSizing: "border-box",
-  },
-  // Outlined gold reset — same footprint as the apply button so the row
-  // stays balanced; visually distinguished as a destructive/cancel
-  // action rather than a confirm.
-  nearMeClearBtn: {
-    width: 28, height: 28,
-    borderRadius: 4,
-    border: "1px solid rgba(245,158,11,0.55)",
-    background: "transparent",
-    color: "#f59e0b",
-    fontSize: 16, fontWeight: 700, lineHeight: 1,
-    cursor: "pointer",
-    fontFamily: "inherit",
-    padding: 0,
-    boxSizing: "border-box",
   },
   nearMeInlineError: {
     color: "#fca5a5",
