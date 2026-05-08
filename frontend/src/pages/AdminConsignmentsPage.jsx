@@ -131,7 +131,7 @@ export default function AdminConsignmentsPage() {
         <div style={st.tableScroll}>
           <table style={st.table}>
             <thead>
-              <tr>
+              <tr style={st.theadRow}>
                 {COLUMNS.map((c) => (
                   <th
                     key={c.key}
@@ -504,15 +504,32 @@ const st = {
     border: `1px solid ${adminColors.border}`,
     borderRadius: 12,
   },
+  // Explicit `display: table` on the wrapper + table-row / table-cell on
+  // the descendants below — most browsers compute these implicitly for
+  // <table>/<tr>/<th>, but anything that injects a flex/grid context
+  // higher up (or a global selector touching `table`) can knock the
+  // header out of the table-layout algorithm and break vertical-align.
+  // Spelling them out makes the layout robust against that.
   table: {
+    display: "table",
     width: "100%", minWidth: 1200,
     borderCollapse: "collapse",
     fontSize: "0.84rem",
+    tableLayout: "auto",
   },
-  // Centered headers — the matching cell styles also center, so each
-  // value sits directly under its header label.
+  // Header row — fixed 48px height, declared explicitly on the <tr> so
+  // every <th> inherits the same row box regardless of its own content.
+  theadRow: {
+    display: "table-row",
+    height: 48,
+  },
+  // Each cell renders as a true table-cell so vertical-align: middle
+  // actually applies (vertical-align is a no-op on flex/inline-block
+  // containers, which is the most common reason "centered" header text
+  // ends up at the top).
   th: {
-    height: 44,
+    display: "table-cell",
+    height: 48,
     padding: "0 0.75rem",
     fontSize: "0.62rem", fontWeight: 700,
     letterSpacing: "0.16em", textTransform: "uppercase",
@@ -521,7 +538,9 @@ const st = {
     background: "rgba(15,23,42,0.6)",
     textAlign: "center",
     verticalAlign: "middle",
+    whiteSpace: "nowrap",
     userSelect: "none",
+    boxSizing: "border-box",
   },
   thSortable: { cursor: "pointer" },
   sortMark: {
