@@ -1610,15 +1610,27 @@ const st = {
     letterSpacing: "0.04em",
     outline: "none",
   },
+  // Compact inline selector — sized small per spec (28px / 12px / 2px 8px)
+  // and stripped of native chrome via appearance:none so the styling
+  // looks consistent across browsers. Matches the dark-input palette
+  // (slate bg, white text, hairline white border) rather than the gold
+  // input style — keeps the gold restricted to the zip field as the
+  // primary action input.
   nearMeSelect: {
-    background: "rgba(15,23,42,0.7)",
-    color: colors.textSecondary,
-    border: `1px solid ${colors.borderGold}`,
-    borderRadius: 6,
-    padding: "0.45rem 0.7rem",
-    fontSize: "0.85rem",
+    height: 28,
+    padding: "2px 8px",
+    borderRadius: 4,
+    background: "rgba(15,23,42,0.8)",
+    color: "#fff",
+    border: "1px solid rgba(255,255,255,0.15)",
+    fontSize: 12,
     fontFamily: "inherit",
     cursor: "pointer",
+    appearance: "none",
+    WebkitAppearance: "none",
+    MozAppearance: "none",
+    boxSizing: "border-box",
+    outline: "none",
   },
   nearMeError: {
     color: "#fca5a5",
