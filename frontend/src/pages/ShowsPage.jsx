@@ -382,8 +382,20 @@ function ExpandedShowRow({ show, compact }) {
 }
 
 // ─── Month grid (used twice during a month-slide transition) ────────
+//
+// Strict fixed-height layout — every dimension is hardcoded and there
+// are NO auto, min-height, max-height, flex, or stretch constraints
+// anywhere in the cell tree:
+//
+//   day cell           80px fixed, overflow: hidden
+//   ├─ day number      20px fixed
+//   └─ event container 56px fixed, overflow: hidden
+//        └─ event pill 16px fixed, 10/16 type, 2px margin-bottom
+//                       overflow: hidden, text-overflow: ellipsis
+//
+// Adding an event cannot push anything taller because nothing in the
+// chain is auto-sized. Pills past what fits in 56px are clipped.
 function MonthGrid({ cursor, today, byDate, expandedDate, onToggleExpand }) {
-  // 6-week (42-cell) grid, Sunday-anchored.
   const cells = useMemo(() => {
     const monthStart = startOfMonth(cursor);
     const start = new Date(monthStart);
@@ -404,10 +416,17 @@ function MonthGrid({ cursor, today, byDate, expandedDate, onToggleExpand }) {
         const isExpanded = iso === expandedDate;
         const dayShows = byDate.get(iso) ?? [];
         return (
-          <button
+          <div
             key={iso}
-            type="button"
+            role="button"
+            tabIndex={0}
             onClick={() => onToggleExpand(iso)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                onToggleExpand(iso);
+              }
+            }}
             style={{
               ...st.dayCell,
               ...(inMonth ? {} : st.dayCellMuted),
@@ -416,78 +435,40 @@ function MonthGrid({ cursor, today, byDate, expandedDate, onToggleExpand }) {
             }}
           >
             <div style={st.dayNumber}>{d.getDate()}</div>
-            <div style={st.dayPills}>
-              {dayShows.slice(0, 2).map((s) => (
-                <DayPill key={s.id} show={s} />
+            <div style={st.eventContainer}>
+              {dayShows.map((s) => (
+                <div
+                  key={s.id}
+                  style={st.eventPill}
+                  title={pillTitle(s)}
+                >
+                  {s.name}
+                </div>
               ))}
-              {dayShows.length > 2 && (
-                <div style={st.dayPillMore}>+{dayShows.length - 2}</div>
-              )}
             </div>
-          </button>
+          </div>
         );
       })}
     </div>
   );
 }
 
-// ─── Day pill — fixed-size + hover popover ───────────────────────────
-// Pill size is locked (height + font + ellipsis) so toggling attending
-// status anywhere can't reflow the day cell. The popover renders only
-// on the start day of a multi-day run so a single tooltip serves the
-// whole range, and uses pointer-events:none so it doesn't block the
-// underlying day-cell click.
-function DayPill({ show }) {
-  const [hover, setHover] = useState(false);
-  return (
-    <div
-      style={{ ...st.dayPill, ...spanPillStyle(show) }}
-      onMouseEnter={() => setHover(true)}
-      onMouseLeave={() => setHover(false)}
-    >
-      <span style={st.dayPillLabel}>
-        {show._isStart ? show.name : " "}
-      </span>
-      {hover && show._isStart && (
-        <div style={st.dayPillPopover} role="tooltip">
-          <div style={st.popoverName}>{show.name}</div>
-          {show.venue && <div style={st.popoverLine}>{show.venue}</div>}
-          <div style={st.popoverLine}>
-            {show.city ? `${show.city}, ${show.state}` : show.state}
-          </div>
-          {show.startTime && (
-            <div style={st.popoverLine}>
-              {formatTimeRange(show.startTime, show.endTime)}
-            </div>
-          )}
-          {show.endDate && show.endDate !== show.date && (
-            <div style={st.popoverLine}>
-              {`${show.date} – ${show.endDate}`}
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  );
+// Native multi-line tooltip for a pill — no styling control but it
+// gets the full info to the user without breaking the cell's
+// overflow:hidden clipping that's holding the size lock in place.
+function pillTitle(s) {
+  const lines = [s.name];
+  if (s.venue) lines.push(s.venue);
+  if (s.city) lines.push(`${s.city}, ${s.state}`);
+  if (s.startTime) {
+    lines.push(s.endTime ? `${s.startTime} – ${s.endTime}` : s.startTime);
+  }
+  if (s.endDate && s.endDate !== s.date) {
+    lines.push(`${s.date} – ${s.endDate}`);
+  }
+  return lines.join("\n");
 }
 
-// Shape per-day pill corners so a multi-day pill connects visually:
-// only the first day rounds its left edge and the last day rounds its
-// right edge; middle days have square inner edges.
-function spanPillStyle(s) {
-  if (!s.endDate || s.endDate === s.date) return null;
-  const left  = s._isStart ? 4 : 0;
-  const right = s._isEnd   ? 4 : 0;
-  return {
-    borderTopLeftRadius:    left,
-    borderBottomLeftRadius: left,
-    borderTopRightRadius:   right,
-    borderBottomRightRadius:right,
-    // Negate the cell's grid gap so adjacent days' pills touch.
-    marginLeft:  s._isStart ? 0 : "-0.25rem",
-    marginRight: s._isEnd   ? 0 : "-0.25rem",
-  };
-}
 
 // Stacked WEEKDAY / DAY / MONTH pill — restored from the first
 // ShowsPage commit (673b333). Used for both start and end dates so the
@@ -897,20 +878,24 @@ const st = {
   // pills slot below has its own fixed height so the cell's contents
   // also can't grow vertically. Cell stays position:relative so the
   // pill popover anchors against it correctly.
+  // ─── STRICT fixed-height calendar cell ───────────────────────────
+  // Hardcoded height: 80 (no min, no max, no auto). overflow:hidden
+  // clips anything inside that would otherwise push out, so adding
+  // a pill or toggling attending status cannot resize the cell. No
+  // flex on the cell — day number + event container each have their
+  // own fixed heights and stack via plain block flow.
   dayCell: {
+    height: 80,
     background: "rgba(15,23,42,0.45)",
     border: `1px solid ${colors.borderSoft}`,
     borderRadius: 8,
-    minHeight: 100,
-    maxHeight: 100,
-    padding: "0.4rem 0.5rem",
+    padding: 0,
     color: colors.textSecondary,
     cursor: "pointer",
-    display: "flex", flexDirection: "column", gap: "0.3rem",
     textAlign: "left",
     fontFamily: "inherit",
     transition: "border-color 0.12s, background 0.12s",
-    position: "relative",
+    overflow: "hidden",
     boxSizing: "border-box",
   },
   dayCellMuted: {
@@ -925,108 +910,48 @@ const st = {
     borderColor: colors.gold,
     background: "rgba(245,158,11,0.05)",
   },
+  // ─── Day number row ───
+  // Fixed 20px tall, no auto sizing. The block-flow stack inside
+  // the cell places this above eventContainer naturally.
   dayNumber: {
+    height: 20,
+    lineHeight: "20px",
+    padding: "0 6px",
     fontSize: "0.78rem", fontWeight: 700,
     color: colors.textPrimary,
     fontVariantNumeric: "tabular-nums",
   },
-  // Fixed-height event slot that fits exactly two 20px pills + a 3px
-  // gap + the small "+N more" line below. marginTop: auto pushes it
-  // to the bottom of the (now fixed-height) cell so the day number
-  // sits up top. Adding events past the slice limit goes through the
-  // "+N" indicator — the slot itself never changes size.
-  //
-  // overflow stays VISIBLE so the pill's hover popover (a descendant)
-  // can render above the slot and escape the cell. The slice + the
-  // fixed-height "+N" line below guarantee content fits in 60px on
-  // its own, no overflow clipping needed.
-  dayPills: {
-    display: "flex", flexDirection: "column", gap: 3,
-    marginTop: "auto",
-    height: 60,
-    maxHeight: 60,
-    overflow: "visible",
-  },
-  // Locked-size pill per spec: 20px fixed height, 11px fixed font,
-  // overflow:hidden + ellipsis + nowrap so a long name can never wrap
-  // or expand the pill. max-width: 100% keeps it inside the cell
-  // even on the narrowest grid columns. Padding and margin are
-  // single-source-of-truth in this style block — nothing in the
-  // attending toggle path mutates them, so toggling can't change
-  // size in any dimension. position:relative anchors the popover.
-  dayPill: {
-    height: 20,
-    minHeight: 20,
-    maxHeight: 20,
-    maxWidth: "100%",
-    background: gradients.goldPill,
-    color: "#0f172a",
-    fontSize: "11px",
-    fontWeight: 800,
-    padding: "0 0.45rem",
-    borderRadius: 4,
-    letterSpacing: "0.02em",
-    display: "flex", alignItems: "center",
+  // ─── Event container ───
+  // Hardcoded 56px tall, overflow:hidden. Pills past what fits are
+  // clipped, so adding shows can never push the cell taller. No
+  // flex / no auto / no min/max — single fixed dimension.
+  eventContainer: {
+    height: 56,
     overflow: "hidden",
-    textOverflow: "ellipsis",
-    whiteSpace: "nowrap",
-    position: "relative",
-    flexShrink: 0,
+    padding: "0 4px",
     boxSizing: "border-box",
   },
-  dayPillLabel: {
-    flex: 1,
+  // ─── Event pill (per the user spec, exactly) ───
+  // height 16, font-size 10, line-height 16, padding 0 4, white-
+  // space nowrap, overflow hidden, text-overflow ellipsis,
+  // width 100%, display block, margin-bottom 2.
+  eventPill: {
+    display: "block",
+    width: "100%",
+    height: 16,
+    fontSize: "10px",
+    lineHeight: "16px",
+    padding: "0 4px",
+    marginBottom: 2,
+    background: gradients.goldPill,
+    color: "#0f172a",
+    fontWeight: 800,
+    letterSpacing: "0.02em",
+    borderRadius: 3,
+    whiteSpace: "nowrap",
     overflow: "hidden",
     textOverflow: "ellipsis",
-    whiteSpace: "nowrap",
-    minWidth: 0,
-    fontSize: "11px",
-    lineHeight: "20px",
-  },
-  // Fixed line height so it slots into the 60px event area predictably
-  // alongside the two 20px pills + gaps.
-  dayPillMore: {
-    height: 14,
-    lineHeight: "14px",
-    color: colors.goldLight,
-    fontSize: "10px", fontWeight: 700,
-    letterSpacing: "0.08em", textTransform: "uppercase",
-    flexShrink: 0,
-  },
-  // Hover-only popover floating above the pill. pointer-events:none
-  // keeps it out of click handling so the day cell underneath still
-  // expands when the pill area is clicked.
-  dayPillPopover: {
-    position: "absolute",
-    bottom: "calc(100% + 6px)",
-    left: 0,
-    minWidth: 220,
-    maxWidth: 280,
-    background: "rgba(10,15,31,0.97)",
-    border: "1px solid rgba(245,158,11,0.45)",
-    borderRadius: 8,
-    padding: "0.65rem 0.8rem",
-    boxShadow: "0 12px 32px rgba(0,0,0,0.55)",
-    zIndex: 50,
-    pointerEvents: "none",
-    textAlign: "left",
-    whiteSpace: "normal",
-    color: colors.textSecondary,
-    fontSize: "0.78rem",
-    fontWeight: 500,
-    letterSpacing: "0.01em",
-    lineHeight: 1.4,
-    textTransform: "none",
-  },
-  popoverName: {
-    color: colors.goldLight,
-    fontWeight: 800,
-    fontSize: "0.86rem",
-    letterSpacing: "-0.01em",
-    marginBottom: "0.3rem",
-  },
-  popoverLine: {
-    marginTop: "0.15rem",
+    boxSizing: "border-box",
   },
 
   expandedPane: {
