@@ -892,11 +892,17 @@ const st = {
     gridTemplateColumns: "repeat(7, 1fr)",
     gap: "0.25rem",
   },
+  // Identical min + max height locks the cell — adding pills can't
+  // push it taller because there's no auto-sizing dimension. The
+  // pills slot below has its own fixed height so the cell's contents
+  // also can't grow vertically. Cell stays position:relative so the
+  // pill popover anchors against it correctly.
   dayCell: {
     background: "rgba(15,23,42,0.45)",
     border: `1px solid ${colors.borderSoft}`,
     borderRadius: 8,
-    minHeight: 78,
+    minHeight: 100,
+    maxHeight: 100,
     padding: "0.4rem 0.5rem",
     color: colors.textSecondary,
     cursor: "pointer",
@@ -904,6 +910,8 @@ const st = {
     textAlign: "left",
     fontFamily: "inherit",
     transition: "border-color 0.12s, background 0.12s",
+    position: "relative",
+    boxSizing: "border-box",
   },
   dayCellMuted: {
     color: colors.textVeryFaint,
@@ -922,25 +930,49 @@ const st = {
     color: colors.textPrimary,
     fontVariantNumeric: "tabular-nums",
   },
+  // Fixed-height event slot that fits exactly two 20px pills + a 3px
+  // gap + the small "+N more" line below. marginTop: auto pushes it
+  // to the bottom of the (now fixed-height) cell so the day number
+  // sits up top. Adding events past the slice limit goes through the
+  // "+N" indicator — the slot itself never changes size.
+  //
+  // overflow stays VISIBLE so the pill's hover popover (a descendant)
+  // can render above the slot and escape the cell. The slice + the
+  // fixed-height "+N" line below guarantee content fits in 60px on
+  // its own, no overflow clipping needed.
   dayPills: {
     display: "flex", flexDirection: "column", gap: 3,
     marginTop: "auto",
+    height: 60,
+    maxHeight: 60,
+    overflow: "visible",
   },
-  // Locked-size pill — height/font/padding are fixed, label is
-  // ellipsised. Toggling attending status anywhere never resizes the
-  // pill or its day cell. position:relative anchors the popover.
+  // Locked-size pill per spec: 20px fixed height, 11px fixed font,
+  // overflow:hidden + ellipsis + nowrap so a long name can never wrap
+  // or expand the pill. max-width: 100% keeps it inside the cell
+  // even on the narrowest grid columns. Padding and margin are
+  // single-source-of-truth in this style block — nothing in the
+  // attending toggle path mutates them, so toggling can't change
+  // size in any dimension. position:relative anchors the popover.
   dayPill: {
-    height: 18,
+    height: 20,
+    minHeight: 20,
+    maxHeight: 20,
+    maxWidth: "100%",
     background: gradients.goldPill,
     color: "#0f172a",
-    fontSize: "0.62rem", fontWeight: 800,
+    fontSize: "11px",
+    fontWeight: 800,
     padding: "0 0.45rem",
     borderRadius: 4,
     letterSpacing: "0.02em",
     display: "flex", alignItems: "center",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
     position: "relative",
     flexShrink: 0,
-    overflow: "visible", // popover escapes; label has its own clip
+    boxSizing: "border-box",
   },
   dayPillLabel: {
     flex: 1,
@@ -948,11 +980,18 @@ const st = {
     textOverflow: "ellipsis",
     whiteSpace: "nowrap",
     minWidth: 0,
+    fontSize: "11px",
+    lineHeight: "20px",
   },
+  // Fixed line height so it slots into the 60px event area predictably
+  // alongside the two 20px pills + gaps.
   dayPillMore: {
+    height: 14,
+    lineHeight: "14px",
     color: colors.goldLight,
-    fontSize: "0.62rem", fontWeight: 700,
+    fontSize: "10px", fontWeight: 700,
     letterSpacing: "0.08em", textTransform: "uppercase",
+    flexShrink: 0,
   },
   // Hover-only popover floating above the pill. pointer-events:none
   // keeps it out of click handling so the day cell underneath still
