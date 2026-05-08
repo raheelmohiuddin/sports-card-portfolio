@@ -24,8 +24,8 @@ const STATES = [
 ];
 const STATE_NAME = Object.fromEntries(STATES);
 
-const NEAR_ME_ZIP_KEY    = "scp.nearMe.zip";
-const NEAR_ME_RADIUS_KEY = "scp.nearMe.radiusMiles";
+const NEAR_ME_ZIP_KEY    = "scp_nearme_zip";
+const NEAR_ME_RADIUS_KEY = "scp_nearme_radius";
 
 // Session-scoped travel-time cache. Keyed by `${zip}|${city}|${state}` so
 // re-renders, pagination, and filter changes don't refire requests for a
@@ -75,8 +75,47 @@ export default function ShowsPage() {
   // Declared up here (not next to the other Near Me handlers below) so
   // the fetch effect can read nearMe without hitting a temporal dead zone.
   const [nearMeOpen, setNearMeOpen] = useState(false);
-  const [nearMe, setNearMe]         = useState(null);
+  // Seed synchronously from localStorage so the button highlights as
+  // active on the very first paint after a refresh / navigation. Coords
+  // start undefined and are filled in by the effect just below — until
+  // they arrive, the API call goes out without proximity (button is
+  // gold but the filter doesn't bite yet). One short window, one extra
+  // request: small price for "just feels right" on reload.
+  const [nearMe, setNearMe] = useState(() => {
+    try {
+      const zip    = localStorage.getItem(NEAR_ME_ZIP_KEY);
+      const radius = localStorage.getItem(NEAR_ME_RADIUS_KEY);
+      if (!zip || !/^\d{5}$/.test(zip) || !radius) return null;
+      return {
+        zip,
+        radiusMiles: radius === "any" ? null : (parseInt(radius, 10) || null),
+      };
+    } catch {
+      return null;
+    }
+  });
   // { zip, radiusMiles, centerLat, centerLng }
+
+  // Coords hydration for a localStorage-restored filter. Skipped when
+  // nearMe is null or already has coords (the panel's runLookup writes
+  // them in directly when the user applies via the UI).
+  useEffect(() => {
+    if (!nearMe || nearMe.centerLat != null) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`https://api.zippopotam.us/us/${nearMe.zip}`);
+        if (!res.ok || cancelled) return;
+        const data = await res.json();
+        const place = data?.places?.[0];
+        const lat = parseFloat(place?.latitude);
+        const lng = parseFloat(place?.longitude);
+        if (cancelled || !Number.isFinite(lat) || !Number.isFinite(lng)) return;
+        setNearMe((prev) => prev ? { ...prev, centerLat: lat, centerLng: lng } : prev);
+      } catch { /* swallow — leaves filter inert; user can re-apply */ }
+    })();
+    return () => { cancelled = true; };
+  }, [nearMe?.zip, nearMe?.centerLat]);
 
   // Whenever the calendar moves, snap from/to to that month's bounds.
   // The user can still type custom dates afterwards; their values stick
@@ -1092,12 +1131,10 @@ function NearMePanel({ onApply, onClear }) {
           const next = e.target.value.replace(/[^\d]/g, "");
           setZip(next);
           setError(null);
-          // Persist on every keystroke so closing the panel by
-          // clicking outside doesn't lose mid-typed digits.
-          try {
-            if (next) localStorage.setItem(NEAR_ME_ZIP_KEY, next);
-            else      localStorage.removeItem(NEAR_ME_ZIP_KEY);
-          } catch {}
+          // localStorage is intentionally NOT touched here — per spec,
+          // Reset is the only path that clears it, and runLookup is the
+          // only path that writes it. Mid-typing isn't persisted.
+          //
           // Auto-fire only when BOTH gates are open: zip is 5 digits
           // AND the user has actually picked a radius (default "Any"
           // before any interaction doesn't count).
@@ -1120,9 +1157,9 @@ function NearMePanel({ onApply, onClear }) {
           // First-touch flips the gate; subsequent radius changes
           // simply re-fire (the lookup is de-duped via lastRef).
           setRadiusTouched(true);
-          try { localStorage.setItem(NEAR_ME_RADIUS_KEY, next); } catch {}
-          // Re-fire with the new radius if we have a valid zip — and
-          // since the user just touched radius, the gate is now open.
+          // localStorage write happens inside runLookup on success —
+          // not here — so a radius change without a valid zip doesn't
+          // pollute the persisted state.
           if (zip.length === 5) runLookup(zip, next);
         }}
         style={st.nearMeRadiusSelect}
