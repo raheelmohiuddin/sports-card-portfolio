@@ -9,6 +9,13 @@ export function isSold(card) {
   return card?.consignmentStatus === "sold" && card?.consignmentSoldPrice != null;
 }
 
+// Card was traded away in a /trades/execute call. Surfaced via the cards
+// table's status column. Same UI-visibility pattern as sold: still shown
+// in My Cards with a TRADED badge so the user can see their history.
+export function isTraded(card) {
+  return card?.status === "traded";
+}
+
 // The "value" we report for a card today.
 //   sold (with price)  → soldPrice  (the realized exit)
 //   anything else      → estimatedValue (manual override or auto market)

@@ -105,10 +105,36 @@ export class ApiStack extends Construct {
       entry: path.join(functionsDir, "cards/psa-lookup.js"),
     });
 
+    // BGS / SGC cert lookup via CardHedger's prices-by-cert endpoint.
+    // PSA still uses the dedicated PSA-API path above; this Lambda
+    // covers the other graders by reshaping CardHedger's response to
+    // the same contract psa-lookup.js returns.
+    const cardLookupCertFn = new NodejsFunction(this, "CardLookupCert", {
+      ...sharedNodejsProps,
+      functionName: "scp-card-lookup-cert",
+      entry: path.join(functionsDir, "cards/lookup-cert.js"),
+    });
+    cardLookupCertFn.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: ["secretsmanager:GetSecretValue"],
+        resources: ["arn:aws:secretsmanager:us-east-1:501789774892:secret:sports-card-portfolio/cardhedger-api-key*"],
+      })
+    );
+
     const portfolioValueFn = new NodejsFunction(this, "PortfolioValue", {
       ...sharedNodejsProps,
       functionName: "scp-portfolio-value",
       entry: path.join(functionsDir, "portfolio/get-value.js"),
+    });
+
+    // Background CardHedger refresh — split out of get-value so the
+    // dashboard read stays sub-second. Owns the slow path (5–20s when many
+    // cards are stale). Timeout bumped accordingly.
+    const portfolioRefreshFn = new NodejsFunction(this, "PortfolioRefresh", {
+      ...sharedNodejsProps,
+      functionName: "scp-portfolio-refresh",
+      entry: path.join(functionsDir, "portfolio/refresh-portfolio.js"),
+      timeout: cdk.Duration.seconds(60),
     });
 
     const portfolioHistoryFn = new NodejsFunction(this, "PortfolioHistory", {
@@ -117,10 +143,48 @@ export class ApiStack extends Construct {
       entry: path.join(functionsDir, "portfolio/get-history.js"),
     });
 
+    // Timeout bumped because the new ?grade= path can call CardHedger
+    // /v1/cards/comps live (5-20s for popular cards). Default-grade path
+    // is still a sub-100ms DB read.
     const cardSalesFn = new NodejsFunction(this, "CardSales", {
       ...sharedNodejsProps,
       functionName: "scp-card-sales",
       entry: path.join(functionsDir, "portfolio/get-card-sales.js"),
+      timeout: cdk.Duration.seconds(60),
+    });
+
+    // POST /pricing/preview — runs fetchMarketValue for an arbitrary cert
+    // without touching the DB. Powers the Trade Builder's "card you'd
+    // receive" pricing so the user sees value before executing the trade.
+    // Slow path (calls CardHedger comps) → 60s timeout to match the
+    // refresh Lambda; needs the cardhedger secret IAM grant below.
+    const pricingPreviewFn = new NodejsFunction(this, "PricingPreview", {
+      ...sharedNodejsProps,
+      functionName: "scp-pricing-preview",
+      entry: path.join(functionsDir, "pricing/pricing-preview.js"),
+      timeout: cdk.Duration.seconds(60),
+    });
+
+    // ─── Trade flow ───
+    // POST /trades/execute — atomic inventory shuffle, see source comments.
+    const executeTradeFn = new NodejsFunction(this, "ExecuteTrade", {
+      ...sharedNodejsProps,
+      functionName: "scp-execute-trade",
+      entry: path.join(functionsDir, "trades/execute-trade.js"),
+    });
+    // POST /trades/confirm-cost — finalize cost basis allocation.
+    const confirmTradeCostFn = new NodejsFunction(this, "ConfirmTradeCost", {
+      ...sharedNodejsProps,
+      functionName: "scp-confirm-trade-cost",
+      entry: path.join(functionsDir, "trades/confirm-cost.js"),
+    });
+    // POST /trades/cancel — atomic rollback of a pending trade so the
+    // Trade Builder's Back button can return the user to the building
+    // step without leaving inventory in a half-traded state.
+    const cancelTradeFn = new NodejsFunction(this, "CancelTrade", {
+      ...sharedNodejsProps,
+      functionName: "scp-cancel-trade",
+      entry: path.join(functionsDir, "trades/cancel-trade.js"),
     });
 
     const avatarUploadUrlFn = new NodejsFunction(this, "AvatarUploadUrl", {
@@ -204,15 +268,6 @@ export class ApiStack extends Construct {
     });
     props.dbSecret.grantRead(migrationRolesFn);
 
-    // One-off DESTRUCTIVE truncate. Removes every row from every user-data
-    // table. Invoke manually after deploy; remove from CDK after use.
-    const migrationTruncateFn = new NodejsFunction(this, "MigrationTruncateAll", {
-      ...sharedNodejsProps,
-      functionName: "scp-migration-truncate-all",
-      entry: path.join(functionsDir, "_migrations/truncate-all.js"),
-    });
-    props.dbSecret.grantRead(migrationTruncateFn);
-
     // Migration: sold_price column on consignments.
     const migrationSoldPriceFn = new NodejsFunction(this, "MigrationAddSoldPrice", {
       ...sharedNodejsProps,
@@ -256,6 +311,46 @@ export class ApiStack extends Construct {
     });
     props.dbSecret.grantRead(migrationShowCoordsFn);
 
+    // Migration: cardhedger_id + raw_comps columns on cards.
+    const migrationCardhedgerColumnsFn = new NodejsFunction(this, "MigrationAddCardhedgerColumns", {
+      ...sharedNodejsProps,
+      functionName: "scp-migration-add-cardhedger-columns",
+      entry: path.join(functionsDir, "_migrations/add-cardhedger-columns.js"),
+    });
+    props.dbSecret.grantRead(migrationCardhedgerColumnsFn);
+
+    // Migration: cardhedger_image_url column on cards.
+    const migrationCardhedgerImageUrlFn = new NodejsFunction(this, "MigrationAddCardhedgerImageUrl", {
+      ...sharedNodejsProps,
+      functionName: "scp-migration-add-cardhedger-image-url",
+      entry: path.join(functionsDir, "_migrations/add-cardhedger-image-url.js"),
+    });
+    props.dbSecret.grantRead(migrationCardhedgerImageUrlFn);
+
+    // Migration: total_cost column on portfolio_snapshots.
+    const migrationSnapshotTotalCostFn = new NodejsFunction(this, "MigrationAddSnapshotTotalCost", {
+      ...sharedNodejsProps,
+      functionName: "scp-migration-add-snapshot-total-cost",
+      entry: path.join(functionsDir, "_migrations/add-snapshot-total-cost.js"),
+    });
+    props.dbSecret.grantRead(migrationSnapshotTotalCostFn);
+
+    // Migration: trades + trade_cards tables and cards.status column.
+    const migrationTradesTablesFn = new NodejsFunction(this, "MigrationAddTradesTables", {
+      ...sharedNodejsProps,
+      functionName: "scp-migration-add-trades-tables",
+      entry: path.join(functionsDir, "_migrations/add-trades-tables.js"),
+    });
+    props.dbSecret.grantRead(migrationTradesTablesFn);
+
+    // Migration: cards.grader column for PSA / BGS / SGC support.
+    const migrationGraderColumnFn = new NodejsFunction(this, "MigrationAddGraderColumn", {
+      ...sharedNodejsProps,
+      functionName: "scp-migration-add-grader-column",
+      entry: path.join(functionsDir, "_migrations/add-grader-column.js"),
+    });
+    props.dbSecret.grantRead(migrationGraderColumnFn);
+
     // Migration: auction_platform column on consignments.
     const migrationAuctionPlatformFn = new NodejsFunction(this, "MigrationAddAuctionPlatform", {
       ...sharedNodejsProps,
@@ -271,16 +366,6 @@ export class ApiStack extends Construct {
       entry: path.join(functionsDir, "_migrations/add-consignment-blocks.js"),
     });
     props.dbSecret.grantRead(migrationConsignmentBlocksFn);
-
-    // Diagnostic: exercises the decline → block flow inside a
-    // transaction with a ROLLBACK at the end. No production data
-    // mutated. Direct-invoke only.
-    const testDeclineLogicFn = new NodejsFunction(this, "TestDeclineLogic", {
-      ...sharedNodejsProps,
-      functionName: "scp-test-decline-logic",
-      entry: path.join(functionsDir, "_diagnostics/test-decline-logic.js"),
-    });
-    props.dbSecret.grantRead(testDeclineLogicFn);
 
     // Helper Lambda for the local geocoding pipeline — accepts a payload
     // of city/state → coords mappings and applies them as UPDATEs.
@@ -387,6 +472,7 @@ export class ApiStack extends Construct {
       functionName: "scp-admin-card-sales",
       entry: path.join(functionsDir, "admin/get-card-sales.js"),
       environment: adminFnEnv,
+      timeout: cdk.Duration.seconds(60),
     });
 
     // Grant cognito-idp:AdminGetUser to the admin Lambdas for the live
@@ -433,7 +519,7 @@ export class ApiStack extends Construct {
       markAttendingFn,
       unmarkAttendingFn,
     ];
-    for (const fn of [addCardFn, getCardsFn, getCardFn, deleteCardFn, psaLookupFn, portfolioValueFn, portfolioHistoryFn, cardSalesFn, updatePriceFn, updateCardFn, avatarUploadUrlFn, avatarViewUrlFn, ...consignmentAndAdminFns]) {
+    for (const fn of [addCardFn, getCardsFn, getCardFn, deleteCardFn, psaLookupFn, portfolioValueFn, portfolioRefreshFn, portfolioHistoryFn, cardSalesFn, executeTradeFn, confirmTradeCostFn, cancelTradeFn, updatePriceFn, updateCardFn, avatarUploadUrlFn, avatarViewUrlFn, ...consignmentAndAdminFns]) {
       props.dbSecret.grantRead(fn);
       props.cardImagesBucket.grantReadWrite(fn);
       fn.addToRolePolicy(
@@ -451,6 +537,20 @@ export class ApiStack extends Construct {
         resources: ["arn:aws:secretsmanager:us-east-1:501789774892:secret:sports-card-portfolio/psa-api-key-s4T0T9"],
       })
     );
+
+    // CardHedger pricing API key — read by portfolio/pricing.js inside the
+    // portfolio-refresh Lambda (and previously portfolio-value before the
+    // SWR split). Also granted to pricing-preview for the Trade Builder
+    // and to both card-sales Lambdas for the grade-filter dropdown's
+    // live comps fetch.
+    for (const fn of [portfolioRefreshFn, pricingPreviewFn, cardSalesFn, adminCardSalesFn]) {
+      fn.addToRolePolicy(
+        new iam.PolicyStatement({
+          actions: ["secretsmanager:GetSecretValue"],
+          resources: ["arn:aws:secretsmanager:us-east-1:501789774892:secret:sports-card-portfolio/cardhedger-api-key*"],
+        })
+      );
+    }
 
     // HTTP API Gateway with Cognito JWT authorizer
     const authorizer = new apigwv2authorizers.HttpUserPoolAuthorizer(
@@ -509,9 +609,23 @@ export class ApiStack extends Construct {
     });
 
     api.addRoutes({
+      path: "/cards/lookup-cert",
+      methods: [apigwv2.HttpMethod.POST],
+      integration: new apigwv2integrations.HttpLambdaIntegration("CardLookupCert", cardLookupCertFn),
+      ...authRoute,
+    });
+
+    api.addRoutes({
       path: "/portfolio/value",
       methods: [apigwv2.HttpMethod.GET],
       integration: new apigwv2integrations.HttpLambdaIntegration("PortfolioValue", portfolioValueFn),
+      ...authRoute,
+    });
+
+    api.addRoutes({
+      path: "/portfolio/refresh",
+      methods: [apigwv2.HttpMethod.POST],
+      integration: new apigwv2integrations.HttpLambdaIntegration("PortfolioRefresh", portfolioRefreshFn),
       ...authRoute,
     });
 
@@ -526,6 +640,34 @@ export class ApiStack extends Construct {
       path: "/cards/{id}/sales",
       methods: [apigwv2.HttpMethod.GET],
       integration: new apigwv2integrations.HttpLambdaIntegration("CardSales", cardSalesFn),
+      ...authRoute,
+    });
+
+    api.addRoutes({
+      path: "/pricing/preview",
+      methods: [apigwv2.HttpMethod.POST],
+      integration: new apigwv2integrations.HttpLambdaIntegration("PricingPreview", pricingPreviewFn),
+      ...authRoute,
+    });
+
+    api.addRoutes({
+      path: "/trades/execute",
+      methods: [apigwv2.HttpMethod.POST],
+      integration: new apigwv2integrations.HttpLambdaIntegration("ExecuteTrade", executeTradeFn),
+      ...authRoute,
+    });
+
+    api.addRoutes({
+      path: "/trades/confirm-cost",
+      methods: [apigwv2.HttpMethod.POST],
+      integration: new apigwv2integrations.HttpLambdaIntegration("ConfirmTradeCost", confirmTradeCostFn),
+      ...authRoute,
+    });
+
+    api.addRoutes({
+      path: "/trades/cancel",
+      methods: [apigwv2.HttpMethod.POST],
+      integration: new apigwv2integrations.HttpLambdaIntegration("CancelTrade", cancelTradeFn),
       ...authRoute,
     });
 

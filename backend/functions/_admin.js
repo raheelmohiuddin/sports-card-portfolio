@@ -29,18 +29,6 @@ async function requireAdmin(event, _db) { // _db kept for API parity with prior 
   if (!claims) return { error: json(401, { error: "Unauthorized" }) };
 
   const claimRole = claims["custom:role"];
-  // TEMP: verbose log so we can see exactly what's in the JWT during the
-  // admin-portal rollout. Includes `iat` so we can tell whether a token
-  // pre-dates a deploy/promotion. Drop once promotions reliably propagate.
-  console.log("admin-guard:", JSON.stringify({
-    sub: claims.sub,
-    cognitoUsername: claims["cognito:username"],
-    email: claims.email,
-    customRole: claimRole,
-    iat: claims.iat,
-    claimKeys: Object.keys(claims),
-  }));
-
   if (claimRole === "admin") return { claims };
 
   // Slow path — JWT claim isn't admin. Could be a stale token from before
@@ -60,7 +48,6 @@ async function requireAdmin(event, _db) { // _db kept for API parity with prior 
         Username: username,
       }));
       const liveRole = res.UserAttributes?.find((a) => a.Name === "custom:role")?.Value;
-      console.log("admin-guard live-fallback:", JSON.stringify({ liveRole }));
       if (liveRole === "admin") return { claims };
     } catch (err) {
       console.error("admin-guard: AdminGetUser failed", err);

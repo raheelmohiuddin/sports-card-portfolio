@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { lookupPsaCert, addCard, uploadCardImages } from "../services/api.js";
+import { lookupCert, addCard, uploadCardImages } from "../services/api.js";
 import DropZone from "../components/DropZone.jsx";
 import { moderateFile } from "../utils/imageModeration.js";
 import { gradients } from "../utils/theme.js";
@@ -26,6 +26,7 @@ function isRare(card) {
 
 export default function AddCardPage() {
   const navigate = useNavigate();
+  const [grader, setGrader]             = useState("PSA");
   const [certNumber, setCertNumber]     = useState("");
   const [certFocused, setCertFocused]   = useState(false);
   const [cardData, setCardData]         = useState(null);
@@ -49,12 +50,25 @@ export default function AddCardPage() {
     setLookupLoading(true);
     setMyCost("");
     try {
-      setCardData(await lookupPsaCert(certNumber.trim()));
+      setCardData(await lookupCert(certNumber.trim(), grader));
     } catch (err) {
       setError(err.message);
     } finally {
       setLookupLoading(false);
     }
+  }
+
+  // Switching grader after a successful lookup invalidates the result
+  // (different grader = different cert namespace). Clear so the user
+  // doesn't accidentally save data from the wrong grader.
+  function selectGrader(next) {
+    if (next === grader) return;
+    setGrader(next);
+    setCardData(null);
+    setError(null);
+    setDuplicateId(null);
+    front.setFile(null);
+    back.setFile(null);
   }
 
   async function handleSave() {
@@ -73,6 +87,9 @@ export default function AddCardPage() {
       const { frontUploadUrl, backUploadUrl } = await addCard({
         ...cardData,
         myCost: costNum,
+        hasFrontImage: !!front.file,
+        hasBackImage:  !!back.file,
+        grader: cardData.grader ?? grader,
       });
       await uploadCardImages({
         frontUploadUrl, frontFile: front.file,
@@ -92,7 +109,6 @@ export default function AddCardPage() {
 
   const hasPsaFront = !!cardData?.frontImageUrl;
   const hasPsaBack  = !!cardData?.backImageUrl;
-  const canSave     = hasPsaFront || hasPsaBack || front.file || back.file;
   const rare        = isRare(cardData);
 
   return (
@@ -112,7 +128,32 @@ export default function AddCardPage() {
 
         {/* ── Lookup ── */}
         <section style={st.lookupSection}>
-          <label style={st.fieldLabel}>PSA Certificate Number</label>
+          {/* Grader selector — drives both the lookup endpoint (PSA's
+              own API vs CardHedger's prices-by-cert) and the
+              record-time grader stored on the card. */}
+          {/* BGS / SGC are temporarily hidden from the grader picker —
+              backend lookup-cert Lambda + the chained details-by-certs
+              + description-parsing flow stay live so re-enabling is
+              just adding "BGS", "SGC" back to the array below. */}
+          <div style={st.graderTabs} role="tablist" aria-label="Grader">
+            {["PSA"].map((g) => {
+              const active = grader === g;
+              return (
+                <button
+                  key={g}
+                  type="button"
+                  role="tab"
+                  aria-selected={active}
+                  onClick={() => selectGrader(g)}
+                  style={{ ...st.graderTab, ...(active ? st.graderTabActive : {}) }}
+                >
+                  {g}
+                </button>
+              );
+            })}
+          </div>
+
+          <label style={st.fieldLabel}>{grader} Certificate Number</label>
           <form onSubmit={handleLookup} style={st.lookupRow}>
             <input
               style={{ ...st.certInput, ...(certFocused ? st.certInputFocused : {}) }}
@@ -173,13 +214,26 @@ export default function AddCardPage() {
                   </p>
                 </div>
                 <div style={st.gradeBadge}>
-                  <span style={st.gradeBadgeLabel}>PSA</span>
+                  <span style={st.gradeBadgeLabel}>{cardData.grader ?? "PSA"}</span>
                   <span style={st.gradeBadgeValue}>{cardData.grade}</span>
                 </div>
               </div>
 
               {cardData.gradeDescription && (
                 <div style={st.gradeDesc}>{cardData.gradeDescription}</div>
+              )}
+
+              {/* Heuristic-parse warning — fires only when CardHedger had
+                  the cert in their grading database but no catalog match,
+                  so the fields below were derived from the cert
+                  description. The parser handles the typical "Year
+                  Brand Player #" layout but stumbles on variants —
+                  flagging it explicitly tells the user to double-check. */}
+              {cardData.parsedFromDescription && (
+                <div style={st.parsedNote}>
+                  <span style={st.parsedNoteMark}>!</span>
+                  <span>Details parsed from certificate description — please verify before saving.</span>
+                </div>
               )}
 
               <div style={st.detailDivider} />
@@ -233,7 +287,7 @@ export default function AddCardPage() {
               <p style={st.sectionSub}>
                 {hasPsaFront || hasPsaBack
                   ? "PSA images shown by default — drop your own photos to override."
-                  : "No PSA images available — upload at least one photo to add this card."}
+                  : "Photos are optional — upload your own to enable the 3D card viewer."}
               </p>
 
               <div style={st.zonesRow}>
@@ -281,10 +335,10 @@ export default function AddCardPage() {
             {/* ── Save ── */}
             <button
               onClick={handleSave}
-              disabled={saveLoading || !canSave}
+              disabled={saveLoading}
               style={{
                 ...st.saveBtn,
-                ...(saveLoading || !canSave ? st.saveBtnDisabled : {}),
+                ...(saveLoading ? st.saveBtnDisabled : {}),
               }}
             >
               {saveLoading ? "Saving…" : (
@@ -311,6 +365,7 @@ function DetailRow({ label, value }) {
     </div>
   );
 }
+
 
 function ImageZone({ side, psaUrl, file, setFile, displayUrl }) {
   const hasPsa  = !!psaUrl;
@@ -386,6 +441,31 @@ const st = {
 
   // ─── Lookup ───
   lookupSection: { marginBottom: "2.5rem" },
+  // Grader pill row — gold-outlined pills, active state inverts to a
+  // gold fill with dark text. Sits directly above the cert label so
+  // the relationship between selected grader and label text is clear.
+  graderTabs: {
+    display: "flex", gap: "0.5rem",
+    marginBottom: "1rem",
+  },
+  graderTab: {
+    padding: "0.45rem 1.1rem",
+    background: "transparent",
+    border: "1px solid rgba(245,158,11,0.55)",
+    borderRadius: 999,
+    color: "#fbbf24",
+    fontSize: "0.78rem", fontWeight: 800,
+    letterSpacing: "0.1em",
+    cursor: "pointer",
+    transition: "background 0.15s, color 0.15s, border-color 0.15s",
+    fontFamily: "inherit",
+  },
+  graderTabActive: {
+    background: "#f59e0b",
+    color: "#0f172a",
+    borderColor: "#f59e0b",
+    boxShadow: "0 0 0 1px rgba(245,158,11,0.6), 0 4px 14px rgba(245,158,11,0.25)",
+  },
   fieldLabel: {
     display: "block",
     fontSize: "0.7rem", fontWeight: 600,
@@ -515,6 +595,32 @@ const st = {
     background: "linear-gradient(90deg, transparent, rgba(255,255,255,0.08), transparent)",
     margin: "1.25rem 0",
   },
+  // Subtle amber note for the description-parsed branch. Same color
+  // family as the rare-card flag so it reads as "heads up" rather
+  // than red-flag error.
+  parsedNote: {
+    display: "flex", alignItems: "center", gap: "0.55rem",
+    marginTop: "1rem",
+    padding: "0.55rem 0.85rem",
+    background: "rgba(245,158,11,0.08)",
+    border: "1px solid rgba(245,158,11,0.3)",
+    borderRadius: 8,
+    color: "#fbbf24",
+    fontSize: "0.78rem",
+    lineHeight: 1.45,
+    letterSpacing: "0.01em",
+  },
+  parsedNoteMark: {
+    flexShrink: 0,
+    width: 18, height: 18,
+    borderRadius: "50%",
+    background: "rgba(245,158,11,0.25)",
+    color: "#fbbf24",
+    fontSize: "0.7rem", fontWeight: 900,
+    display: "flex", alignItems: "center", justifyContent: "center",
+    lineHeight: 1,
+  },
+
   detailGrid: {
     display: "grid",
     gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))",

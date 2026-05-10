@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { fetchUserAttributes } from "aws-amplify/auth";
 import {
   getCard as defaultGetCard,
@@ -62,9 +62,8 @@ export default function CardModal({
   const [pop, setPop] = useState({ open: false, src: null, alt: null });
   const [visible, setVisible]         = useState(false);
   const [closing, setClosing]         = useState(false);
-  const [sales, setSales]             = useState([]);
-  const [salesLoading, setSalesLoading] = useState(true);
-  const [salesError, setSalesError]   = useState(false);
+  // Sales state lives inside SalesHistory now — it owns the grade
+  // dropdown + re-fetch logic. CardModal just passes the loader.
   // Animation completes at ~320ms — mount the heavy below-the-fold content
   // (sales chart) only after that to keep the slide-in compositor frames clean.
   const [hydrated, setHydrated] = useState(false);
@@ -72,7 +71,12 @@ export default function CardModal({
   // hidden for admins. Defer past the slide-in so the network call doesn't
   // compete with the compositor.
   const [role, setRole] = useState(null);
-  const tier = getRarityTier(card);
+  // Memoize derived values that only depend on `card`. getRarityTier
+  // walks several fields and the rest are conditional chains; cheap
+  // individually but they used to recompute on every render (modal
+  // re-renders frequently — pop toggles, role fetch, hydration flag,
+  // image load). Caching against the card identity keeps them flat.
+  const tier = useMemo(() => getRarityTier(card), [card]);
   const rare = tier !== null;
 
   // Slide-in on mount: paint at translateX(100%), then flip to 0 on next frame
@@ -101,10 +105,12 @@ export default function CardModal({
     };
   }, []);
 
-  // Hydrate the heavy content (sales fetch + chart) after the slide-in
-  // settles. Animation duration is 320ms; +20ms slack to be safe.
+  // Hydrate the heavy content (sales fetch + grade dropdown's
+  // all-prices-by-card lookup) after the slide-in settles. Animation
+  // duration is 320ms; +30ms slack puts us at 350ms — past any
+  // residual GPU compositing work.
   useEffect(() => {
-    const id = setTimeout(() => setHydrated(true), 340);
+    const id = setTimeout(() => setHydrated(true), 350);
     return () => clearTimeout(id);
   }, []);
 
@@ -115,12 +121,6 @@ export default function CardModal({
     let cancelled = false;
     fetchUserAttributes()
       .then((attrs) => {
-        // TEMP diagnostic — remove once consign visibility is confirmed.
-        console.log("CardModal role fetched:", {
-          customRole: attrs["custom:role"],
-          email: attrs.email,
-          allKeys: Object.keys(attrs),
-        });
         if (!cancelled) setRole(attrs["custom:role"] ?? null);
       })
       .catch((err) => {
@@ -147,34 +147,22 @@ export default function CardModal({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pop.open]);
 
-  // Fetch sales history once the slide-in has finished. Network is async and
-  // doesn't block the main thread, but the React re-render that processes
-  // the result (and the SalesHistory chart's reflow) does — running it after
-  // the animation keeps the compositor unblocked.
-  useEffect(() => {
-    if (!hydrated) return;
-    let cancelled = false;
-    setSalesLoading(true);
-    setSalesError(false);
-    getCardSales(card.id)
-      .then((data) => {
-        if (!cancelled) setSales(data?.sales ?? []);
-      })
-      .catch(() => {
-        if (!cancelled) { setSalesError(true); setSales([]); }
-      })
-      .finally(() => {
-        if (!cancelled) setSalesLoading(false);
-      });
-    return () => { cancelled = true; };
-  }, [card.id, hydrated]);
+  // (Sales fetch lives inside SalesHistory now — see component below.)
 
   // Sold cards display their realized soldPrice as the headline value;
   // everything else falls back to the existing manual/auto chain.
-  const sold = card.consignmentStatus === "sold" && card.consignmentSoldPrice != null;
-  const displayValue = sold
-    ? card.consignmentSoldPrice
-    : (card.estimatedValue ?? card.avgSalePrice);
+  // Memoized as one block so neither value recomputes when state
+  // unrelated to `card` changes (pop toggle, hydration, role fetch).
+  const { sold, displayValue } = useMemo(() => {
+    const isSoldCard =
+      card.consignmentStatus === "sold" && card.consignmentSoldPrice != null;
+    return {
+      sold: isSoldCard,
+      displayValue: isSoldCard
+        ? card.consignmentSoldPrice
+        : (card.estimatedValue ?? card.avgSalePrice),
+    };
+  }, [card]);
 
   return (
     <>
@@ -210,7 +198,9 @@ export default function CardModal({
           {/* ── Grade + tier badges ── */}
           <div style={st.gradeRow}>
             <div style={{ ...st.gradeBadge, ...(tier ? gradeBadgeTierStyle(tier) : {}) }}>
-              <img src="/psa.avif" alt="PSA" style={st.gradeBadgeLogo} />
+              {(card.grader ?? "PSA") === "PSA"
+                ? <img src="/psa.avif" alt="PSA" style={st.gradeBadgeLogo} />
+                : <span style={st.gradeBadgeText}>{card.grader}</span>}
               <span style={st.gradeBadgeNum}>{card.grade}</span>
               {card.gradeDescription && (
                 <span style={st.gradeDesc}>{card.gradeDescription}</span>
@@ -319,7 +309,7 @@ export default function CardModal({
               animation. After hydration the full SalesHistory takes over. */}
           <div style={st.sectionHead}>Sales History</div>
           {hydrated
-            ? <SalesHistory loading={salesLoading} error={salesError} sales={sales} />
+            ? <SalesHistory card={card} loadSales={getCardSales} />
             : <div style={st.salesPlaceholder} />}
 
           {/* ── Consign this card (collectors only) ──
@@ -562,15 +552,29 @@ function AdminConsignmentBlock({ consignment }) {
 
 function CostAndPnl({ card, displayValue }) {
   if (card.myCost == null) return null;
-  const sold      = card.consignmentStatus === "sold" && card.consignmentSoldPrice != null;
-  const hasValue  = displayValue != null;
-  const pnl       = hasValue ? displayValue - card.myCost : null;
-  const positive  = pnl != null && pnl >= 0;
-  const pnlPct    = hasValue && card.myCost > 0 ? (pnl / card.myCost) * 100 : null;
-  // Label semantics: "profit/loss" feels right for sold (it's settled);
-  // "gain/loss" reads better for unrealized paper movement.
-  const pnlLabel  = sold ? (positive ? "realized profit" : "realized loss")
-                         : (positive ? "unrealized gain" : "unrealized loss");
+  // P&L derivation memoized so it doesn't recompute on every parent
+  // re-render (pop toggle, role fetch, image load). Cheap individually
+  // but multiplied across 8-10 renders per modal-open.
+  const { sold, hasValue, pnl, positive, pnlPct, pnlLabel } = useMemo(() => {
+    const isSold   = card.consignmentStatus === "sold" && card.consignmentSoldPrice != null;
+    const has      = displayValue != null;
+    const value    = has ? displayValue - card.myCost : null;
+    const isPos    = value != null && value >= 0;
+    const pct      = has && card.myCost > 0 ? (value / card.myCost) * 100 : null;
+    // Label semantics: "profit/loss" reads as settled (sold cards);
+    // "gain/loss" reads as unrealized paper movement.
+    const label    = isSold
+      ? (isPos ? "realized profit" : "realized loss")
+      : (isPos ? "unrealized gain" : "unrealized loss");
+    return {
+      sold:     isSold,
+      hasValue: has,
+      pnl:      value,
+      positive: isPos,
+      pnlPct:   pct,
+      pnlLabel: label,
+    };
+  }, [card, displayValue]);
 
   return (
     <>
@@ -758,6 +762,19 @@ const st = {
     background: "#fff",
     padding: "2px 5px",
     borderRadius: 4,
+  },
+  // BGS / SGC text fallback — same height envelope as the PSA logo
+  // chip so the badge layout doesn't shift between graders.
+  gradeBadgeText: {
+    height: 28,
+    display: "flex", alignItems: "center",
+    background: "#fff",
+    color: "#0f172a",
+    padding: "0 7px",
+    borderRadius: 4,
+    fontSize: "0.78rem", fontWeight: 900,
+    letterSpacing: "0.04em",
+    fontFamily: "inherit",
   },
   gradeBadgeNum: {
     fontSize: "1.05rem", fontWeight: 800,

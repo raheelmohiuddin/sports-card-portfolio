@@ -30,7 +30,12 @@ exports.handler = async (event) => {
     grade, gradeDescription, frontImageUrl, backImageUrl,
     psaPopulation, psaPopulationHigher, psaData,
     myCost, targetPrice,
+    hasFrontImage, hasBackImage,
+    grader,
   } = body;
+  // Default to PSA when the field is missing — preserves the contract
+  // for any older client that doesn't yet know about graders.
+  const graderValue = ["PSA", "BGS", "SGC"].includes(grader) ? grader : "PSA";
 
   if (!isValidCertNumber(certNumber)) {
     return json(400, { error: "certNumber is required and must be 1–30 alphanumeric characters" });
@@ -66,8 +71,9 @@ exports.handler = async (event) => {
     `INSERT INTO cards
        (user_id, cert_number, year, brand, sport, player_name, card_number,
         grade, grade_description, image_url, back_image_url,
-        psa_population, psa_population_higher, psa_data, my_cost, target_price)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+        psa_population, psa_population_higher, psa_data, my_cost, target_price,
+        grader)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
      ON CONFLICT (user_id, cert_number) DO NOTHING
      RETURNING id`,
     [
@@ -87,6 +93,7 @@ exports.handler = async (event) => {
       psaData ? JSON.stringify(psaData) : null,
       myCostValue,
       targetPriceValue,
+      graderValue,
     ]
   );
 
@@ -105,18 +112,25 @@ exports.handler = async (event) => {
 
   const cardId = result.rows[0].id;
   const bucket = process.env.CARD_IMAGES_BUCKET;
-  const frontKey = `cards/${userId}/${cardId}-front.jpg`;
-  const backKey  = `cards/${userId}/${cardId}-back.jpg`;
+  // Only generate pre-signed URLs and persist s3 keys for sides that will
+  // actually be uploaded. Otherwise get-cards.js sees an s3_image_key
+  // pointing at a non-existent S3 object, which short-circuits the
+  // image_url fallback and produces a brief broken-image flash before
+  // the placeholder kicks in.
+  const frontKey = hasFrontImage ? `cards/${userId}/${cardId}-front.jpg` : null;
+  const backKey  = hasBackImage  ? `cards/${userId}/${cardId}-back.jpg`  : null;
 
   const [frontUploadUrl, backUploadUrl] = await Promise.all([
-    makeUploadUrl(bucket, frontKey),
-    makeUploadUrl(bucket, backKey),
+    frontKey ? makeUploadUrl(bucket, frontKey) : Promise.resolve(null),
+    backKey  ? makeUploadUrl(bucket, backKey)  : Promise.resolve(null),
   ]);
 
-  await db.query(
-    "UPDATE cards SET s3_image_key = $1, s3_back_image_key = $2 WHERE id = $3",
-    [frontKey, backKey, cardId]
-  );
+  if (frontKey || backKey) {
+    await db.query(
+      "UPDATE cards SET s3_image_key = $1, s3_back_image_key = $2 WHERE id = $3",
+      [frontKey, backKey, cardId]
+    );
+  }
 
   // Permanent consignment block lookup — if this user ever had a
   // consignment for this cert declined, the block survived the original

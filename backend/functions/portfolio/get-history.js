@@ -11,7 +11,7 @@ exports.handler = async (event) => {
   const userId = await ensureUser(db, claims.sub, claims.email);
 
   const result = await db.query(
-    `SELECT snapshot_at, total_value, card_count
+    `SELECT snapshot_at, total_value, total_cost, card_count
      FROM portfolio_snapshots
      WHERE user_id = $1
      ORDER BY snapshot_at ASC
@@ -22,6 +22,7 @@ exports.handler = async (event) => {
   return json(200, result.rows.map((r) => ({
     timestamp:  r.snapshot_at,
     totalValue: parseFloat(r.total_value),
+    totalCost:  r.total_cost != null ? parseFloat(r.total_cost) : null,
     cardCount:  r.card_count,
   })));
 };

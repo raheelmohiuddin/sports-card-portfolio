@@ -27,6 +27,34 @@ const STATE_NAME = Object.fromEntries(STATES);
 const NEAR_ME_ZIP_KEY    = "scp_nearme_zip";
 const NEAR_ME_RADIUS_KEY = "scp_nearme_radius";
 
+// sessionStorage cache for the default-load shows list (no states, no q,
+// no Near Me, dates pinned to the current month). Lives for the tab
+// session OR 1h, whichever expires first. Filtered loads bypass the
+// cache entirely so we never serve filtered data under the default key.
+const SHOWS_CACHE_KEY    = "scp_shows_cache";
+const SHOWS_CACHE_TTL_MS = 60 * 60 * 1000;
+
+function readShowsCache() {
+  try {
+    const raw = sessionStorage.getItem(SHOWS_CACHE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed?.ts || Date.now() - parsed.ts > SHOWS_CACHE_TTL_MS) return null;
+    return Array.isArray(parsed.shows) ? parsed.shows : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeShowsCache(shows) {
+  try {
+    sessionStorage.setItem(SHOWS_CACHE_KEY, JSON.stringify({ ts: Date.now(), shows }));
+  } catch {
+    // sessionStorage quota or privacy mode — silent fail; the page just
+    // won't have the warm-cache benefit on next mount.
+  }
+}
+
 // Session-scoped travel-time cache. Keyed by `${zip}|${city}|${state}` so
 // re-renders, pagination, and filter changes don't refire requests for a
 // show whose travel-time we already have. Module-level (not React state)
@@ -143,25 +171,58 @@ export default function ShowsPage() {
   //   2. wait until BOTH the 200ms fade timer AND the API have settled
   //      (Promise.all races them — fade always completes before swap)
   //   3. swap data, opacity → 1 (200ms transition in)
-  // The first load skips step 1 (no old content to fade out) and just
-  // shows the loading state until data arrives.
+  // First mount short-circuits to a sessionStorage cache hit when the
+  // filter set matches the default-load shape (no states, current month,
+  // no q, no Near Me) — see scp_shows_cache. Filtered loads always go
+  // straight to the network.
   useEffect(() => {
     let cancelled = false;
+
+    const isDefault =
+      states.length === 0 &&
+      fromDate === toIsoDate(startOfMonth(new Date())) &&
+      toDate   === toIsoDate(endOfMonth(new Date())) &&
+      qApplied === "" &&
+      nearMe == null;
+
+    const fetchArgs = {
+      states:      states.length ? states : undefined,
+      from:        fromDate || undefined,
+      to:          toDate   || undefined,
+      q:           qApplied || undefined,
+      centerLat:   nearMe?.centerLat,
+      centerLng:   nearMe?.centerLng,
+      radiusMiles: nearMe?.radiusMiles,
+    };
+
+    // Warm-cache path — only on first mount, only at default filters.
+    // Render the cache instantly (no fade, no spinner), then refresh
+    // silently in the background.
+    if (isDefault && !hasLoadedOnce) {
+      const cached = readShowsCache();
+      if (cached) {
+        setShows(cached);
+        setGridOpacity(1);
+        setLoading(false);
+        setHasLoadedOnce(true);
+        getShows(fetchArgs)
+          .then((data) => {
+            if (cancelled) return;
+            setShows(data);
+            writeShowsCache(data);
+          })
+          .catch(() => { /* background refresh failures stay silent */ });
+        return () => { cancelled = true; };
+      }
+    }
+
     setLoading(true);
     setError(null);
     if (hasLoadedOnce) setGridOpacity(0);
 
     Promise.all([
       new Promise((r) => setTimeout(r, 200)),
-      getShows({
-        states:      states.length ? states : undefined,
-        from:        fromDate || undefined,
-        to:          toDate   || undefined,
-        q:           qApplied || undefined,
-        centerLat:   nearMe?.centerLat,
-        centerLng:   nearMe?.centerLng,
-        radiusMiles: nearMe?.radiusMiles,
-      }),
+      getShows(fetchArgs),
     ])
       .then(([_, data]) => {
         if (cancelled) return;
@@ -169,6 +230,7 @@ export default function ShowsPage() {
         setGridOpacity(1);
         setLoading(false);
         setHasLoadedOnce(true);
+        if (isDefault) writeShowsCache(data);
       })
       .catch((e) => {
         if (cancelled) return;
@@ -279,6 +341,7 @@ export default function ShowsPage() {
           attending={attending}
           onToggleAttending={toggleAttending}
           userZip={nearMe?.zip ?? null}
+          loading={!hasLoadedOnce}
         />
 
         {/* ── Browse + filter ── */}
@@ -321,7 +384,7 @@ export default function ShowsPage() {
           )}
 
           {!hasLoadedOnce ? (
-            <div style={st.stateMsg}>Loading shows…</div>
+            <SkeletonShowsGrid />
           ) : (
             <div style={{ ...st.grid, opacity: gridOpacity }}>
               {shows.length === 0 ? (
@@ -352,7 +415,7 @@ export default function ShowsPage() {
 // ─── Calendar panel ──────────────────────────────────────────────────
 // cursor + setCursor are controlled by ShowsPage so navigating months
 // can drive the grid's date-range filter at the same time.
-function CalendarPanel({ cursor, setCursor, attending, onToggleAttending, userZip }) {
+function CalendarPanel({ cursor, setCursor, attending, onToggleAttending, userZip, loading }) {
   const today = useMemo(() => startOfDay(new Date()), []);
   const [viewMode, setViewMode] = useState("month"); // month | list
   const [expandedDate, setExpandedDate] = useState(null);
@@ -453,6 +516,7 @@ function CalendarPanel({ cursor, setCursor, attending, onToggleAttending, userZi
                 byDate={byDate}
                 expandedDate={expandedDate}
                 onToggleExpand={(iso) => setExpandedDate(iso === expandedDate ? null : iso)}
+                loading={loading}
               />
             </div>
             {transition && (
@@ -472,6 +536,7 @@ function CalendarPanel({ cursor, setCursor, attending, onToggleAttending, userZi
                   byDate={byDate}
                   expandedDate={null}
                   onToggleExpand={() => {}}
+                  loading={loading}
                 />
               </div>
             )}
@@ -732,7 +797,7 @@ function RemoveAttendingButton({ onClick }) {
 //
 // Adding an event cannot push anything taller because nothing in the
 // chain is auto-sized. Pills past what fits in 56px are clipped.
-function MonthGrid({ cursor, today, byDate, expandedDate, onToggleExpand }) {
+function MonthGrid({ cursor, today, byDate, expandedDate, onToggleExpand, loading }) {
   const cells = useMemo(() => {
     const monthStart = startOfMonth(cursor);
     const start = new Date(monthStart);
@@ -773,15 +838,25 @@ function MonthGrid({ cursor, today, byDate, expandedDate, onToggleExpand }) {
           >
             <div style={st.dayNumber}>{d.getDate()}</div>
             <div style={st.eventContainer}>
-              {dayShows.map((s) => (
-                <div
-                  key={s.id}
-                  style={st.eventPill}
-                  title={pillTitle(s)}
-                >
-                  {s.name}
-                </div>
-              ))}
+              {loading && inMonth ? (
+                // Two shimmer bars per in-month cell so the calendar feels
+                // "alive" while attending data loads. Out-of-month cells
+                // stay blank — they wouldn't have events most of the time.
+                <>
+                  <div style={st.eventPillShimmer} />
+                  {(d.getDate() % 3 === 0) && <div style={{ ...st.eventPillShimmer, width: "60%" }} />}
+                </>
+              ) : (
+                dayShows.map((s) => (
+                  <div
+                    key={s.id}
+                    style={st.eventPill}
+                    title={pillTitle(s)}
+                  >
+                    {s.name}
+                  </div>
+                ))
+              )}
             </div>
           </div>
         );
@@ -1045,22 +1120,13 @@ function parseRadius(raw) {
 
 function NearMePanel({ onApply, onClear }) {
   const [zip, setZip]       = useState(() => localStorage.getItem(NEAR_ME_ZIP_KEY) ?? "");
-  // Radius is stored as a string ("any" | "25" | "50" | "100" | "250")
+  // Radius is stored as a string ("" | "any" | "25" | "50" | "100" | "250")
   // because <select> values are strings; keeps round-trip with the
-  // <option value> tags clean. Default "any" — but the auto-fire gate
-  // below treats the *un-touched* default as "no radius selected yet"
-  // so a fresh open won't run the search until the user explicitly
-  // picks an option from the dropdown (even if that pick happens to
-  // be Any).
-  const [radius, setRadius] = useState(() => localStorage.getItem(NEAR_ME_RADIUS_KEY) ?? "any");
-  // True once the user has interacted with the radius dropdown at
-  // least once — gates the auto-fire so a fresh 5-digit zip alone
-  // isn't enough. Initialised true when localStorage already has a
-  // radius preference, since that means the user committed in some
-  // prior session and any further edit should re-apply immediately.
-  const [radiusTouched, setRadiusTouched] = useState(
-    () => localStorage.getItem(NEAR_ME_RADIUS_KEY) !== null
-  );
+  // <option value> tags clean. Default "" maps to the disabled "Distance"
+  // placeholder option — auto-fire is gated on radius !== "" so a fresh
+  // open won't run the search until the user picks a real option. Once
+  // selected, the placeholder can't be re-chosen (the option is disabled).
+  const [radius, setRadius] = useState(() => localStorage.getItem(NEAR_ME_RADIUS_KEY) ?? "");
   const [error, setError]   = useState(null);
   const [zipFocused, setZipFocused] = useState(false);
   // De-dupes back-to-back fires for the same (zip, radius) pair — auto-
@@ -1104,8 +1170,7 @@ function NearMePanel({ onApply, onClear }) {
 
   function reset() {
     setZip("");
-    setRadius("any");
-    setRadiusTouched(false);
+    setRadius("");
     setError(null);
     lastRef.current = { zip: "", radius: "" };
     try {
@@ -1136,12 +1201,12 @@ function NearMePanel({ onApply, onClear }) {
           // only path that writes it. Mid-typing isn't persisted.
           //
           // Auto-fire only when BOTH gates are open: zip is 5 digits
-          // AND the user has actually picked a radius (default "Any"
-          // before any interaction doesn't count).
-          if (next.length === 5 && radiusTouched) runLookup(next, radius);
+          // AND the user has picked a real radius (the disabled "Distance"
+          // placeholder has value "" and stays selected until they choose).
+          if (next.length === 5 && radius !== "") runLookup(next, radius);
         }}
         onKeyDown={(e) => {
-          if (e.key === "Enter" && radiusTouched) {
+          if (e.key === "Enter" && radius !== "") {
             e.preventDefault();
             runLookup(zip, radius);
           }
@@ -1153,10 +1218,11 @@ function NearMePanel({ onApply, onClear }) {
         aria-label="Search radius"
         onChange={(e) => {
           const next = e.target.value;
+          // The "Distance" placeholder is disabled so onChange should
+          // never deliver "" — but guard anyway so a no-op selection
+          // doesn't kick off a lookup.
+          if (next === "") return;
           setRadius(next);
-          // First-touch flips the gate; subsequent radius changes
-          // simply re-fire (the lookup is de-duped via lastRef).
-          setRadiusTouched(true);
           // localStorage write happens inside runLookup on success —
           // not here — so a radius change without a valid zip doesn't
           // pollute the persisted state.
@@ -1164,6 +1230,7 @@ function NearMePanel({ onApply, onClear }) {
         }}
         style={st.nearMeRadiusSelect}
       >
+        <option value="" hidden disabled style={{ background: "#0f172a", color: "#94a3b8" }}>Distance</option>
         <option value="any" style={{ background: "#0f172a", color: "#fff" }}>Any</option>
         <option value="25"  style={{ background: "#0f172a", color: "#fff" }}>25mi</option>
         <option value="50"  style={{ background: "#0f172a", color: "#fff" }}>50mi</option>
@@ -1243,6 +1310,29 @@ function MultiStateDropdown({ selected, onToggle }) {
 }
 
 // ─── Show card ───────────────────────────────────────────────────────
+// Skeleton grid shown on first paint before the initial fetch resolves
+// (no cache hit). Matches the real grid's column geometry so layout
+// doesn't shift when the live data swaps in. Each tile mirrors the
+// rough proportions of a real ShowCard: title bar, meta row, chip row.
+function SkeletonShowCard() {
+  return (
+    <div style={st.skeletonCard}>
+      <div style={{ ...st.skeletonBar, width: "70%", height: "1rem" }} />
+      <div style={{ ...st.skeletonBar, width: "45%", height: "0.7rem" }} />
+      <div style={{ ...st.skeletonBar, width: "90%", height: "0.7rem" }} />
+      <div style={{ ...st.skeletonBar, width: "30%", height: "1.6rem", marginTop: "auto" }} />
+    </div>
+  );
+}
+
+function SkeletonShowsGrid({ count = 6 }) {
+  return (
+    <div style={st.grid}>
+      {Array.from({ length: count }).map((_, i) => <SkeletonShowCard key={i} />)}
+    </div>
+  );
+}
+
 function ShowCard({ show, onToggle }) {
   const startDate = show.date ? new Date(`${show.date}T00:00:00`) : null;
   const endDate   = show.endDate && show.endDate !== show.date
@@ -1672,6 +1762,19 @@ const st = {
     overflow: "hidden",
     textOverflow: "ellipsis",
     boxSizing: "border-box",
+  },
+  // Shimmer pill rendered in cells while attending data is loading. Same
+  // height + spacing as a real eventPill so the row layout doesn't shift
+  // when real pills swap in. Keyframe lives in index.css.
+  eventPillShimmer: {
+    display: "block",
+    width: "100%",
+    height: 16,
+    marginBottom: 2,
+    borderRadius: 3,
+    background: "linear-gradient(110deg, rgba(255,255,255,0.04) 30%, rgba(255,255,255,0.10) 50%, rgba(255,255,255,0.04) 70%)",
+    backgroundSize: "200% 100%",
+    animation: "skeletonShimmer 1.4s ease-in-out infinite",
   },
 
   expandedPane: {
@@ -2135,6 +2238,25 @@ const st = {
     gridAutoRows: "1fr",
     gap: "1rem",
     transition: "opacity 200ms ease-in-out",
+  },
+  // Skeleton tile shown on first paint when there's no warm sessionStorage
+  // cache and the network fetch hasn't returned yet. Roughly mirrors the
+  // ShowCard envelope: dark panel with a few placeholder bars.
+  skeletonCard: {
+    background: "rgba(255,255,255,0.02)",
+    border: "1px solid rgba(255,255,255,0.05)",
+    borderRadius: 12,
+    padding: "1.1rem 1.1rem 1rem",
+    minHeight: 160,
+    display: "flex",
+    flexDirection: "column",
+    gap: "0.55rem",
+  },
+  skeletonBar: {
+    borderRadius: 4,
+    background: "linear-gradient(110deg, rgba(255,255,255,0.025) 30%, rgba(255,255,255,0.07) 50%, rgba(255,255,255,0.025) 70%)",
+    backgroundSize: "200% 100%",
+    animation: "skeletonShimmer 1.4s ease-in-out infinite",
   },
   // No-results state inside the grid — spans all columns so it sits
   // centered + can't break the grid's layout commitment.

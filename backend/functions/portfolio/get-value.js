@@ -1,9 +1,10 @@
 const { getPool, ensureUser } = require("../_db");
-const { fetchMarketValue } = require("./pricing");
 const { json } = require("../_response");
 
-const STALE_HOURS = 24;
-
+// Fast read of the user's portfolio. Returns whatever's currently in the DB
+// — no CardHedger calls, no staleness check. Frontend pairs this with a
+// background POST /portfolio/refresh to repopulate stale rows; that split is
+// what lets the dashboard render in <1s even when many cards need refresh.
 exports.handler = async (event) => {
   const claims = event.requestContext?.authorizer?.jwt?.claims;
   if (!claims) return json(401, { error: "Unauthorized" });
@@ -12,65 +13,22 @@ exports.handler = async (event) => {
   const userId = await ensureUser(db, claims.sub, claims.email);
 
   const result = await db.query(
-    `SELECT id, player_name, year, brand, card_number, grade,
-            manual_price,
+    `SELECT id, manual_price, my_cost,
             estimated_value, avg_sale_price, last_sale_price,
             num_sales, price_source, value_last_updated
      FROM cards WHERE user_id = $1`,
     [userId]
   );
 
-  const now = new Date();
-
-  await Promise.all(
-    result.rows.map(async (row) => {
-      if (row.manual_price !== null && row.manual_price !== undefined) return;
-
-      const lastUpdated = row.value_last_updated ? new Date(row.value_last_updated) : null;
-      const stale =
-        !lastUpdated ||
-        (now.getTime() - lastUpdated.getTime()) / 3600000 > STALE_HOURS;
-
-      if (!stale) return;
-
-      const pricing = await fetchMarketValue({
-        playerName: row.player_name,
-        year:       row.year,
-        brand:      row.brand,
-        cardNumber: row.card_number,
-        grade:      row.grade,
-        certNumber: row.id,
-      });
-
-      if (!pricing) return;
-
-      await db.query(
-        `UPDATE cards
-         SET estimated_value    = $1,
-             avg_sale_price     = $2,
-             last_sale_price    = $3,
-             num_sales          = $4,
-             price_source       = $5,
-             value_last_updated = NOW()
-         WHERE id = $6`,
-        [pricing.avgSalePrice, pricing.avgSalePrice, pricing.lastSalePrice,
-         pricing.numSales, pricing.source, row.id]
-      );
-
-      row.estimated_value = pricing.avgSalePrice;
-      row.avg_sale_price  = pricing.avgSalePrice;
-      row.last_sale_price = pricing.lastSalePrice;
-      row.num_sales       = pricing.numSales;
-      row.price_source    = pricing.source;
-    })
-  );
-
   let totalValue = 0;
+  let totalCost  = 0;
   const cards = result.rows.map((row) => {
     const manualPrice  = row.manual_price    ? parseFloat(row.manual_price)    : null;
     const autoValue    = row.estimated_value ? parseFloat(row.estimated_value) : null;
     const displayValue = manualPrice ?? autoValue;
+    const cost         = row.my_cost         ? parseFloat(row.my_cost)         : null;
     if (displayValue) totalValue += displayValue;
+    if (cost)         totalCost  += cost;
     return {
       id:            row.id,
       manualPrice,
@@ -83,6 +41,7 @@ exports.handler = async (event) => {
   });
 
   const finalTotal = Math.round(totalValue * 100) / 100;
+  const finalCost  = Math.round(totalCost  * 100) / 100;
 
   // Write a portfolio_snapshots row at most once per 30 minutes per user.
   // Wrapped in try/catch so a snapshot failure never breaks the response.
@@ -96,8 +55,8 @@ exports.handler = async (event) => {
       : Infinity;
     if (minutesSince > 30) {
       await db.query(
-        "INSERT INTO portfolio_snapshots (user_id, total_value, card_count) VALUES ($1, $2, $3)",
-        [userId, finalTotal, cards.length]
+        "INSERT INTO portfolio_snapshots (user_id, total_value, total_cost, card_count) VALUES ($1, $2, $3, $4)",
+        [userId, finalTotal, finalCost, cards.length]
       );
     }
   } catch (err) {

@@ -5,15 +5,16 @@ import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid,
 } from "recharts";
 import {
-  getCards, deleteCard, getPortfolioValue, getPortfolioHistory,
+  getCards, deleteCard, getPortfolioValue, getPortfolioHistory, refreshPortfolio,
   updateCardPrice, updateCard,
 } from "../services/api.js";
 import CardModal from "../components/CardModal.jsx";
 import GhostIcon from "../components/GhostIcon.jsx";
+import TradeTab from "../components/TradeTab.jsx";
 import { getRarityTier, TIER_LABELS, TIER_COLORS } from "../utils/rarity.js";
 import { gradients } from "../utils/theme.js";
 import {
-  isSold, effectiveValue, cardPnl, summarizePortfolio,
+  isSold, isTraded, effectiveValue, cardPnl, summarizePortfolio,
 } from "../utils/portfolio.js";
 
 // Slice palette — gold-dominant with cool/jewel accents for variety.
@@ -50,17 +51,54 @@ export default function PortfolioPage() {
   const [selectedCard, setSelectedCard] = useState(null);
   const [editingCard, setEditingCard]   = useState(null);
 
+  // Stale-while-revalidate. Phase 1: fast DB read of cards + value + history,
+  // render the page immediately. Phase 2: kick off /portfolio/refresh in the
+  // background; if any cards came back fresh, re-fetch the fast endpoints
+  // and silently swap state. Server-side refresh is rate-limited by the 24h
+  // staleness gate, so calling it on every mount is cheap.
   useEffect(() => {
+    let cancelled = false;
+
+    async function silentlyApplyValue() {
+      try {
+        const [cardList, valueData] = await Promise.all([getCards(), getPortfolioValue()]);
+        if (cancelled) return;
+        const pricingById = Object.fromEntries(valueData.cards.map((c) => [c.id, c]));
+        const merged = cardList.map((card) => ({ ...card, ...pricingById[card.id] }));
+        setCards(merged);
+        setTotalValue(valueData.totalValue);
+      } catch {
+        // Swallow — refresh-driven re-fetch shouldn't surface as an error
+        // when the initial render already succeeded.
+      }
+    }
+
     Promise.all([getCards(), getPortfolioValue(), getPortfolioHistory()])
       .then(([cardList, valueData, historyData]) => {
+        if (cancelled) return;
         const pricingById = Object.fromEntries(valueData.cards.map((c) => [c.id, c]));
         const merged = cardList.map((card) => ({ ...card, ...pricingById[card.id] }));
         setCards(merged);
         setTotalValue(valueData.totalValue);
         setHistory(historyData);
+        setLoading(false);
+
+        // Phase 2 — fire-and-forget. If the server actually refreshed any
+        // rows, pull the new values without blocking anything user-visible.
+        refreshPortfolio()
+          .then((res) => {
+            if (cancelled || !res?.refreshed) return;
+            silentlyApplyValue();
+          })
+          .catch(() => { /* background refresh failures are non-fatal */ });
       })
-      .catch((e) => setError(e.message))
-      .finally(() => setLoading(false));
+      .catch((e) => {
+        if (cancelled) return;
+        setError(e.message);
+        setLoading(false);
+      });
+
+    return () => { cancelled = true; };
   }, []);
 
   async function handleDelete(id) {
@@ -169,7 +207,8 @@ export default function PortfolioPage() {
 
   // ── Tab routing via URL search params ──
   const [searchParams, setSearchParams] = useSearchParams();
-  const tab = searchParams.get("tab") === "cards" ? "cards" : "dashboard";
+  const tabRaw = searchParams.get("tab");
+  const tab = tabRaw === "cards" || tabRaw === "trade" ? tabRaw : "dashboard";
   const highlightId = searchParams.get("highlight");
 
   function selectTab(next) {
@@ -189,41 +228,45 @@ export default function PortfolioPage() {
         {/* ── Tab bar ── */}
         <nav style={st.tabBar}>
           <TabButton label="Dashboard" active={tab === "dashboard"} onClick={() => selectTab("dashboard")} />
-          <TabButton label="My Cards" active={tab === "cards"}     onClick={() => selectTab("cards")}
-            badge={!loading ? cardCount : null} />
+          <TabButton label="My Cards" active={tab === "cards"}     onClick={() => selectTab("cards")} />
+          <TabButton label="My Trade" active={tab === "trade"}     onClick={() => selectTab("trade")} />
         </nav>
 
         {/* ── Dashboard ── */}
         {tab === "dashboard" && (
           <>
-            <HeroStats
-              totalValue={displayTotalValue}
-              totalInvested={totalInvested}
-              pnl={pnl}
-              pnlPct={pnlPct}
-              realizedPnl={realizedPnl}
-              unrealizedPnl={unrealizedPnl}
-              hasCost={hasCost}
-              cardCount={cardCount}
-              avgValue={avgValue}
-              rareCount={rareCount}
-              loading={loading}
-              milestones={achievedMilestones}
-            />
+            {(loading || cards.length > 0) && (
+              <HeroStats
+                totalValue={displayTotalValue}
+                totalInvested={totalInvested}
+                pnl={pnl}
+                pnlPct={pnlPct}
+                realizedPnl={realizedPnl}
+                unrealizedPnl={unrealizedPnl}
+                hasCost={hasCost}
+                cardCount={cardCount}
+                avgValue={avgValue}
+                rareCount={rareCount}
+                loading={loading}
+              />
+            )}
 
             {!loading && alerts.length > 0 && (
-              <AlertBanner alerts={alerts} onJump={() => selectTab("cards")} />
+              <AlertBanner
+                alerts={alerts}
+                onJump={() => { setFilter("targetHit", true); selectTab("cards"); }}
+              />
             )}
 
             {!loading && cards.length > 0 && (
               <>
-                <AnalyticsPanel cards={cards} totalValue={totalValue} />
-                <InsightsRow cards={cards} />
+                <AnalyticsPanel cards={cards} totalValue={displayTotalValue} />
+                <PerformersPanel cards={cards} onSelectCard={(c) => setSelectedCard(c)} />
                 <PriceHistoryChart history={history} />
               </>
             )}
 
-            {loading && <div style={st.stateMsg}>Loading your portfolio…</div>}
+            {loading && <DashboardSkeleton />}
             {error   && <div style={{ ...st.stateMsg, color: "#f87171" }}>Error: {error}</div>}
             {!loading && !error && cards.length === 0 && <EmptyState />}
           </>
@@ -238,7 +281,7 @@ export default function PortfolioPage() {
                   <span style={st.heroDot} /> My Cards
                 </p>
                 <p style={st.cardsBarSub}>
-                  {loading ? "Loading…" : cardCount === 0 ? "No cards yet" : `${cardCount} card${cardCount === 1 ? "" : "s"} in your portfolio`}
+                  Browse, filter, and manage your collection.
                 </p>
               </div>
               <Link to="/add-card" style={st.cardsAddBtn}>
@@ -257,7 +300,7 @@ export default function PortfolioPage() {
             )}
 
             {loading ? (
-              <div style={st.stateMsg}>Loading your portfolio…</div>
+              <SkeletonGrid />
             ) : error ? (
               <div style={{ ...st.stateMsg, color: "#f87171" }}>Error: {error}</div>
             ) : cards.length === 0 ? (
@@ -290,6 +333,38 @@ export default function PortfolioPage() {
             )}
           </>
         )}
+
+        {/* ── My Trade ── */}
+        {tab === "trade" && !loading && (
+          <TradeTab
+            cards={cards}
+            onTradeComplete={(newCardIds) => {
+              // Trade is fully confirmed server-side. Refetch the cards
+              // list so the new received cards appear (with their newly
+              // assigned my_cost) and the given cards flip to TRADED.
+              // Highlight the first new card; secondary cards still
+              // appear in the grid, just without the gold pulse.
+              getCards()
+                .then((next) => {
+                  const pricingById = Object.fromEntries(
+                    (cards ?? []).map((c) => [c.id, c])
+                  );
+                  // Preserve any pricing fields already on the in-memory
+                  // copy of existing cards (avoids a flash of "—" while
+                  // /portfolio/value re-runs).
+                  setCards(next.map((c) => ({ ...pricingById[c.id], ...c })));
+                })
+                .catch(() => { /* failure surfaces on next mount */ });
+              setSearchParams((prev) => {
+                const np = new URLSearchParams(prev);
+                np.set("tab", "cards");
+                if (newCardIds.length > 0) np.set("highlight", newCardIds[0]);
+                else np.delete("highlight");
+                return np;
+              });
+            }}
+          />
+        )}
       </div>
 
       {selectedCard && (
@@ -315,7 +390,7 @@ export default function PortfolioPage() {
 }
 
 // ─── Hero stats bar ────────────────────────────────────────────────────
-function HeroStats({ totalValue, totalInvested, pnl, pnlPct, realizedPnl, unrealizedPnl, hasCost, cardCount, avgValue, rareCount, loading, milestones }) {
+function HeroStats({ totalValue, totalInvested, pnl, pnlPct, realizedPnl, unrealizedPnl, hasCost, cardCount, avgValue, rareCount, loading }) {
   const positive = pnl != null && pnl >= 0;
   const pnlColor = positive ? "#10b981" : "#f87171";
 
@@ -328,16 +403,6 @@ function HeroStats({ totalValue, totalInvested, pnl, pnlPct, realizedPnl, unreal
         </div>
         <div style={st.heroAccent}>◆</div>
       </div>
-
-      {milestones && milestones.length > 0 && (
-        <div style={st.milestoneRow}>
-          {milestones.slice(0, 8).map((m) => (
-            <span key={m.id} style={st.milestoneBadge} title={m.label}>
-              <span style={st.milestoneIcon}>✦</span> {m.label}
-            </span>
-          ))}
-        </div>
-      )}
 
       {/* When cost is set, P&L gets top billing — biggest typography in the panel,
           color-coded green/red. Total value drops to a secondary metric below.
@@ -426,20 +491,6 @@ function Stat({ label, value, accent }) {
   );
 }
 
-function PerfStat({ label, value, sub, tone }) {
-  const valueStyle =
-    tone === "positive" ? st.perfStatPositive
-    : tone === "negative" ? st.perfStatNegative
-    : st.perfStatNeutral;
-  return (
-    <div style={st.perfStat}>
-      <div style={st.perfStatLabel}>{label}</div>
-      <div style={{ ...st.perfStatValue, ...valueStyle }}>{value}</div>
-      {sub && <div style={{ ...st.perfStatSub, ...valueStyle }}>{sub}</div>}
-    </div>
-  );
-}
-
 // ─── Analytics panel ──────────────────────────────────────────────────
 function computeAllocation(cards) {
   const buckets = new Map();
@@ -460,17 +511,6 @@ function AnalyticsPanel({ cards, totalValue }) {
   const data = useMemo(() => computeAllocation(cards), [cards]);
   const [activeIdx, setActiveIdx] = useState(null);
 
-  // Cost / P&L roll-ups across the whole portfolio.
-  const totalInvested = useMemo(
-    () => cards.reduce((sum, c) => sum + (c.myCost ?? 0), 0),
-    [cards]
-  );
-  const hasCost = totalInvested > 0;
-  const totalCurrent = totalValue ?? 0;
-  const pnl  = totalCurrent - totalInvested;
-  const pnlPct = totalInvested > 0 ? (pnl / totalInvested) * 100 : 0;
-  const pnlPositive = pnl >= 0;
-
   if (data.length === 0) return null;
 
   return (
@@ -484,20 +524,6 @@ function AnalyticsPanel({ cards, totalValue }) {
         </div>
         <span style={st.analyticsAccent}>◆</span>
       </div>
-
-      {/* Performance row — only renders when at least one card has a cost basis */}
-      {hasCost && (
-        <div style={st.perfRow}>
-          <PerfStat label="Invested"  value={fmtUsd(totalInvested)} />
-          <PerfStat label="Current"   value={fmtUsd(totalCurrent)} />
-          <PerfStat
-            label="Profit / Loss"
-            value={`${pnlPositive ? "+" : "−"}${fmtUsd(Math.abs(pnl))}`}
-            sub={`${pnlPositive ? "+" : "−"}${Math.abs(pnlPct).toFixed(1)}%`}
-            tone={pnlPositive ? "positive" : "negative"}
-          />
-        </div>
-      )}
 
       <div style={st.analyticsBody}>
         {/* ── Donut chart ── */}
@@ -820,6 +846,7 @@ function CardListRow({ card, highlighted, onOpen, onEdit, onDelete }) {
           <img
             src={card.imageUrl} alt=""
             style={st.listThumb}
+            loading="lazy"
             onError={() => setImgErr(true)}
             draggable={false}
           />
@@ -833,7 +860,8 @@ function CardListRow({ card, highlighted, onOpen, onEdit, onDelete }) {
           <span style={st.listNameMain}>{card.playerName ?? "Unknown"}</span>
           {tier && <TierFlag tier={tier} />}
           {sold && <span style={st.listFlagSold}>SOLD</span>}
-          {!sold && card.targetReached && <span style={st.listFlagTarget}>TARGET</span>}
+          {isTraded(card) && <span style={st.listFlagTraded}>TRADED</span>}
+          {!sold && !isTraded(card) && card.targetReached && <span style={st.listFlagTarget}>TARGET</span>}
         </div>
         <div style={st.listNameMeta}>
           {card.cardNumber ? `#${card.cardNumber} · ` : ""}Cert {card.certNumber}
@@ -1055,15 +1083,65 @@ function EditCostModal({ card, onClose, onSave }) {
 }
 
 // ─── Empty state ──────────────────────────────────────────────────────
-// No CTA button here — the gold "Add Card" button at the top of the My
-// Cards section is always visible directly above this empty state, so a
-// second button would be redundant.
+// Skeleton loader for the cards grid — renders eight placeholder tiles
+// that match the real CardTile dimensions (5/7 image + body) so the grid
+// layout is locked in immediately and there's no layout shift when real
+// data arrives. Shimmer band is driven by `skeletonShimmer` in index.css.
+function SkeletonTile() {
+  return (
+    <div style={st.skeletonTile}>
+      <div style={st.skeletonImage} />
+      <div style={st.skeletonBody}>
+        <div style={st.skeletonLine} />
+        <div style={{ ...st.skeletonLine, width: "60%" }} />
+        <div style={{ ...st.skeletonLine, width: "40%", marginTop: "0.4rem" }} />
+      </div>
+    </div>
+  );
+}
+
+function SkeletonGrid({ count = 8 }) {
+  return (
+    <div style={st.grid}>
+      {Array.from({ length: count }).map((_, i) => <SkeletonTile key={i} />)}
+    </div>
+  );
+}
+
+// Dashboard skeleton — shown beneath HeroStats (which has its own "—"
+// placeholders) while the fast read is in flight. Two analytics panels
+// side-by-side on top, full-width chart below — same proportions as the
+// real layout so the page doesn't shift when data arrives.
+function DashboardSkeleton() {
+  return (
+    <>
+      <div style={st.skeletonAnalyticsRow}>
+        <div style={st.skeletonPanel}>
+          <div style={{ ...st.skeletonLine, width: "40%", height: "1rem" }} />
+          <div style={st.skeletonChartArea} />
+        </div>
+        <div style={st.skeletonPanel}>
+          <div style={{ ...st.skeletonLine, width: "40%", height: "1rem" }} />
+          <div style={st.skeletonChartArea} />
+        </div>
+      </div>
+      <div style={{ ...st.skeletonPanel, marginTop: "1.5rem" }}>
+        <div style={{ ...st.skeletonLine, width: "30%", height: "1rem" }} />
+        <div style={{ ...st.skeletonChartArea, height: 240 }} />
+      </div>
+    </>
+  );
+}
+
 function EmptyState() {
   return (
     <div style={st.empty}>
       <div style={st.emptyIcon}>◆</div>
       <h2 style={st.emptyTitle}>Your collection is empty</h2>
       <p style={st.emptySub}>Add your first PSA-graded card to start tracking your portfolio.</p>
+      <Link to="/add-card" style={st.emptyCta}>
+        <span style={st.cardsAddMark}>+</span> Add Card
+      </Link>
     </div>
   );
 }
@@ -1146,6 +1224,7 @@ function CardTile({ card, index, highlighted, onOpen, onEdit, onDelete, onCardUp
             src={card.imageUrl}
             alt={card.playerName ?? "Card"}
             style={st.image}
+            loading="lazy"
             onError={() => setImgErr(true)}
             draggable={false}
           />
@@ -1172,9 +1251,13 @@ function CardTile({ card, index, highlighted, onOpen, onEdit, onDelete, onCardUp
           >✕</button>
         </div>
 
-        {/* Bottom-left grade badge — PSA logo + grade */}
+        {/* Bottom-left grade badge — grader logo + grade. PSA gets the
+            stickered AVIF; BGS / SGC get a text badge (no licensed
+            assets). Falls back to PSA for legacy rows missing grader. */}
         <div style={st.gradeBadge}>
-          <img src="/psa.avif" alt="PSA" style={st.gradeBadgeLogo} />
+          {(card.grader ?? "PSA") === "PSA"
+            ? <img src="/psa.avif" alt="PSA" style={st.gradeBadgeLogo} />
+            : <span style={st.gradeBadgeText}>{card.grader}</span>}
           <span style={st.gradeBadgeValue}>{card.grade}</span>
         </div>
 
@@ -1184,9 +1267,11 @@ function CardTile({ card, index, highlighted, onOpen, onEdit, onDelete, onCardUp
         {/* SOLD diagonal stamp — takes precedence over target-hit since the
             card is no longer in active portfolio rotation. */}
         {isSold(card) && <div style={st.soldStamp}>SOLD</div>}
+        {isTraded(card) && <div style={st.tradedStamp}>TRADED</div>}
 
-        {/* Target-reached pulsing badge — suppressed for sold cards. */}
-        {!isSold(card) && card.targetReached && (
+        {/* Target-reached pulsing badge — suppressed for sold or traded
+            cards (both removed from active portfolio rotation). */}
+        {!isSold(card) && !isTraded(card) && card.targetReached && (
           <div style={st.targetBadge} title={`Target hit · $${card.targetPrice}`}>
             <span style={st.targetBadgeDot} />
             TARGET HIT
@@ -1257,7 +1342,7 @@ function PopBadge({ card }) {
         <>
           <span style={st.popBadgeDot}>·</span>
           <span style={higherZero ? st.popBadgeHigherZero : {}}>
-            {higherZero ? "Highest Graded" : `+${card.psaPopulationHigher.toLocaleString()}`}
+            {higherZero ? "Highest Graded" : `Higher: ${card.psaPopulationHigher.toLocaleString()}`}
           </span>
         </>
       )}
@@ -1364,153 +1449,27 @@ function parseOptional(raw) {
 
 // ─── Alert banner — target prices reached ─────────────────────────────
 function AlertBanner({ alerts, onJump }) {
+  const n = alerts.length;
   return (
     <section style={st.alertBanner}>
       <div style={st.alertHeader}>
         <span style={st.alertDot} />
-        <span style={st.alertEyebrow}>Target Price Reached</span>
-        <span style={st.alertCount}>{alerts.length}</span>
+        <span style={st.alertEyebrow}>
+          {n} card{n === 1 ? "" : "s"} hit target price
+        </span>
         {onJump && (
           <button onClick={onJump} style={st.alertJump} type="button">
-            View cards →
+            View →
           </button>
         )}
       </div>
-      <div style={st.alertList}>
-        {alerts.slice(0, 6).map((c) => (
-          <div key={c.id} style={st.alertItem}>
-            <span style={st.alertItemName}>{c.playerName ?? "Unknown"}</span>
-            <span style={st.alertItemMeta}>PSA {c.grade}</span>
-            <span style={st.alertItemValue}>
-              {fmtUsd(c.estimatedValue)} <span style={st.alertItemArrow}>≥</span> {fmtUsd(c.targetPrice)}
-            </span>
-          </div>
-        ))}
-        {alerts.length > 6 && (
-          <div style={st.alertMore}>+{alerts.length - 6} more</div>
-        )}
-      </div>
     </section>
   );
 }
 
-// ─── Insights row — diversification + performers ──────────────────────
-function InsightsRow({ cards }) {
-  return (
-    <section style={st.insightsRow}>
-      <DiversificationPanel cards={cards} />
-      <PerformersPanel cards={cards} />
-    </section>
-  );
-}
-
-// ─── Diversification score ────────────────────────────────────────────
-function DiversificationPanel({ cards }) {
-  const score = useMemo(() => diversificationScore(cards), [cards]);
-  const label =
-    score >= 70 ? "Well Diversified"
-    : score >= 40 ? "Moderately Diversified"
-    : score >= 1  ? "Concentrated"
-    : "—";
-  const color =
-    score >= 70 ? "#10b981"
-    : score >= 40 ? "#f59e0b"
-    : "#f87171";
-
-  // SVG circular gauge
-  const radius = 56;
-  const stroke = 8;
-  const circumference = 2 * Math.PI * radius;
-  const offset = circumference - (score / 100) * circumference;
-
-  return (
-    <div style={st.insightsCol}>
-      <div style={st.insightsHeader}>
-        <p style={st.insightsEyebrow}>Diversification</p>
-        <span style={st.analyticsAccent}>◆</span>
-      </div>
-      <div style={st.divBody}>
-        <svg width={140} height={140} style={{ flexShrink: 0 }}>
-          <circle
-            cx={70} cy={70} r={radius}
-            fill="none"
-            stroke="rgba(255,255,255,0.06)"
-            strokeWidth={stroke}
-          />
-          <circle
-            cx={70} cy={70} r={radius}
-            fill="none"
-            stroke={color}
-            strokeWidth={stroke}
-            strokeDasharray={circumference}
-            strokeDashoffset={offset}
-            strokeLinecap="round"
-            transform="rotate(-90 70 70)"
-            style={{
-              transition: "stroke-dashoffset 0.6s ease, stroke 0.3s ease",
-              filter: `drop-shadow(0 0 12px ${color})`,
-            }}
-          />
-          <text
-            x={70} y={70}
-            textAnchor="middle" dy="0.35em"
-            fill={color}
-            fontSize={32} fontWeight={800}
-            style={{ fontVariantNumeric: "tabular-nums", letterSpacing: "-0.02em" }}
-          >
-            {score}
-          </text>
-        </svg>
-        <div style={st.divDetails}>
-          <div style={{ ...st.divLabel, color }}>{label}</div>
-          <div style={st.divDescription}>
-            Spread across sports, grades, and years. Higher scores reflect
-            broader exposure across categories.
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function diversificationScore(cards) {
-  if (cards.length < 2) return 0;
-  const dimensions = [
-    groupCount(cards, (c) => c.sport ?? "—"),
-    groupCount(cards, (c) => c.year  ?? "—"),
-    groupCount(cards, (c) => c.grade ?? "—"),
-    // Rarity tier counts as a fourth dimension; non-tier cards bucket as "common"
-    // so the dimension is meaningful even before any rare cards are owned.
-    groupCount(cards, (c) => getRarityTier(c) ?? "common"),
-  ];
-  const dimScores = dimensions.map((groups) => {
-    const counts = Object.values(groups);
-    const total  = counts.reduce((s, v) => s + v, 0);
-    if (total === 0 || counts.length < 2) return 0;
-    // Normalised Shannon entropy
-    const entropy = -counts.reduce((s, v) => {
-      const p = v / total;
-      return s + (p > 0 ? p * Math.log2(p) : 0);
-    }, 0);
-    const maxEntropy = Math.log2(counts.length);
-    const evenness   = entropy / maxEntropy; // 0..1
-    // Penalise too-few categories — full credit only at 5+ unique buckets
-    const breadth = Math.min(1, counts.length / 5);
-    return evenness * breadth;
-  });
-  return Math.round((dimScores.reduce((s, v) => s + v, 0) / dimScores.length) * 100);
-}
-
-function groupCount(items, keyFn) {
-  return items.reduce((acc, item) => {
-    const k = keyFn(item);
-    acc[k] = (acc[k] ?? 0) + 1;
-    return acc;
-  }, {});
-}
 
 // ─── Top / bottom performers ──────────────────────────────────────────
-function PerformersPanel({ cards }) {
+function PerformersPanel({ cards, onSelectCard }) {
   const tracked = useMemo(() => {
     return cards
       .filter((c) => c.myCost != null && c.estimatedValue != null)
@@ -1532,20 +1491,20 @@ function PerformersPanel({ cards }) {
     .slice(0, 3);
 
   return (
-    <div style={st.insightsCol}>
+    <div style={st.performersStandalone}>
       <div style={st.insightsHeader}>
         <p style={st.insightsEyebrow}>Performers</p>
         <span style={st.analyticsAccent}>◆</span>
       </div>
       <div style={st.perfGrid}>
-        <PerformerColumn title="Top Gainers" cards={gainers} positive emptyMessage="No gainers yet" />
-        <PerformerColumn title="Top Losers"  cards={losers}  positive={false} emptyMessage="No losses yet" />
+        <PerformerColumn title="Top Gainers" cards={gainers} positive onSelectCard={onSelectCard} emptyMessage="No gainers yet" />
+        <PerformerColumn title="Top Losers"  cards={losers}  positive={false} onSelectCard={onSelectCard} emptyMessage="No losses yet" />
       </div>
     </div>
   );
 }
 
-function PerformerColumn({ title, cards, positive, emptyMessage }) {
+function PerformerColumn({ title, cards, positive, emptyMessage, onSelectCard }) {
   const color = positive ? "#10b981" : "#f87171";
   return (
     <div>
@@ -1556,8 +1515,16 @@ function PerformerColumn({ title, cards, positive, emptyMessage }) {
         <div style={st.perfList}>
           {cards.map((c) => {
             const tier = getRarityTier(c);
+            const clickable = !!onSelectCard;
             return (
-            <div key={c.id} style={st.perfItem}>
+            <div
+              key={c.id}
+              style={{ ...st.perfItem, ...(clickable ? st.perfItemClickable : {}) }}
+              onClick={clickable ? () => onSelectCard(c) : undefined}
+              role={clickable ? "button" : undefined}
+              tabIndex={clickable ? 0 : undefined}
+              onKeyDown={clickable ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onSelectCard(c); } } : undefined}
+            >
               <div style={st.perfItemMain}>
                 <div style={st.perfItemName}>
                   {c.playerName ?? "Unknown"}
@@ -1600,17 +1567,42 @@ function PriceHistoryChart({ history }) {
   }
 
   const chartData = history.map((h) => ({
-    ts: new Date(h.timestamp).getTime(),
+    ts:    new Date(h.timestamp).getTime(),
     value: h.totalValue,
+    cost:  h.totalCost ?? null,
     label: new Date(h.timestamp).toLocaleString(),
   }));
+  // Cost line is suppressed entirely until we have at least one
+  // non-null total_cost. Older snapshots written before the migration
+  // have NULL cost — rendering an Area whose data is uniformly null
+  // can cause Recharts to short-circuit domain computation and blank
+  // the whole chart in some versions. Conditional render avoids it.
+  const hasCostData = chartData.some((d) => d.cost != null);
+  // Surfaced once per render so a blank chart can be diagnosed against
+  // the actual payload via DevTools — remove once stable.
+  // eslint-disable-next-line no-console
+  console.log("[PriceHistoryChart] data:", { rows: chartData.length, hasCostData, sample: chartData[0] });
 
-  const first = chartData[0].value;
-  const last  = chartData[chartData.length - 1].value;
-  const delta = last - first;
-  const deltaPct = first > 0 ? (delta / first) * 100 : 0;
-  const positive = delta >= 0;
-  const color = positive ? "#10b981" : "#f87171";
+  const last       = chartData[chartData.length - 1];
+  const totalReturn = last.cost != null ? last.value - last.cost : null;
+  const returnPct   = last.cost > 0 ? (totalReturn / last.cost) * 100 : null;
+  const positive    = totalReturn != null && totalReturn >= 0;
+  const returnColor = totalReturn == null ? "#94a3b8" : (positive ? "#10b981" : "#f87171");
+
+  // Best Day = biggest single-snapshot-to-snapshot value gain. Negative
+  // diffs are ignored (we only highlight gains). Returns null if no
+  // positive movement occurred — surfaced as "—" so we don't lie about
+  // a "best" day that doesn't exist.
+  let bestDayDelta = 0;
+  let bestDayTs    = null;
+  for (let i = 1; i < chartData.length; i++) {
+    const diff = chartData[i].value - chartData[i - 1].value;
+    if (diff > bestDayDelta) {
+      bestDayDelta = diff;
+      bestDayTs    = chartData[i].ts;
+    }
+  }
+  const bestDay = bestDayDelta > 0 ? { delta: bestDayDelta, ts: bestDayTs } : null;
 
   return (
     <section style={st.historyPanel}>
@@ -1619,18 +1611,56 @@ function PriceHistoryChart({ history }) {
           <p style={st.insightsEyebrow}>Portfolio History</p>
           <p style={st.analyticsSub}>{history.length} snapshots tracked</p>
         </div>
-        <div style={st.historyDelta}>
-          <span style={{ ...st.historyDeltaValue, color }}>
-            {positive ? "+" : "−"}{fmtUsd(Math.abs(delta))}
+        <div style={st.historyLegend}>
+          <span style={st.historyLegendItem}>
+            <span style={{ ...st.historyLegendSwatch, background: "#f59e0b" }} />
+            Portfolio Value
           </span>
-          <span style={{ ...st.historyDeltaPct, color }}>
-            {positive ? "+" : "−"}{Math.abs(deltaPct).toFixed(1)}%
+          <span style={st.historyLegendItem}>
+            <span style={{ ...st.historyLegendSwatch, background: "#3b82f6" }} />
+            Cost Basis
           </span>
-          <span style={st.historyDeltaLabel}>since first snapshot</span>
         </div>
       </div>
 
-      <ResponsiveContainer width="100%" height={240}>
+      {/* Summary row — total return, %, best day. Total return left-aligned
+          and largest since it's the headline number; % and best day are
+          secondary metrics to its right. */}
+      <div style={st.historySummary}>
+        <div style={st.historySummaryItem}>
+          <div style={st.historySummaryLabel}>Total Return</div>
+          <div style={{ ...st.historySummaryValue, color: returnColor }}>
+            {totalReturn == null
+              ? "—"
+              : `${positive ? "+" : "−"}${fmtUsd(Math.abs(totalReturn))}`}
+          </div>
+        </div>
+        <div style={st.historySummaryItem}>
+          <div style={st.historySummaryLabel}>Return %</div>
+          <div style={{ ...st.historySummaryValue, color: returnColor }}>
+            {returnPct == null
+              ? "—"
+              : `${positive ? "+" : "−"}${Math.abs(returnPct).toFixed(2)}%`}
+          </div>
+        </div>
+        <div style={st.historySummaryItem}>
+          <div style={st.historySummaryLabel}>Best Day</div>
+          <div style={{ ...st.historySummaryValue, color: bestDay ? "#10b981" : "#94a3b8" }}>
+            {bestDay ? `+${fmtUsd(bestDay.delta)}` : "—"}
+          </div>
+          {bestDay && (
+            <div style={st.historySummarySub}>
+              {new Date(bestDay.ts).toLocaleDateString(undefined, { month: "short", day: "numeric" })}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Explicit 300px height on the wrapper so ResponsiveContainer can't
+          collapse to zero in any flex / grid ancestor. ResponsiveContainer
+          inherits 100% of parent width and matches the height we set here. */}
+      <div style={{ width: "100%", height: 300 }}>
+        <ResponsiveContainer width="100%" height="100%">
         <AreaChart data={chartData} margin={{ top: 10, right: 12, left: 0, bottom: 0 }}>
           <defs>
             <linearGradient id="historyGradient" x1="0" y1="0" x2="0" y2="1">
@@ -1653,6 +1683,24 @@ function PriceHistoryChart({ history }) {
             width={68}
           />
           <Tooltip content={<HistoryTooltip />} cursor={{ stroke: "rgba(245,158,11,0.4)", strokeWidth: 1 }} />
+          {/* Cost basis is rendered first so the value line draws on top of
+              it visually. We use Area with no fill so the line still
+              sits inside the same Recharts series type without forcing
+              an extra import; dashed stroke distinguishes it from
+              portfolio value at a glance. */}
+          {hasCostData && (
+            <Area
+              type="monotone"
+              dataKey="cost"
+              stroke="#3b82f6"
+              strokeWidth={2}
+              strokeDasharray="4 3"
+              fill="none"
+              connectNulls
+              isAnimationActive
+              animationDuration={800}
+            />
+          )}
           <Area
             type="monotone"
             dataKey="value"
@@ -1664,6 +1712,7 @@ function PriceHistoryChart({ history }) {
           />
         </AreaChart>
       </ResponsiveContainer>
+      </div>
     </section>
   );
 }
@@ -1671,10 +1720,24 @@ function PriceHistoryChart({ history }) {
 function HistoryTooltip({ active, payload }) {
   if (!active || !payload?.length) return null;
   const p = payload[0].payload;
+  const gap = p.cost != null ? p.value - p.cost : null;
+  const positive = gap != null && gap >= 0;
   return (
     <div style={st.tooltip}>
       <div style={st.tooltipName}>{new Date(p.ts).toLocaleString()}</div>
-      <div style={st.tooltipValue}>{fmtUsd(p.value)}</div>
+      <div style={{ ...st.tooltipValue, color: "#f59e0b" }}>
+        Value: {fmtUsd(p.value)}
+      </div>
+      {p.cost != null && (
+        <>
+          <div style={{ ...st.tooltipValue, color: "#60a5fa", fontSize: "0.95rem" }}>
+            Cost: {fmtUsd(p.cost)}
+          </div>
+          <div style={{ ...st.tooltipPct, color: positive ? "#10b981" : "#f87171" }}>
+            {positive ? "+" : "−"}{fmtUsd(Math.abs(gap))} unrealized
+          </div>
+        </>
+      )}
     </div>
   );
 }
@@ -2031,6 +2094,16 @@ const st = {
     border: "1px solid rgba(16,185,129,0.55)",
     padding: "0.05rem 0.3rem", borderRadius: 3,
   },
+  // Blue TRADED flag — same envelope as SOLD/TARGET but sky-blue so
+  // "left the portfolio via trade" reads distinct from "sold for cash".
+  listFlagTraded: {
+    flexShrink: 0,
+    fontSize: "0.55rem", fontWeight: 800, letterSpacing: "0.1em",
+    color: "#93c5fd",
+    background: "rgba(59,130,246,0.18)",
+    border: "1px solid rgba(59,130,246,0.55)",
+    padding: "0.05rem 0.3rem", borderRadius: 3,
+  },
   listCell: {
     fontSize: "0.82rem", color: "#cbd5e1",
     overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
@@ -2220,38 +2293,6 @@ const st = {
     marginTop: "1.25rem",
   },
 
-  // ── Performance row inside analytics ──
-  perfRow: {
-    display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
-    gap: "1.5rem",
-    marginTop: "1.5rem",
-    padding: "1.25rem 1.5rem",
-    background: "rgba(255,255,255,0.025)",
-    border: "1px solid rgba(255,255,255,0.05)",
-    borderRadius: 12,
-  },
-  perfStat: {},
-  perfStatLabel: {
-    fontSize: "0.62rem", fontWeight: 700,
-    letterSpacing: "0.16em", textTransform: "uppercase",
-    color: "#64748b", marginBottom: "0.4rem",
-  },
-  perfStatValue: {
-    fontSize: "1.5rem", fontWeight: 800,
-    lineHeight: 1, letterSpacing: "-0.02em",
-    fontVariantNumeric: "tabular-nums",
-  },
-  perfStatSub: {
-    fontSize: "0.78rem", fontWeight: 600,
-    marginTop: "0.3rem",
-    fontVariantNumeric: "tabular-nums",
-    opacity: 0.85,
-  },
-  perfStatNeutral:  { color: "#f1f5f9" },
-  perfStatPositive: { color: "#10b981" },
-  perfStatNegative: { color: "#f87171" },
-
   // ── Donut chart ──
   chartWrap: {
     position: "relative",
@@ -2358,15 +2399,70 @@ const st = {
     animation: "fadeInUp 0.5s ease-out backwards",
     position: "relative",
   },
+
+  // ── Skeleton loading tile ──
+  // Same shell as a real tile minus interaction. Shimmer driven by the
+  // `skeletonShimmer` keyframe in index.css; the wide gradient + 200%
+  // background-size gives the highlight band room to sweep.
+  skeletonTile: {
+    background: "#0f172a",
+    border: "1px solid rgba(255,255,255,0.05)",
+    borderRadius: 14,
+    overflow: "hidden",
+    position: "relative",
+  },
+  skeletonImage: {
+    width: "100%",
+    aspectRatio: "5 / 7",
+    background: "linear-gradient(110deg, rgba(255,255,255,0.025) 30%, rgba(255,255,255,0.07) 50%, rgba(255,255,255,0.025) 70%)",
+    backgroundSize: "200% 100%",
+    animation: "skeletonShimmer 1.4s ease-in-out infinite",
+  },
+  skeletonBody: {
+    padding: "0.95rem 0.95rem 1.05rem",
+    display: "flex",
+    flexDirection: "column",
+    gap: "0.55rem",
+  },
+  skeletonLine: {
+    height: "0.7rem",
+    borderRadius: 4,
+    background: "linear-gradient(110deg, rgba(255,255,255,0.025) 30%, rgba(255,255,255,0.07) 50%, rgba(255,255,255,0.025) 70%)",
+    backgroundSize: "200% 100%",
+    animation: "skeletonShimmer 1.4s ease-in-out infinite",
+    width: "100%",
+  },
+
+  // ── Dashboard skeleton ──
+  skeletonAnalyticsRow: {
+    display: "grid",
+    gridTemplateColumns: "1fr 1fr",
+    gap: "1.5rem",
+    marginTop: "1.5rem",
+  },
+  skeletonPanel: {
+    background: "#0f172a",
+    border: "1px solid rgba(255,255,255,0.05)",
+    borderRadius: 14,
+    padding: "1.25rem",
+    display: "flex",
+    flexDirection: "column",
+    gap: "1rem",
+  },
+  skeletonChartArea: {
+    width: "100%",
+    height: 180,
+    borderRadius: 8,
+    background: "linear-gradient(110deg, rgba(255,255,255,0.025) 30%, rgba(255,255,255,0.07) 50%, rgba(255,255,255,0.025) 70%)",
+    backgroundSize: "200% 100%",
+    animation: "skeletonShimmer 1.4s ease-in-out infinite",
+  },
   tileHovered: {
     transform: "translateY(-3px)",
     borderColor: "rgba(245,158,11,0.45)",
     background: "#111c33",
     boxShadow:
       "0 0 0 1px rgba(245,158,11,0.15), 0 12px 28px rgba(0,0,0,0.5), 0 0 32px rgba(245,158,11,0.12)",
-  },
-  tileRare: {
-    borderColor: "rgba(245,158,11,0.25)",
   },
   tileHighlight: {
     // Triggered when the tile is the target of a deep-link highlight.
@@ -2452,6 +2548,20 @@ const st = {
     color: "#f59e0b", lineHeight: 1,
     fontVariantNumeric: "tabular-nums",
     letterSpacing: "-0.01em",
+  },
+  // Text fallback used in place of /psa.avif for BGS / SGC. Same
+  // height + white-pill envelope so the badge visual balance stays
+  // identical regardless of grader.
+  gradeBadgeText: {
+    height: 20,
+    display: "flex", alignItems: "center",
+    background: "#fff",
+    color: "#0f172a",
+    padding: "0 5px",
+    borderRadius: 2,
+    fontSize: "0.65rem", fontWeight: 900,
+    letterSpacing: "0.04em",
+    fontFamily: "inherit",
   },
 
   // ─── Tier ribbon (top-left of grid tile) ───
@@ -2588,6 +2698,21 @@ const st = {
     transform: "rotate(8deg)",
     zIndex: 4,
   },
+  // Sibling of soldStamp — same diagonal placement, blue gradient so the
+  // user can spot traded cards at a glance in the grid view.
+  tradedStamp: {
+    position: "absolute",
+    top: 12, right: 12,
+    fontSize: "0.65rem", fontWeight: 900,
+    letterSpacing: "0.18em",
+    color: "#0f172a",
+    background: "linear-gradient(135deg, #60a5fa, #3b82f6)",
+    padding: "0.25rem 0.65rem",
+    borderRadius: 4,
+    boxShadow: "0 4px 14px rgba(59,130,246,0.5), 0 0 0 1px rgba(59,130,246,0.85)",
+    transform: "rotate(8deg)",
+    zIndex: 4,
+  },
 
   // ── Inline editor ──
   editBlock: {
@@ -2639,6 +2764,17 @@ const st = {
     margin: "0 0 0.5rem", letterSpacing: "-0.02em",
   },
   emptySub: { color: "#64748b", fontSize: "0.92rem" },
+  emptyCta: {
+    display: "inline-flex", alignItems: "center", gap: "0.45rem",
+    marginTop: "1.5rem",
+    background: "#f59e0b", color: "#0f172a",
+    padding: "0.65rem 1.2rem",
+    borderRadius: 8,
+    fontSize: "0.9rem", fontWeight: 700,
+    letterSpacing: "0.02em",
+    textDecoration: "none",
+    transition: "background 0.2s, transform 0.1s",
+  },
 
   // ─── Edit cost modal ───
   editBackdrop: {
@@ -2776,23 +2912,6 @@ const st = {
   },
   eyebrowMark: { marginRight: "0.4rem" },
 
-  // ─── Milestones in hero ───
-  milestoneRow: {
-    display: "flex", flexWrap: "wrap", gap: "0.4rem",
-    marginTop: "0.6rem", marginBottom: "1rem",
-  },
-  milestoneBadge: {
-    display: "inline-flex", alignItems: "center", gap: "0.3rem",
-    background: "rgba(245,158,11,0.08)",
-    border: "1px solid rgba(245,158,11,0.3)",
-    color: "#fbbf24",
-    fontSize: "0.65rem", fontWeight: 700,
-    padding: "0.25rem 0.55rem",
-    borderRadius: 999,
-    letterSpacing: "0.04em",
-  },
-  milestoneIcon: { fontSize: "0.65rem" },
-
   // ─── Alert banner ───
   alertBanner: {
     background: "linear-gradient(135deg, rgba(245,158,11,0.12), rgba(217,119,6,0.06))",
@@ -2816,11 +2935,6 @@ const st = {
     letterSpacing: "0.18em", textTransform: "uppercase",
     color: "#fbbf24",
   },
-  alertCount: {
-    background: "#f59e0b", color: "#0f172a",
-    fontSize: "0.7rem", fontWeight: 800,
-    padding: "0.1rem 0.5rem", borderRadius: 999,
-  },
   alertJump: {
     marginLeft: "auto",
     background: "transparent",
@@ -2830,32 +2944,6 @@ const st = {
     padding: "0.3rem 0.8rem", borderRadius: 999,
     cursor: "pointer", letterSpacing: "0.01em",
   },
-  alertList: {
-    display: "grid",
-    gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))",
-    gap: "0.5rem 1rem",
-  },
-  alertItem: {
-    display: "flex", alignItems: "center", gap: "0.6rem",
-    fontSize: "0.85rem", color: "#e2e8f0",
-    padding: "0.35rem 0",
-    borderBottom: "1px solid rgba(245,158,11,0.1)",
-  },
-  alertItemName: { fontWeight: 600, color: "#f1f5f9", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
-  alertItemMeta: {
-    fontSize: "0.65rem", color: "#94a3b8",
-    background: "rgba(15,23,42,0.6)",
-    border: "1px solid rgba(245,158,11,0.2)",
-    padding: "0.1rem 0.35rem", borderRadius: 3,
-    fontWeight: 700, letterSpacing: "0.06em",
-  },
-  alertItemValue: {
-    fontSize: "0.78rem", color: "#fbbf24", fontWeight: 700,
-    fontVariantNumeric: "tabular-nums",
-  },
-  alertItemArrow: { color: "#64748b", margin: "0 0.2rem" },
-  alertMore: { fontSize: "0.72rem", color: "#64748b", fontStyle: "italic", padding: "0.4rem 0" },
-
   // ─── Target-reached badge on tile ───
   // Lives in the bottom-left, stacked above the grade badge. The slimmer
   // PSA-logo grade pill is ~26px tall now, so 42px clears it with breathing room.
@@ -2879,19 +2967,8 @@ const st = {
     background: "#f59e0b",
   },
 
-  // ─── Insights row (diversification + performers) ───
-  insightsRow: {
-    display: "grid",
-    gridTemplateColumns: "minmax(260px, 1fr) minmax(320px, 1.4fr)",
-    gap: "1.25rem",
-    marginBottom: "2.5rem",
-  },
-  insightsCol: {
-    background: gradients.goldPanel,
-    border: "1px solid rgba(255,255,255,0.06)",
-    borderRadius: 16,
-    padding: "1.5rem 1.75rem",
-  },
+  // ─── Performers panel header (used by the standalone PerformersPanel
+  // shell — keeps the same visual treatment we removed from InsightsRow).
   insightsHeader: {
     display: "flex", alignItems: "flex-start",
     justifyContent: "space-between", marginBottom: "1.25rem",
@@ -2900,21 +2977,6 @@ const st = {
     fontSize: "0.7rem", fontWeight: 700,
     letterSpacing: "0.18em", textTransform: "uppercase",
     color: "#94a3b8", margin: 0,
-  },
-
-  // ─── Diversification ───
-  divBody: {
-    display: "flex", alignItems: "center", gap: "1.25rem",
-    flexWrap: "wrap",
-  },
-  divDetails: { flex: 1, minWidth: 140 },
-  divLabel: {
-    fontSize: "1.1rem", fontWeight: 800,
-    letterSpacing: "-0.01em", marginBottom: "0.5rem",
-  },
-  divDescription: {
-    fontSize: "0.78rem", color: "#64748b",
-    lineHeight: 1.6,
   },
 
   // ─── Performers ───
@@ -2934,11 +2996,28 @@ const st = {
     fontStyle: "italic", padding: "0.85rem 0",
     letterSpacing: "0.02em",
   },
+  // PerformersPanel is no longer wrapped by InsightsRow; this style mirrors
+  // the old insightsCol shell so the panel keeps the same visual treatment
+  // when rendered standalone on the dashboard.
+  performersStandalone: {
+    background: gradients.goldPanel,
+    border: "1px solid rgba(255,255,255,0.06)",
+    borderRadius: 16,
+    padding: "1.5rem 1.75rem",
+    marginBottom: "2.5rem",
+  },
   perfItem: {
     display: "flex", alignItems: "center",
     justifyContent: "space-between", gap: "0.75rem",
     padding: "0.55rem 0",
     borderBottom: "1px solid rgba(255,255,255,0.04)",
+  },
+  perfItemClickable: {
+    cursor: "pointer",
+    borderRadius: 6,
+    margin: "0 -0.5rem",
+    padding: "0.55rem 0.5rem",
+    transition: "background 0.15s ease",
   },
   perfItemMain: { flex: 1, minWidth: 0 },
   perfItemName: {
@@ -2970,22 +3049,47 @@ const st = {
     justifyContent: "space-between", flexWrap: "wrap",
     gap: "1rem", marginBottom: "1.25rem",
   },
-  historyDelta: { textAlign: "right" },
-  historyDeltaValue: {
-    fontSize: "1.4rem", fontWeight: 800,
-    fontVariantNumeric: "tabular-nums",
-    letterSpacing: "-0.02em",
+  historyLegend: {
+    display: "flex", alignItems: "center", gap: "1.25rem",
+    flexWrap: "wrap",
   },
-  historyDeltaPct: {
-    fontSize: "0.85rem", fontWeight: 700,
-    marginLeft: "0.6rem",
-    fontVariantNumeric: "tabular-nums",
+  historyLegendItem: {
+    display: "inline-flex", alignItems: "center", gap: "0.45rem",
+    fontSize: "0.72rem", fontWeight: 600,
+    letterSpacing: "0.08em", textTransform: "uppercase",
+    color: "#94a3b8",
   },
-  historyDeltaLabel: {
-    display: "block",
-    fontSize: "0.62rem", fontWeight: 600,
+  historyLegendSwatch: {
+    display: "inline-block",
+    width: 10, height: 10, borderRadius: 2,
+  },
+  historySummary: {
+    display: "grid",
+    gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+    gap: "1rem",
+    padding: "1rem 1.25rem",
+    background: "rgba(255,255,255,0.025)",
+    border: "1px solid rgba(255,255,255,0.05)",
+    borderRadius: 12,
+    marginBottom: "1.25rem",
+  },
+  historySummaryItem: {
+    display: "flex", flexDirection: "column",
+    gap: "0.25rem",
+  },
+  historySummaryLabel: {
+    fontSize: "0.62rem", fontWeight: 700,
     letterSpacing: "0.16em", textTransform: "uppercase",
-    color: "#64748b", marginTop: "0.2rem",
+    color: "#64748b",
+  },
+  historySummaryValue: {
+    fontSize: "1.35rem", fontWeight: 800,
+    lineHeight: 1, letterSpacing: "-0.02em",
+    fontVariantNumeric: "tabular-nums",
+  },
+  historySummarySub: {
+    fontSize: "0.7rem", color: "#94a3b8",
+    fontWeight: 600,
   },
   historyEmpty: {
     color: "#64748b", fontSize: "0.85rem",

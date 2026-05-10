@@ -1,17 +1,7 @@
 const { getPool, ensureUser } = require("../_db");
-const { S3Client, GetObjectCommand } = require("@aws-sdk/client-s3");
-const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
 const { json } = require("../_response");
-
-const s3 = new S3Client({});
-
-async function signedUrl(key) {
-  return getSignedUrl(
-    s3,
-    new GetObjectCommand({ Bucket: process.env.CARD_IMAGES_BUCKET, Key: key }),
-    { expiresIn: 3600 }
-  );
-}
+const { safeImageUrl } = require("../_image-helpers");
+const { signedCardImageUrl } = require("../_s3-helpers");
 
 exports.handler = async (event) => {
   const claims = event.requestContext?.authorizer?.jwt?.claims;
@@ -29,14 +19,14 @@ exports.handler = async (event) => {
   // boolean via `cb.user_id IS NOT NULL`.
   const result = await db.query(
     `SELECT c.id, c.cert_number, c.year, c.brand, c.sport, c.player_name, c.card_number,
-            c.grade, c.grade_description,
-            c.s3_image_key, c.image_url,
+            c.grade, c.grade_description, c.grader,
+            c.s3_image_key, c.cardhedger_image_url,
             c.s3_back_image_key, c.back_image_url,
             c.psa_population, c.psa_population_higher,
             c.manual_price, c.my_cost, c.target_price,
             c.estimated_value, c.avg_sale_price, c.last_sale_price,
             c.num_sales, c.price_source, c.value_last_updated,
-            c.added_at,
+            c.status, c.added_at,
             cn.status     AS consignment_status,
             cn.sold_price AS consignment_sold_price,
             (cb.user_id IS NOT NULL) AS consignment_blocked
@@ -58,8 +48,8 @@ exports.handler = async (event) => {
   const cards = await Promise.all(
     result.rows.map(async (row) => {
       const [imageUrl, backImageUrl] = await Promise.all([
-        row.s3_image_key      ? signedUrl(row.s3_image_key)      : Promise.resolve(row.image_url      ?? null),
-        row.s3_back_image_key ? signedUrl(row.s3_back_image_key) : Promise.resolve(row.back_image_url ?? null),
+        row.s3_image_key      ? signedCardImageUrl(row.s3_image_key)      : Promise.resolve(safeImageUrl(row.cardhedger_image_url)),
+        row.s3_back_image_key ? signedCardImageUrl(row.s3_back_image_key) : Promise.resolve(row.back_image_url ?? null),
       ]);
 
       const manualPrice = row.manual_price ? parseFloat(row.manual_price) : null;
@@ -78,6 +68,7 @@ exports.handler = async (event) => {
         cardNumber:       row.card_number,
         grade:            row.grade,
         gradeDescription: row.grade_description,
+        grader:           row.grader ?? "PSA",
         imageUrl,
         backImageUrl,
         psaPopulation:       row.psa_population        ?? null,
@@ -96,6 +87,7 @@ exports.handler = async (event) => {
         consignmentStatus:     row.consignment_status     ?? null,
         consignmentSoldPrice:  row.consignment_sold_price != null ? parseFloat(row.consignment_sold_price) : null,
         consignmentBlocked:    !!row.consignment_blocked,
+        status:                row.status ?? null,
       };
     })
   );

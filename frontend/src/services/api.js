@@ -15,6 +15,24 @@ export async function lookupPsaCert(certNumber) {
   return res.json();
 }
 
+// Generic cert lookup that branches on grader. PSA stays on the
+// existing /psa/{cert} route (PSA's own API). BGS / SGC go to the new
+// /cards/lookup-cert route which reshapes CardHedger's prices-by-cert
+// response to the same contract — letting the AddCardPage share its
+// state machine across all three graders.
+export async function lookupCert(certNumber, grader) {
+  if (grader === "PSA") {
+    return lookupPsaCert(certNumber);
+  }
+  const headers = await authHeaders();
+  const res = await fetch(`${API_BASE}/cards/lookup-cert`, {
+    method: "POST", headers,
+    body: JSON.stringify({ certNumber, grader }),
+  });
+  if (!res.ok) throw await readError(res);
+  return res.json();
+}
+
 // Throws a rich error so callers can branch on status (e.g. 409 duplicates).
 async function readError(res) {
   let data = null;
@@ -77,9 +95,94 @@ export async function getPortfolioHistory() {
   return res.json();
 }
 
-export async function getCardSales(id) {
+// Returns CardHedger pricing for an arbitrary cert without persisting
+// it to the user's portfolio. Used by the Trade Builder to preview the
+// estimated value of cards being traded for.
+// Returns: { available: true, avgSalePrice, lastSalePrice, ... } or
+//          { available: false, reason }
+export async function previewPricing(card) {
   const headers = await authHeaders();
-  const res = await fetch(`${API_BASE}/cards/${id}/sales`, { headers });
+  const res = await fetch(`${API_BASE}/pricing/preview`, {
+    method: "POST", headers,
+    body: JSON.stringify({
+      certNumber: card.certNumber,
+      playerName: card.playerName,
+      year:       card.year,
+      brand:      card.brand,
+      cardNumber: card.cardNumber,
+      grade:      card.grade,
+      sport:      card.sport,
+    }),
+  });
+  if (!res.ok) throw await readError(res);
+  return res.json();
+}
+
+// Submits a trade for atomic execution. Server marks given cards as
+// 'traded', inserts received cards (NULL my_cost), creates a pending
+// trade row, and returns { tradeId, receivedCards: [{ id, certNumber }] }.
+// Cost basis is allocated in a follow-up call to confirmTradeCost.
+export async function executeTrade(payload) {
+  const headers = await authHeaders();
+  const res = await fetch(`${API_BASE}/trades/execute`, {
+    method: "POST", headers, body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw await readError(res);
+  return res.json();
+}
+
+// Atomic rollback of a pending trade. Used by the Trade Builder's Back
+// button on the allocation screen — restores given cards to active,
+// deletes the inserted received cards, and removes the trade row.
+// Server-side gated on trades.status='pending'.
+export async function cancelTrade(tradeId) {
+  const headers = await authHeaders();
+  const res = await fetch(`${API_BASE}/trades/cancel`, {
+    method: "POST", headers, body: JSON.stringify({ tradeId }),
+  });
+  if (!res.ok) throw await readError(res);
+  return res.json();
+}
+
+// Finalizes a pending trade by allocating cost basis to each received
+// card. Body: { tradeId, allocations: [{ certNumber, cost }] }. Server
+// updates each card.my_cost AND trade_cards.allocated_cost, then marks
+// the trade as 'executed'.
+export async function confirmTradeCost(payload) {
+  const headers = await authHeaders();
+  const res = await fetch(`${API_BASE}/trades/confirm-cost`, {
+    method: "POST", headers, body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw await readError(res);
+  return res.json();
+}
+
+// Triggers a server-side CardHedger refresh. Two modes:
+//   • no payload → walks all cards, refreshes those past the 24h
+//                  staleness window (PortfolioPage SWR mount)
+//   • { cardIds: [...] } → scopes the refresh to those cards AND
+//                          bypasses the staleness gate. Used by the
+//                          Trade Builder right after confirm-cost so
+//                          received cards get pricing + image URLs
+//                          populated immediately.
+// Returns { refreshed, skipped, failed }.
+export async function refreshPortfolio(payload) {
+  const headers = await authHeaders();
+  const res = await fetch(`${API_BASE}/portfolio/refresh`, {
+    method: "POST",
+    headers,
+    body: payload ? JSON.stringify(payload) : undefined,
+  });
+  if (!res.ok) throw new Error(`Portfolio refresh failed: ${res.status}`);
+  return res.json();
+}
+
+export async function getCardSales(id, grade) {
+  const headers = await authHeaders();
+  const url = grade
+    ? `${API_BASE}/cards/${id}/sales?grade=${encodeURIComponent(grade)}`
+    : `${API_BASE}/cards/${id}/sales`;
+  const res = await fetch(url, { headers });
   if (!res.ok) throw new Error(`Card sales failed: ${res.status}`);
   return res.json();
 }
@@ -275,9 +378,12 @@ export async function getAdminCard(id) {
   return res.json();
 }
 
-export async function getAdminCardSales(id) {
+export async function getAdminCardSales(id, grade) {
   const headers = await authHeaders();
-  const res = await fetch(`${API_BASE}/admin/cards/${id}/sales`, { headers });
+  const url = grade
+    ? `${API_BASE}/admin/cards/${id}/sales?grade=${encodeURIComponent(grade)}`
+    : `${API_BASE}/admin/cards/${id}/sales`;
+  const res = await fetch(url, { headers });
   if (!res.ok) throw await readError(res);
   return res.json();
 }

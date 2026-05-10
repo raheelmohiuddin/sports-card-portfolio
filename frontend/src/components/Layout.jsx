@@ -19,14 +19,11 @@ export default function NavHeader() {
   const [email, setEmail]       = useState(null);
   const [role, setRole]         = useState(null);
   useEffect(() => {
-    // TEMP diagnostic for nav-header auth state — remove once stable.
-    console.log("nav-header authStatus:", authStatus);
     if (!isAuth) { setUsername(null); setEmail(null); setRole(null); return; }
     let cancelled = false;
     fetchUserAttributes()
       .then((attrs) => {
         if (cancelled) return;
-        console.log("nav-header attributes:", attrs);
         setUsername(attrs.preferred_username ?? null);
         setEmail(attrs.email ?? null);
         setRole(attrs["custom:role"] ?? null);

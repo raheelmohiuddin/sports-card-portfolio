@@ -158,6 +158,41 @@ a { color: inherit; text-decoration: none; }
   }
 }
 
+/* Trade-execution overlay animations. Both rows of cards cross through
+   the centre simultaneously with a scale pulse at the midpoint to sell
+   the swap. translateX is GPU-accelerated; 80vw on each side is wide
+   enough to clear the viewport regardless of card count or screen
+   size. The accompanying React component drives entry/exit by
+   mounting the overlay only during the animating + success steps. */
+@keyframes scp-trade-slide-right {
+  0%   { transform: translateX(0)     scale(1);   }
+  50%  { transform: translateX(40vw)  scale(1.1); }
+  100% { transform: translateX(80vw)  scale(1);   }
+}
+@keyframes scp-trade-slide-left {
+  0%   { transform: translateX(0)     scale(1);   }
+  50%  { transform: translateX(-40vw) scale(1.1); }
+  100% { transform: translateX(-80vw) scale(1);   }
+}
+@keyframes scp-trade-success-pop {
+  0%   { transform: scale(0.6); opacity: 0; }
+  60%  { transform: scale(1.08); opacity: 1; }
+  100% { transform: scale(1);   opacity: 1; }
+}
+@keyframes scp-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Skeleton-tile shimmer — sweeps a subtle highlight band across a wide
+   gradient so the placeholder feels alive while data is loading. Used by
+   PortfolioPage's loading state; the gradient is set via inline style on the
+   skeleton elements so the keyframe is reusable for any element that wants
+   the same sweep. */
+@keyframes skeletonShimmer {
+  0%   { background-position: 100% 0; }
+  100% { background-position: -100% 0; }
+}
+
 /* Force the navbar Sign In button to stay on one line. Inline whiteSpace:
    nowrap was apparently being overridden somewhere in the cascade (Amplify's
    global Authenticator stylesheet ships some !important rules), so this

@@ -146,12 +146,6 @@ const services = {
     const username = generatePrimaryUsername();
     rememberSignupUsername(username);
 
-    // TEMP diagnostic — dump the input shape Amplify hands us so we can see
-    // exactly where the form-field values land. Remove once stable.
-    console.log("handleSignUp input:", JSON.stringify(input, (_k, v) =>
-      typeof v === "string" && v.length > 4 ? `${v.slice(0, 2)}…(${v.length})` : v
-    ));
-
     // Defensively normalise the userAttributes so we never spread away
     // given_name / family_name. Amplify v6's Authenticator should put them
     // under input.options.userAttributes, but some Authenticator versions

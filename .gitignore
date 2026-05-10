@@ -11,3 +11,4 @@ frontend/src/aws-exports.js
 *.js.map
 .DS_Store
 coverage/
+.claude/
