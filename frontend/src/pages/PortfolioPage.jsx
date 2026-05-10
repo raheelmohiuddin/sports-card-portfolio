@@ -351,26 +351,20 @@ export default function PortfolioPage() {
               <CardListView
                 cards={visibleCards}
                 highlightId={highlightId}
-                onOpen={(c) => setSelectedCard(c)}
-                onEdit={(c) => setEditingCard(c)}
-                onDelete={(id) => handleDelete(id)}
+                onOpen={openCardModal}
+                onEdit={startEdit}
+                onDelete={handleDelete}
               />
             ) : (
-              <div style={st.grid}>
-                {visibleCards.map((card, idx) => (
-                  <CardTile
-                    key={card.id}
-                    card={card}
-                    index={idx}
-                    highlighted={String(card.id) === String(highlightId)}
-                    pulse={pulseIds?.has(card.id) ?? false}
-                    onOpen={openCardModal}
-                    onEdit={startEdit}
-                    onDelete={handleDelete}
-                    onCardUpdate={handleCardUpdate}
-                  />
-                ))}
-              </div>
+              <CardGrid
+                visibleCards={visibleCards}
+                highlightId={highlightId}
+                pulseIds={pulseIds}
+                onOpen={openCardModal}
+                onEdit={startEdit}
+                onDelete={handleDelete}
+                onCardUpdate={handleCardUpdate}
+              />
             )}
           </>
         )}
@@ -791,6 +785,10 @@ function NoMatches({ onClear }) {
 
 // ─── List view ────────────────────────────────────────────────────────
 function CardListView({ cards, highlightId, onOpen, onEdit, onDelete }) {
+  // Pre-compute the comparison side once per parent render — the map
+  // body then does a single string equality per row instead of two
+  // String() conversions.
+  const highlightIdStr = highlightId == null ? null : String(highlightId);
   return (
     <div style={st.listOuter}>
       <div style={st.list}>
@@ -809,10 +807,10 @@ function CardListView({ cards, highlightId, onOpen, onEdit, onDelete }) {
           <CardListRow
             key={card.id}
             card={card}
-            highlighted={String(card.id) === String(highlightId)}
-            onOpen={() => onOpen(card)}
-            onEdit={() => onEdit(card)}
-            onDelete={() => onDelete(card.id)}
+            highlighted={String(card.id) === highlightIdStr}
+            onOpen={onOpen}
+            onEdit={onEdit}
+            onDelete={onDelete}
           />
         ))}
       </div>
@@ -820,7 +818,7 @@ function CardListView({ cards, highlightId, onOpen, onEdit, onDelete }) {
   );
 }
 
-function CardListRow({ card, highlighted, onOpen, onEdit, onDelete }) {
+function CardListRowImpl({ card, highlighted, onOpen, onEdit, onDelete }) {
   const [hovered, setHovered] = useState(false);
   const [pulsing, setPulsing] = useState(false);
   const [imgErr, setImgErr]   = useState(false);
@@ -850,7 +848,7 @@ function CardListRow({ card, highlighted, onOpen, onEdit, onDelete }) {
       }}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
-      onClick={onOpen}
+      onClick={() => onOpen(card)}
     >
       <div style={st.listThumbWrap}>
         {card.imageUrl && !imgErr ? (
@@ -907,14 +905,14 @@ function CardListRow({ card, highlighted, onOpen, onEdit, onDelete }) {
       <div style={st.listActions}>
         <button
           type="button"
-          onClick={(e) => { e.stopPropagation(); onEdit(); }}
+          onClick={(e) => { e.stopPropagation(); onEdit(card); }}
           style={st.listActionEdit}
           title="Edit cost"
           aria-label="Edit cost"
         >✎</button>
         <button
           type="button"
-          onClick={(e) => { e.stopPropagation(); onDelete(); }}
+          onClick={(e) => { e.stopPropagation(); onDelete(card.id); }}
           style={st.listActionDel}
           title="Remove card"
           aria-label="Remove card"
@@ -923,6 +921,7 @@ function CardListRow({ card, highlighted, onOpen, onEdit, onDelete }) {
     </div>
   );
 }
+const CardListRow = memo(CardListRowImpl);
 
 // ─── Tab button ───────────────────────────────────────────────────────
 function TabButton({ label, active, onClick, badge }) {
@@ -1160,7 +1159,7 @@ function EmptyState() {
 // ─── Tier badges ──────────────────────────────────────────────────────
 // Grid-tile ribbon. Ghost renders as a bare floating icon (no pill); the
 // other two tiers use a text pill in their tier colour.
-function TierRibbon({ tier }) {
+function TierRibbonImpl({ tier }) {
   if (tier === "ghost") {
     return (
       <div style={st.ghostBadgeTile}>
@@ -1171,9 +1170,10 @@ function TierRibbon({ tier }) {
   const variant = tier === "ultra_rare" ? st.tierRibbonUltraRare : st.tierRibbonRare;
   return <div style={{ ...st.tierRibbonBase, ...variant }}>{TIER_LABELS[tier]}</div>;
 }
+const TierRibbon = memo(TierRibbonImpl);
 
 // Inline flag used in list rows + performer rows. Ghost is icon-only here too.
-function TierFlag({ tier }) {
+function TierFlagImpl({ tier }) {
   if (tier === "ghost") {
     return (
       <span style={st.ghostBadgeInline}>
@@ -1184,6 +1184,7 @@ function TierFlag({ tier }) {
   const variant = tier === "ultra_rare" ? st.tierFlagUltraRare : st.tierFlagRare;
   return <span style={{ ...st.tierFlagBase, ...variant }}>{TIER_LABELS[tier]}</span>;
 }
+const TierFlag = memo(TierFlagImpl);
 
 // Border-tint applied to tiles per tier. Pre-computed at module scope
 // so the spread inside CardTile's render is by-reference — keeps
@@ -1204,6 +1205,67 @@ function tileTierStyle(tier) {
 // the stable callbacks from PortfolioPage (openCardModal / startEdit /
 // handleDelete / handleCardUpdate), only tiles whose own props actually
 // change get re-rendered.
+// IntersectionObserver-based virtualization wrapper. Tiles render a
+// minimum-height placeholder until they're within `rootMargin` of the
+// viewport, at which point the real CardTile mounts and stays mounted
+// (mount-once semantics — keeps scroll-back instantaneous and avoids
+// flicker when the user scrolls fast). With ~360px placeholder height
+// and 400px root margin, even 200-card portfolios feel responsive on
+// initial render because most tiles are non-visible at mount.
+function LazyTile({ children, placeholderHeight = 360 }) {
+  const [visible, setVisible] = useState(false);
+  const ref = useRef(null);
+
+  useEffect(() => {
+    if (visible) return; // sticky once visible — no need to keep observing
+    const el = ref.current;
+    if (!el || typeof IntersectionObserver === "undefined") {
+      // SSR / older browsers / test envs — render eagerly.
+      setVisible(true);
+      return;
+    }
+    const observer = new IntersectionObserver(([entry]) => {
+      if (entry.isIntersecting) {
+        setVisible(true);
+        observer.disconnect();
+      }
+    }, { rootMargin: "400px" });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [visible]);
+
+  return (
+    <div ref={ref} style={visible ? undefined : { minHeight: placeholderHeight }}>
+      {visible ? children : null}
+    </div>
+  );
+}
+
+// Memoized grid wrapper. highlightIdStr is computed ONCE per parent
+// render here, instead of running String() inside every map iteration.
+function CardGridImpl({ visibleCards, highlightId, pulseIds, onOpen, onEdit, onDelete, onCardUpdate }) {
+  const highlightIdStr = highlightId == null ? null : String(highlightId);
+  return (
+    <div style={st.grid}>
+      {visibleCards.map((card, idx) => (
+        <LazyTile key={card.id}>
+          <CardTile
+            card={card}
+            index={idx}
+            highlighted={String(card.id) === highlightIdStr}
+            pulse={pulseIds?.has(card.id) ?? false}
+            onOpen={onOpen}
+            onEdit={onEdit}
+            onDelete={onDelete}
+            onCardUpdate={onCardUpdate}
+          />
+        </LazyTile>
+      ))}
+    </div>
+  );
+}
+const CardGrid = memo(CardGridImpl);
+
 function CardTileImpl({ card, index, highlighted, pulse, onOpen, onEdit, onDelete, onCardUpdate }) {
   const [hovered, setHovered] = useState(false);
   const [imgErr, setImgErr]   = useState(false);
@@ -1287,7 +1349,7 @@ function CardTileImpl({ card, index, highlighted, pulse, onOpen, onEdit, onDelet
             assets). Falls back to PSA for legacy rows missing grader. */}
         <div style={st.gradeBadge}>
           {(card.grader ?? "PSA") === "PSA"
-            ? <img src="/psa.avif" alt="PSA" style={st.gradeBadgeLogo} />
+            ? <img src="/psa.avif" alt="PSA" loading="lazy" style={st.gradeBadgeLogo} />
             : <span style={st.gradeBadgeText}>{card.grader}</span>}
           <span style={st.gradeBadgeValue}>{card.grade}</span>
         </div>
@@ -1542,7 +1604,7 @@ function PerformersPanel({ cards, onSelectCard }) {
   );
 }
 
-function PerformerColumn({ title, cards, positive, emptyMessage, onSelectCard }) {
+function PerformerColumnImpl({ title, cards, positive, emptyMessage, onSelectCard }) {
   const color = positive ? "#10b981" : "#f87171";
   return (
     <div>
@@ -1551,41 +1613,60 @@ function PerformerColumn({ title, cards, positive, emptyMessage, onSelectCard })
         <div style={st.perfEmpty}>{emptyMessage}</div>
       ) : (
         <div style={st.perfList}>
-          {cards.map((c) => {
-            const tier = getRarityTier(c);
-            const clickable = !!onSelectCard;
-            return (
-            <div
+          {cards.map((c) => (
+            <PerformerRow
               key={c.id}
-              style={{ ...st.perfItem, ...(clickable ? st.perfItemClickable : {}) }}
-              onClick={clickable ? () => onSelectCard(c) : undefined}
-              role={clickable ? "button" : undefined}
-              tabIndex={clickable ? 0 : undefined}
-              onKeyDown={clickable ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onSelectCard(c); } } : undefined}
-            >
-              <div style={st.perfItemMain}>
-                <div style={st.perfItemName}>
-                  {c.playerName ?? "Unknown"}
-                  {tier && <TierFlag tier={tier} />}
-                </div>
-                <div style={st.perfItemMeta}>PSA {c.grade}{c.year ? ` · ${c.year}` : ""}</div>
-              </div>
-              <div style={st.perfItemNumbers}>
-                <div style={{ ...st.perfItemPnl, color }}>
-                  {c.pnl >= 0 ? "+" : "−"}{fmtUsd(Math.abs(c.pnl))}
-                </div>
-                <div style={st.perfItemBasis}>
-                  {fmtUsd(c.myCost)} → {fmtUsd(c.estimatedValue)}
-                </div>
-              </div>
-            </div>
-            );
-          })}
+              card={c}
+              color={color}
+              onSelectCard={onSelectCard}
+            />
+          ))}
         </div>
       )}
     </div>
   );
 }
+const PerformerColumn = memo(PerformerColumnImpl);
+
+// Single performer row — extracted + memoized so changes elsewhere on the
+// dashboard (modal toggle, pulse, etc.) don't re-render every row.
+// Inline click/keydown closures live inside the row body, where they're
+// only created when the row itself re-renders.
+function PerformerRowImpl({ card, color, onSelectCard }) {
+  const tier = getRarityTier(card);
+  const clickable = !!onSelectCard;
+  return (
+    <div
+      style={{ ...st.perfItem, ...(clickable ? st.perfItemClickable : {}) }}
+      onClick={clickable ? () => onSelectCard(card) : undefined}
+      role={clickable ? "button" : undefined}
+      tabIndex={clickable ? 0 : undefined}
+      onKeyDown={clickable ? (e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onSelectCard(card);
+        }
+      } : undefined}
+    >
+      <div style={st.perfItemMain}>
+        <div style={st.perfItemName}>
+          {card.playerName ?? "Unknown"}
+          {tier && <TierFlag tier={tier} />}
+        </div>
+        <div style={st.perfItemMeta}>PSA {card.grade}{card.year ? ` · ${card.year}` : ""}</div>
+      </div>
+      <div style={st.perfItemNumbers}>
+        <div style={{ ...st.perfItemPnl, color }}>
+          {card.pnl >= 0 ? "+" : "−"}{fmtUsd(Math.abs(card.pnl))}
+        </div>
+        <div style={st.perfItemBasis}>
+          {fmtUsd(card.myCost)} → {fmtUsd(card.estimatedValue)}
+        </div>
+      </div>
+    </div>
+  );
+}
+const PerformerRow = memo(PerformerRowImpl);
 
 // ─── Price history line chart ─────────────────────────────────────────
 // API shape (from /portfolio/history): [{ timestamp, totalValue, totalCost,
