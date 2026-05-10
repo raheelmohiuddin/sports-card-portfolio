@@ -25,6 +25,22 @@ function displaySource(source) {
   return source;
 }
 
+// Known marketplaces render their brand logo instead of a text badge —
+// the wordmark is recognisable at a glance and saves horizontal space.
+// Anything else falls back to the gold-bordered uppercase text pill.
+// CardHedger still tags Fanatics Collect rows with the legacy "PWCC"
+// label, so both spellings map to the same logo.
+function SourceBadge({ source }) {
+  const key = source ? String(source).toLowerCase() : "";
+  if (key === "ebay") {
+    return <img src="/ebay-logo.svg" alt="eBay" style={st.brandLogo} />;
+  }
+  if (key === "pwcc" || key === "fanatics collect" || key === "fanatics_collect") {
+    return <img src="/fanatics-collect-logo.png" alt="Fanatics Collect" style={st.brandLogo} />;
+  }
+  return <span style={st.source}>{displaySource(source)}</span>;
+}
+
 function formatSaleDate(d) {
   if (!d) return "—";
   try {
@@ -63,14 +79,20 @@ export default function SalesHistory({ card, loadSales }) {
   // selectedGrade=null on first run = "use the card's own grade
   // (server resolves it from the row)". Subsequent grade picks pass
   // the chosen label.
+  //
+  // AbortController on cleanup: rapid card-switching (e.g. clicking
+  // through a grid) used to leave stacked in-flight fetches racing
+  // each other. The signal aborts the previous request whenever the
+  // effect re-runs, so the latest selection always wins and we don't
+  // waste bandwidth on responses we'll never render.
   useEffect(() => {
     if (!card?.id) return;
-    let cancelled = false;
+    const ctrl = new AbortController();
     setLoading(true);
     setError(false);
-    loadSales(card.id, selectedGrade)
+    loadSales(card.id, selectedGrade, { signal: ctrl.signal })
       .then((data) => {
-        if (cancelled) return;
+        if (ctrl.signal.aborted) return;
         setSales(data?.sales ?? []);
         setAvailableGrades(data?.availableGrades ?? []);
         // Reset the windowed-list cursor whenever the dataset changes
@@ -83,13 +105,16 @@ export default function SalesHistory({ card, loadSales }) {
           setSelectedGrade(data.currentGrade);
         }
       })
-      .catch(() => {
-        if (!cancelled) { setError(true); setSales([]); }
+      .catch((err) => {
+        // AbortError is the expected cleanup path — don't treat it as
+        // a real failure. Anything else is a network/server issue.
+        if (ctrl.signal.aborted || err?.name === "AbortError") return;
+        setError(true); setSales([]);
       })
       .finally(() => {
-        if (!cancelled) setLoading(false);
+        if (!ctrl.signal.aborted) setLoading(false);
       });
-    return () => { cancelled = true; };
+    return () => ctrl.abort();
   }, [card?.id, selectedGrade, loadSales]);
 
   return (
@@ -138,7 +163,7 @@ export default function SalesHistory({ card, loadSales }) {
                 {showGrade && (
                   <span style={st.gradePill}>{sale.grade ?? "—"}</span>
                 )}
-                <span style={st.source}>{displaySource(sale.price_source)}</span>
+                <SourceBadge source={sale.price_source} />
                 <span style={st.price}>{fmt(sale.price)}</span>
               </>
             );
@@ -242,21 +267,24 @@ const st = {
     transition: "background 0.15s",
   },
   row: {
-    display: "grid",
-    gridTemplateColumns: "1fr auto auto",
+    // Flex with alignItems: center vertically centres every cell —
+    // crucial because the SourceBadge can be a 20px-tall logo OR a
+    // 16px-tall text pill OR an auto-sized image, and we want them
+    // all to share a baseline with the price text. Date takes flex: 1
+    // so it consumes the leftover horizontal space and pushes
+    // grade-pill / source / price flush right.
+    display: "flex",
+    alignItems: "center",
     gap: "0.85rem",
     padding: "0.65rem 0.95rem",
     fontSize: "0.82rem",
     borderBottom: "1px solid rgba(245,158,11,0.08)",
     fontVariantNumeric: "tabular-nums",
-    alignItems: "center",
   },
-  // Insert an extra `auto` column for the per-row grade pill when the
-  // "All grades" filter is active. Keeps date / grade / source / price
-  // crisply aligned across all rows.
-  rowWithGrade: {
-    gridTemplateColumns: "1fr auto auto auto",
-  },
+  // No additional layout hint needed under flex — the gradePill slots
+  // in between date and source via DOM order automatically. Kept as an
+  // empty entry in case future visual tweaks need a grade-mode hook.
+  rowWithGrade: {},
   gradePill: {
     color: "#fbbf24", fontWeight: 800,
     fontSize: "0.62rem",
@@ -272,7 +300,7 @@ const st = {
     color: "inherit",
     cursor: "pointer",
   },
-  date: { color: "#cbd5e1" },
+  date: { color: "#cbd5e1", flex: 1, minWidth: 0 },
   source: {
     color: "#94a3b8", fontWeight: 700,
     fontSize: "0.7rem",
@@ -281,6 +309,18 @@ const st = {
     padding: "0.1rem 0.4rem", borderRadius: 3,
     letterSpacing: "0.04em",
     textTransform: "uppercase",
+  },
+  brandLogo: {
+    // Locked to 20px tall (≈ row text line-height) so eBay and Fanatics
+    // logos render at the same vertical footprint despite different
+    // intrinsic aspect ratios. width: auto preserves each wordmark's
+    // proportions. verticalAlign: middle is harmless under flex
+    // alignment but keeps the image vertically anchored if the parent
+    // ever falls back to inline flow.
+    height: 20, width: "auto",
+    objectFit: "contain",
+    display: "block",
+    verticalAlign: "middle",
   },
   price: {
     color: "#f59e0b", fontWeight: 800,

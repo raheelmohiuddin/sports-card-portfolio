@@ -257,39 +257,51 @@ export default function CardModal({
             </>
           )}
 
-          {/* ── Headline value ──
-              Sold → green "Sold For" label, no auto-pricing context (the
-              sale is the truth). Held → existing market-value layout. */}
-          {displayValue != null && (
+          {/* ── Market Value (held cards only) ──
+              Sold cards skip this block entirely — the sale price is shown
+              in ConsignBlock below as part of the consignment status, and
+              market estimates are irrelevant once the card has exited. */}
+          {!sold && displayValue != null && (
             <>
-              <div style={st.sectionHead}>{sold ? "Sold For" : "Market Value"}</div>
+              <div style={st.sectionHead}>Market Value</div>
               <div style={st.priceBlock}>
-                <div style={{ ...st.mainPrice, ...(sold ? st.mainPriceSold : {}) }}>
+                <div style={st.mainPrice}>
                   {fmt(displayValue)}
                 </div>
-                {!sold && (
-                  <>
-                    <div style={st.priceDetails}>
-                      {card.avgSalePrice  && <span>Avg {fmt(card.avgSalePrice)}</span>}
-                      {card.lastSalePrice && <><span style={st.dot}>·</span><span>Last {fmt(card.lastSalePrice)}</span></>}
-                      {card.numSales      && <><span style={st.dot}>·</span><span>{card.numSales} sales</span></>}
-                    </div>
-                    {card.priceSource && (
-                      <span style={{ ...st.sourceBadge, ...sourceBadgeStyle(card.priceSource) }}>
-                        {badgeLabel(card.priceSource)}
-                      </span>
-                    )}
-                  </>
+                <div style={st.priceDetails}>
+                  {card.avgSalePrice  && <span>Avg {fmt(card.avgSalePrice)}</span>}
+                  {card.lastSalePrice && <><span style={st.dot}>·</span><span>Last {fmt(card.lastSalePrice)}</span></>}
+                  {card.numSales      && <><span style={st.dot}>·</span><span>{card.numSales} sales</span></>}
+                </div>
+                {card.priceSource && (
+                  <span style={{ ...st.sourceBadge, ...sourceBadgeStyle(card.priceSource) }}>
+                    {badgeLabel(card.priceSource)}
+                  </span>
                 )}
               </div>
             </>
           )}
 
-          {/* ── Cost + P&L ── */}
+          {/* ── Sold cards: surface consignment status (with sold price)
+                immediately, followed by realized P&L. Held cards keep the
+                existing bottom-of-sidebar placement so the consign CTA
+                sits below the market context. */}
+          {sold && hydrated && !adminConsignment && (
+            <ConsignBlock
+              cardId={card.id}
+              role={role}
+              consignmentStatus={card.consignmentStatus ?? null}
+              consignmentSoldPrice={card.consignmentSoldPrice ?? null}
+              consignmentBlocked={card.consignmentBlocked ?? false}
+              onConsigned={(status) => onCardUpdate?.(card.id, { consignmentStatus: status })}
+            />
+          )}
+
+          {/* ── Cost + P&L (realized for sold, unrealized for held) ── */}
           <CostAndPnl card={card} displayValue={displayValue} />
 
-          {/* ── Target price (only when set) ── */}
-          {card.targetPrice != null && (
+          {/* ── Target price (only meaningful while held) ── */}
+          {!sold && card.targetPrice != null && (
             <>
               <div style={st.sectionHead}>Target Price</div>
               <div style={st.targetBlock}>
@@ -312,10 +324,12 @@ export default function CardModal({
             ? <SalesHistory card={card} loadSales={getCardSales} />
             : <div style={st.salesPlaceholder} />}
 
-          {/* ── Consign this card (collectors only) ──
-              Suppressed when adminConsignment is provided — admins use the
-              read-only block below + the queue page for status changes. */}
-          {hydrated && !adminConsignment && (
+          {/* ── Consign this card (held cards only) ──
+              Sold cards already rendered ConsignBlock at the top — repeating
+              it here would duplicate the status pill. Suppressed when
+              adminConsignment is provided so admins see the read-only
+              AdminConsignmentBlock instead. */}
+          {!sold && hydrated && !adminConsignment && (
             <ConsignBlock
               cardId={card.id}
               role={role}

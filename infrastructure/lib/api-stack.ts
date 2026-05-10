@@ -186,6 +186,27 @@ export class ApiStack extends Construct {
       functionName: "scp-cancel-trade",
       entry: path.join(functionsDir, "trades/cancel-trade.js"),
     });
+    // GET /trades — executed-trade history with snapshotted card metadata
+    // joined from trade_cards. Powers the Past Trades section in My Trade.
+    const listTradesFn = new NodejsFunction(this, "ListTrades", {
+      ...sharedNodejsProps,
+      functionName: "scp-list-trades",
+      entry: path.join(functionsDir, "trades/list-trades.js"),
+    });
+    // POST /trades/analyze — Claude-driven trade analysis. Long timeout
+    // because Sonnet calls regularly run 5–15s with 4k output tokens.
+    const analyzeTradeFn = new NodejsFunction(this, "AnalyzeTrade", {
+      ...sharedNodejsProps,
+      functionName: "scp-analyze-trade",
+      entry: path.join(functionsDir, "trades/analyze-trade.js"),
+      timeout: cdk.Duration.seconds(60),
+    });
+    analyzeTradeFn.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: ["secretsmanager:GetSecretValue"],
+        resources: ["arn:aws:secretsmanager:us-east-1:501789774892:secret:sports-card-portfolio/anthropic-api-key*"],
+      })
+    );
 
     const avatarUploadUrlFn = new NodejsFunction(this, "AvatarUploadUrl", {
       ...sharedNodejsProps,
@@ -519,7 +540,7 @@ export class ApiStack extends Construct {
       markAttendingFn,
       unmarkAttendingFn,
     ];
-    for (const fn of [addCardFn, getCardsFn, getCardFn, deleteCardFn, psaLookupFn, portfolioValueFn, portfolioRefreshFn, portfolioHistoryFn, cardSalesFn, executeTradeFn, confirmTradeCostFn, cancelTradeFn, updatePriceFn, updateCardFn, avatarUploadUrlFn, avatarViewUrlFn, ...consignmentAndAdminFns]) {
+    for (const fn of [addCardFn, getCardsFn, getCardFn, deleteCardFn, psaLookupFn, portfolioValueFn, portfolioRefreshFn, portfolioHistoryFn, cardSalesFn, executeTradeFn, confirmTradeCostFn, cancelTradeFn, listTradesFn, analyzeTradeFn, updatePriceFn, updateCardFn, avatarUploadUrlFn, avatarViewUrlFn, ...consignmentAndAdminFns]) {
       props.dbSecret.grantRead(fn);
       props.cardImagesBucket.grantReadWrite(fn);
       fn.addToRolePolicy(
@@ -668,6 +689,20 @@ export class ApiStack extends Construct {
       path: "/trades/cancel",
       methods: [apigwv2.HttpMethod.POST],
       integration: new apigwv2integrations.HttpLambdaIntegration("CancelTrade", cancelTradeFn),
+      ...authRoute,
+    });
+
+    api.addRoutes({
+      path: "/trades",
+      methods: [apigwv2.HttpMethod.GET],
+      integration: new apigwv2integrations.HttpLambdaIntegration("ListTrades", listTradesFn),
+      ...authRoute,
+    });
+
+    api.addRoutes({
+      path: "/trades/analyze",
+      methods: [apigwv2.HttpMethod.POST],
+      integration: new apigwv2integrations.HttpLambdaIntegration("AnalyzeTrade", analyzeTradeFn),
       ...authRoute,
     });
 

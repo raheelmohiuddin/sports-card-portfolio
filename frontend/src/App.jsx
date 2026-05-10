@@ -11,6 +11,7 @@ import UsernameSetupPage from "./pages/UsernameSetupPage.jsx";
 import ProfilePage from "./pages/ProfilePage.jsx";
 import SettingsPage from "./pages/SettingsPage.jsx";
 import PortfolioPage from "./pages/PortfolioPage.jsx";
+import TradeDeskPage from "./pages/TradeDeskPage.jsx";
 import AddCardPage from "./pages/AddCardPage.jsx";
 import AdminPage from "./pages/AdminPage.jsx";
 import AdminConsignmentsPage from "./pages/AdminConsignmentsPage.jsx";
@@ -88,6 +89,7 @@ function AnimatedRoutes() {
             /signin when unauthenticated and /portfolio when already set. */}
         <Route path="/setup-username" element={<UsernameSetupPage />} />
         <Route path="/portfolio" element={<ProtectedRoute><PortfolioPage /></ProtectedRoute>} />
+        <Route path="/tradedesk" element={<ProtectedRoute><TradeDeskPage /></ProtectedRoute>} />
         <Route path="/add-card"  element={<ProtectedRoute><AddCardPage /></ProtectedRoute>} />
         <Route path="/profile"   element={<ProtectedRoute><ProfilePage /></ProtectedRoute>} />
         <Route path="/settings"  element={<ProtectedRoute><SettingsPage /></ProtectedRoute>} />

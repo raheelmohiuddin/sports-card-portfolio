@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import {
   PieChart, Pie, Cell, Tooltip, ResponsiveContainer,
-  AreaChart, Area, XAxis, YAxis, CartesianGrid,
+  LineChart, Line, XAxis, YAxis, CartesianGrid,
 } from "recharts";
 import {
   getCards, deleteCard, getPortfolioValue, getPortfolioHistory, refreshPortfolio,
@@ -10,7 +10,6 @@ import {
 } from "../services/api.js";
 import CardModal from "../components/CardModal.jsx";
 import GhostIcon from "../components/GhostIcon.jsx";
-import TradeTab from "../components/TradeTab.jsx";
 import { getRarityTier, TIER_LABELS, TIER_COLORS } from "../utils/rarity.js";
 import { gradients } from "../utils/theme.js";
 import {
@@ -45,11 +44,17 @@ function isRare(card) {
 export default function PortfolioPage() {
   const [cards, setCards]               = useState([]);
   const [totalValue, setTotalValue]     = useState(null);
+  const [tradesExecuted, setTradesExecuted] = useState(0);
   const [history, setHistory]           = useState([]);
   const [loading, setLoading]           = useState(true);
   const [error, setError]               = useState(null);
   const [selectedCard, setSelectedCard] = useState(null);
   const [editingCard, setEditingCard]   = useState(null);
+  // Transient gold-pulse highlight for cards just received in a trade.
+  // Set in onTradeComplete and auto-cleared after 3s. Kept out of the URL
+  // because it's a one-shot post-action effect, not a deep-link state.
+  const [pulseIds, setPulseIds]         = useState(null);
+
 
   // Stale-while-revalidate. Phase 1: fast DB read of cards + value + history,
   // render the page immediately. Phase 2: kick off /portfolio/refresh in the
@@ -67,6 +72,7 @@ export default function PortfolioPage() {
         const merged = cardList.map((card) => ({ ...card, ...pricingById[card.id] }));
         setCards(merged);
         setTotalValue(valueData.totalValue);
+        setTradesExecuted(valueData.tradesExecuted ?? 0);
       } catch {
         // Swallow — refresh-driven re-fetch shouldn't surface as an error
         // when the initial render already succeeded.
@@ -80,6 +86,7 @@ export default function PortfolioPage() {
         const merged = cardList.map((card) => ({ ...card, ...pricingById[card.id] }));
         setCards(merged);
         setTotalValue(valueData.totalValue);
+        setTradesExecuted(valueData.tradesExecuted ?? 0);
         setHistory(historyData);
         setLoading(false);
 
@@ -101,7 +108,11 @@ export default function PortfolioPage() {
     return () => { cancelled = true; };
   }, []);
 
-  async function handleDelete(id) {
+  // useCallback so the reference is stable across renders — prevents
+  // `React.memo(CardTile)` from busting on every parent state change. All
+  // setters used inside are themselves stable, so the empty-deps array
+  // is safe.
+  const handleDelete = useCallback(async (id) => {
     if (!window.confirm("Remove this card from your portfolio?")) return;
     await deleteCard(id);
     setCards((prev) => {
@@ -110,9 +121,9 @@ export default function PortfolioPage() {
       setTotalValue(Math.round(newTotal * 100) / 100);
       return next;
     });
-  }
+  }, []);
 
-  function handleCardUpdate(id, patch) {
+  const handleCardUpdate = useCallback((id, patch) => {
     setSelectedCard((prev) => (prev?.id === id ? { ...prev, ...patch } : prev));
     setCards((prev) => {
       const next = prev.map((c) => (c.id === id ? { ...c, ...patch } : c));
@@ -122,7 +133,14 @@ export default function PortfolioPage() {
       setTotalValue(Math.round(newTotal * 100) / 100);
       return next;
     });
-  }
+  }, []);
+
+  // Stable click handlers passed through to CardTile. They take `card`
+  // as a parameter (CardTile invokes them with its own card prop) so
+  // the reference stays identity-equal across renders — no per-row
+  // closure churn that would defeat React.memo.
+  const openCardModal = useCallback((c) => setSelectedCard(c), []);
+  const startEdit     = useCallback((c) => setEditingCard(c), []);
 
   const cardCount  = cards.length;
   const rareCount  = useMemo(() => cards.filter(isRare).length, [cards]);
@@ -208,7 +226,7 @@ export default function PortfolioPage() {
   // ── Tab routing via URL search params ──
   const [searchParams, setSearchParams] = useSearchParams();
   const tabRaw = searchParams.get("tab");
-  const tab = tabRaw === "cards" || tabRaw === "trade" ? tabRaw : "dashboard";
+  const tab = tabRaw === "cards" ? "cards" : "dashboard";
   const highlightId = searchParams.get("highlight");
 
   function selectTab(next) {
@@ -222,14 +240,35 @@ export default function PortfolioPage() {
     });
   }
 
+  // ── Trade-completion pulse, driven by URL param ──
+  // TradeDeskPage navigates to /portfolio?tab=cards&pulse=id1,id2 after
+  // a confirm. Read the IDs once, drive the gold pulse, then strip the
+  // param so a refresh doesn't re-trigger.
+  useEffect(() => {
+    const raw = searchParams.get("pulse");
+    if (!raw) return;
+    const ids = raw.split(",").map((s) => s.trim()).filter(Boolean);
+    if (ids.length === 0) return;
+    setPulseIds(new Set(ids));
+    const t = setTimeout(() => setPulseIds(null), 3000);
+    setSearchParams((prev) => {
+      const np = new URLSearchParams(prev);
+      np.delete("pulse");
+      return np;
+    }, { replace: true });
+    return () => clearTimeout(t);
+    // searchParams is referentially stable per react-router; we only
+    // want this to fire when the actual pulse value changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams.get("pulse")]);
+
   return (
     <div style={st.page}>
       <div className="container" style={st.inner}>
         {/* ── Tab bar ── */}
         <nav style={st.tabBar}>
           <TabButton label="Dashboard" active={tab === "dashboard"} onClick={() => selectTab("dashboard")} />
-          <TabButton label="My Cards" active={tab === "cards"}     onClick={() => selectTab("cards")} />
-          <TabButton label="My Trade" active={tab === "trade"}     onClick={() => selectTab("trade")} />
+          <TabButton label="My Cards"  active={tab === "cards"}     onClick={() => selectTab("cards")} />
         </nav>
 
         {/* ── Dashboard ── */}
@@ -247,6 +286,7 @@ export default function PortfolioPage() {
                 cardCount={cardCount}
                 avgValue={avgValue}
                 rareCount={rareCount}
+                tradesExecuted={tradesExecuted}
                 loading={loading}
               />
             )}
@@ -323,9 +363,10 @@ export default function PortfolioPage() {
                     card={card}
                     index={idx}
                     highlighted={String(card.id) === String(highlightId)}
-                    onOpen={() => setSelectedCard(card)}
-                    onEdit={() => setEditingCard(card)}
-                    onDelete={() => handleDelete(card.id)}
+                    pulse={pulseIds?.has(card.id) ?? false}
+                    onOpen={openCardModal}
+                    onEdit={startEdit}
+                    onDelete={handleDelete}
                     onCardUpdate={handleCardUpdate}
                   />
                 ))}
@@ -334,37 +375,6 @@ export default function PortfolioPage() {
           </>
         )}
 
-        {/* ── My Trade ── */}
-        {tab === "trade" && !loading && (
-          <TradeTab
-            cards={cards}
-            onTradeComplete={(newCardIds) => {
-              // Trade is fully confirmed server-side. Refetch the cards
-              // list so the new received cards appear (with their newly
-              // assigned my_cost) and the given cards flip to TRADED.
-              // Highlight the first new card; secondary cards still
-              // appear in the grid, just without the gold pulse.
-              getCards()
-                .then((next) => {
-                  const pricingById = Object.fromEntries(
-                    (cards ?? []).map((c) => [c.id, c])
-                  );
-                  // Preserve any pricing fields already on the in-memory
-                  // copy of existing cards (avoids a flash of "—" while
-                  // /portfolio/value re-runs).
-                  setCards(next.map((c) => ({ ...pricingById[c.id], ...c })));
-                })
-                .catch(() => { /* failure surfaces on next mount */ });
-              setSearchParams((prev) => {
-                const np = new URLSearchParams(prev);
-                np.set("tab", "cards");
-                if (newCardIds.length > 0) np.set("highlight", newCardIds[0]);
-                else np.delete("highlight");
-                return np;
-              });
-            }}
-          />
-        )}
       </div>
 
       {selectedCard && (
@@ -390,7 +400,7 @@ export default function PortfolioPage() {
 }
 
 // ─── Hero stats bar ────────────────────────────────────────────────────
-function HeroStats({ totalValue, totalInvested, pnl, pnlPct, realizedPnl, unrealizedPnl, hasCost, cardCount, avgValue, rareCount, loading }) {
+function HeroStats({ totalValue, totalInvested, pnl, pnlPct, realizedPnl, unrealizedPnl, hasCost, cardCount, avgValue, rareCount, tradesExecuted, loading }) {
   const positive = pnl != null && pnl >= 0;
   const pnlColor = positive ? "#10b981" : "#f87171";
 
@@ -460,6 +470,7 @@ function HeroStats({ totalValue, totalInvested, pnl, pnlPct, realizedPnl, unreal
             <Stat label="Invested" value={fmtUsd(totalInvested)} />
             <Stat label="Cards" value={cardCount.toLocaleString()} />
             <Stat label="Rare" value={rareCount} accent={rareCount > 0} />
+            <Stat label="Trades" value={tradesExecuted.toLocaleString()} accent={tradesExecuted > 0} />
           </div>
         </>
       ) : (
@@ -475,6 +486,7 @@ function HeroStats({ totalValue, totalInvested, pnl, pnlPct, realizedPnl, unreal
             <Stat label="Cards" value={loading ? "—" : cardCount.toLocaleString()} />
             <Stat label="Avg Card Value" value={avgValue != null ? fmtUsd(avgValue) : "—"} />
             <Stat label="Rare Cards" value={loading ? "—" : rareCount} accent={rareCount > 0} />
+            <Stat label="Trades" value={loading ? "—" : tradesExecuted.toLocaleString()} accent={tradesExecuted > 0} />
           </div>
         </>
       )}
@@ -543,8 +555,7 @@ function AnalyticsPanel({ cards, totalValue }) {
                 strokeWidth={2}
                 onMouseEnter={(_, i) => setActiveIdx(i)}
                 onMouseLeave={() => setActiveIdx(null)}
-                isAnimationActive={true}
-                animationDuration={600}
+                isAnimationActive={false}
               >
                 {data.map((_, i) => (
                   <Cell
@@ -1174,22 +1185,30 @@ function TierFlag({ tier }) {
   return <span style={{ ...st.tierFlagBase, ...variant }}>{TIER_LABELS[tier]}</span>;
 }
 
-// Border-tint applied to tiles per tier — keeps the rest of the tile styling
-// consistent and just nudges the border colour to match the badge.
+// Border-tint applied to tiles per tier. Pre-computed at module scope
+// so the spread inside CardTile's render is by-reference — keeps
+// React.memo's prop-equality check on style-shaped values cheap, and
+// avoids allocating a new object on every CardTile render.
+const TIER_TILE_STYLES = {
+  ultra_rare: { borderColor: "rgba(245,158,11,0.4)" },
+  ghost:      { borderColor: "rgba(255,255,255,0.32)" },
+  rare:       { borderColor: "rgba(147,197,253,0.4)" },
+};
+const EMPTY_TIER_STYLE = {};
 function tileTierStyle(tier) {
-  const c = TIER_COLORS[tier];
-  if (!c) return {};
-  // Convert hex → rgba with low alpha for a subtle tinted border
-  return { borderColor: tier === "ultra_rare" ? "rgba(245,158,11,0.4)"
-            : tier === "ghost" ? "rgba(255,255,255,0.32)"
-            : "rgba(147,197,253,0.4)" };
+  return TIER_TILE_STYLES[tier] ?? EMPTY_TIER_STYLE;
 }
 
 // ─── Card tile ────────────────────────────────────────────────────────
-function CardTile({ card, index, highlighted, onOpen, onEdit, onDelete, onCardUpdate }) {
+// Wrapped in React.memo at the bottom of the function; combined with
+// the stable callbacks from PortfolioPage (openCardModal / startEdit /
+// handleDelete / handleCardUpdate), only tiles whose own props actually
+// change get re-rendered.
+function CardTileImpl({ card, index, highlighted, pulse, onOpen, onEdit, onDelete, onCardUpdate }) {
   const [hovered, setHovered] = useState(false);
   const [imgErr, setImgErr]   = useState(false);
   const [pulsing, setPulsing] = useState(false);
+  const [tradePulsing, setTradePulsing] = useState(false);
   const tileRef = useRef(null);
   const tier = getRarityTier(card);
 
@@ -1203,6 +1222,17 @@ function CardTile({ card, index, highlighted, onOpen, onEdit, onDelete, onCardUp
     return () => clearTimeout(t);
   }, [highlighted]);
 
+  // Trade-completion pulse — set by parent after a trade confirms. No
+  // scroll (the grid sorts newly-added cards to the top), just a 3s
+  // gold ring so the user can spot the cards they just received among
+  // the rest of their portfolio.
+  useEffect(() => {
+    if (!pulse) return;
+    setTradePulsing(true);
+    const t = setTimeout(() => setTradePulsing(false), 3000);
+    return () => clearTimeout(t);
+  }, [pulse]);
+
   return (
     <div
       ref={tileRef}
@@ -1211,11 +1241,12 @@ function CardTile({ card, index, highlighted, onOpen, onEdit, onDelete, onCardUp
         ...(tier ? tileTierStyle(tier) : {}),
         ...(hovered ? st.tileHovered : {}),
         ...(pulsing ? st.tileHighlight : {}),
+        ...(tradePulsing ? st.tileTradePulse : {}),
         animationDelay: `${Math.min(index * 35, 600)}ms`,
       }}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
-      onClick={onOpen}
+      onClick={() => onOpen(card)}
     >
       {/* Image area */}
       <div style={st.imageWrap}>
@@ -1239,13 +1270,13 @@ function CardTile({ card, index, highlighted, onOpen, onEdit, onDelete, onCardUp
         <div style={{ ...st.tileActions, opacity: hovered ? 1 : 0 }}>
           <button
             style={st.editBtn}
-            onClick={(e) => { e.stopPropagation(); onEdit(); }}
+            onClick={(e) => { e.stopPropagation(); onEdit(card); }}
             title="Edit cost"
             aria-label="Edit cost"
           >✎</button>
           <button
             style={st.deleteBtn}
-            onClick={(e) => { e.stopPropagation(); onDelete(); }}
+            onClick={(e) => { e.stopPropagation(); onDelete(card.id); }}
             title="Remove card"
             aria-label="Remove card"
           >✕</button>
@@ -1301,6 +1332,7 @@ function CardTile({ card, index, highlighted, onOpen, onEdit, onDelete, onCardUp
     </div>
   );
 }
+const CardTile = memo(CardTileImpl);
 
 // Slim P&L line under the value — only renders when myCost is set.
 // Sold cards label this "Realized" with green/red P&L; held cards use
@@ -1476,19 +1508,25 @@ function PerformersPanel({ cards, onSelectCard }) {
       .map((c) => ({ ...c, pnl: c.estimatedValue - c.myCost }));
   }, [cards]);
 
+  // Partition by sign, sort each side, take 3. Wrapped in useMemo
+  // because the partition + two sorts are O(n log n) and the dashboard
+  // re-renders on unrelated state changes (selected card, pulse
+  // timers). Break-even cards (pnl === 0) appear in neither column.
+  const { gainers, losers } = useMemo(() => {
+    return {
+      gainers: tracked
+        .filter((c) => c.pnl > 0)
+        .sort((a, b) => b.pnl - a.pnl)
+        .slice(0, 3),
+      losers: tracked
+        .filter((c) => c.pnl < 0)
+        .sort((a, b) => a.pnl - b.pnl)
+        .slice(0, 3),
+    };
+  }, [tracked]);
+
   // Hide the whole panel if no cards have a cost basis yet
   if (tracked.length === 0) return null;
-
-  // Partition by sign first, then sort each side and take 3.
-  // Break-even cards (pnl === 0) appear in neither column by design.
-  const gainers = tracked
-    .filter((c) => c.pnl > 0)
-    .sort((a, b) => b.pnl - a.pnl) // descending — biggest gain first
-    .slice(0, 3);
-  const losers = tracked
-    .filter((c) => c.pnl < 0)
-    .sort((a, b) => a.pnl - b.pnl) // ascending — most-negative first
-    .slice(0, 3);
 
   return (
     <div style={st.performersStandalone}>
@@ -1550,8 +1588,20 @@ function PerformerColumn({ title, cards, positive, emptyMessage, onSelectCard })
 }
 
 // ─── Price history line chart ─────────────────────────────────────────
+// API shape (from /portfolio/history): [{ timestamp, totalValue, totalCost,
+// cardCount }]. We map to {ts, value, cost} for the chart axes. Cost line
+// only draws when at least one snapshot has non-null cost (older snapshots
+// predate the total_cost migration). Filters out value=0 rows so empty-
+// portfolio early snapshots don't squash the Y-axis range.
+//
+// Chart uses a PLAIN LineChart with fixed pixel dimensions (no
+// ResponsiveContainer). ResponsiveContainer was returning width(-1)
+// height(-1) inside the dashboard's flex/grid layout — symptom of its
+// parent-measurement falling through. Fixed width + overflow:hidden on
+// the wrapper trades a touch of small-screen clipping for guaranteed
+// rendering across all containers.
 function PriceHistoryChart({ history }) {
-  if (!history || history.length < 2) {
+  if (!history || history.length === 0) {
     return (
       <section style={st.historyPanel}>
         <div style={st.insightsHeader}>
@@ -1559,50 +1609,45 @@ function PriceHistoryChart({ history }) {
           <span style={st.analyticsAccent}>◆</span>
         </div>
         <div style={st.historyEmpty}>
-          Tracking begins after a few snapshots — keep checking back.
-          Your portfolio is recorded automatically when this page loads.
+          Tracking begins after your first snapshot — visit the dashboard
+          a couple of times over a few hours and your portfolio history
+          will start filling in here automatically.
         </div>
       </section>
     );
   }
 
-  const chartData = history.map((h) => ({
-    ts:    new Date(h.timestamp).getTime(),
-    value: h.totalValue,
-    cost:  h.totalCost ?? null,
-    label: new Date(h.timestamp).toLocaleString(),
-  }));
-  // Cost line is suppressed entirely until we have at least one
-  // non-null total_cost. Older snapshots written before the migration
-  // have NULL cost — rendering an Area whose data is uniformly null
-  // can cause Recharts to short-circuit domain computation and blank
-  // the whole chart in some versions. Conditional render avoids it.
-  const hasCostData = chartData.some((d) => d.cost != null);
-  // Surfaced once per render so a blank chart can be diagnosed against
-  // the actual payload via DevTools — remove once stable.
-  // eslint-disable-next-line no-console
-  console.log("[PriceHistoryChart] data:", { rows: chartData.length, hasCostData, sample: chartData[0] });
-
-  const last       = chartData[chartData.length - 1];
-  const totalReturn = last.cost != null ? last.value - last.cost : null;
-  const returnPct   = last.cost > 0 ? (totalReturn / last.cost) * 100 : null;
-  const positive    = totalReturn != null && totalReturn >= 0;
-  const returnColor = totalReturn == null ? "#94a3b8" : (positive ? "#10b981" : "#f87171");
-
-  // Best Day = biggest single-snapshot-to-snapshot value gain. Negative
-  // diffs are ignored (we only highlight gains). Returns null if no
-  // positive movement occurred — surfaced as "—" so we don't lie about
-  // a "best" day that doesn't exist.
-  let bestDayDelta = 0;
-  let bestDayTs    = null;
-  for (let i = 1; i < chartData.length; i++) {
-    const diff = chartData[i].value - chartData[i - 1].value;
-    if (diff > bestDayDelta) {
-      bestDayDelta = diff;
-      bestDayTs    = chartData[i].ts;
+  const { chartData, hasCostData, totalReturn, returnPct, positive, returnColor, bestDay } = useMemo(() => {
+    const data = history
+      .map((h) => ({
+        ts:    new Date(h.timestamp).getTime(),
+        value: h.totalValue,
+        cost:  h.totalCost ?? null,
+        label: new Date(h.timestamp).toLocaleString(),
+      }))
+      .filter((d) => d.value != null && d.value > 0);
+    const hasCost = data.some((d) => d.cost != null);
+    const lastRow = data[data.length - 1];
+    const tr      = lastRow?.cost != null ? lastRow.value - lastRow.cost : null;
+    const pct     = lastRow?.cost > 0 ? (tr / lastRow.cost) * 100 : null;
+    const pos     = tr != null && tr >= 0;
+    const color   = tr == null ? "#94a3b8" : (pos ? "#10b981" : "#f87171");
+    let delta = 0;
+    let ts    = null;
+    for (let i = 1; i < data.length; i++) {
+      const diff = data[i].value - data[i - 1].value;
+      if (diff > delta) { delta = diff; ts = data[i].ts; }
     }
-  }
-  const bestDay = bestDayDelta > 0 ? { delta: bestDayDelta, ts: bestDayTs } : null;
+    return {
+      chartData:   data,
+      hasCostData: hasCost,
+      totalReturn: tr,
+      returnPct:   pct,
+      positive:    pos,
+      returnColor: color,
+      bestDay:     delta > 0 ? { delta, ts } : null,
+    };
+  }, [history]);
 
   return (
     <section style={st.historyPanel}>
@@ -1616,16 +1661,15 @@ function PriceHistoryChart({ history }) {
             <span style={{ ...st.historyLegendSwatch, background: "#f59e0b" }} />
             Portfolio Value
           </span>
-          <span style={st.historyLegendItem}>
-            <span style={{ ...st.historyLegendSwatch, background: "#3b82f6" }} />
-            Cost Basis
-          </span>
+          {hasCostData && (
+            <span style={st.historyLegendItem}>
+              <span style={{ ...st.historyLegendSwatch, background: "#3b82f6" }} />
+              Cost Basis
+            </span>
+          )}
         </div>
       </div>
 
-      {/* Summary row — total return, %, best day. Total return left-aligned
-          and largest since it's the headline number; % and best day are
-          secondary metrics to its right. */}
       <div style={st.historySummary}>
         <div style={st.historySummaryItem}>
           <div style={st.historySummaryLabel}>Total Return</div>
@@ -1656,62 +1700,50 @@ function PriceHistoryChart({ history }) {
         </div>
       </div>
 
-      {/* Explicit 300px height on the wrapper so ResponsiveContainer can't
-          collapse to zero in any flex / grid ancestor. ResponsiveContainer
-          inherits 100% of parent width and matches the height we set here. */}
-      <div style={{ width: "100%", height: 300 }}>
-        <ResponsiveContainer width="100%" height="100%">
-        <AreaChart data={chartData} margin={{ top: 10, right: 12, left: 0, bottom: 0 }}>
-          <defs>
-            <linearGradient id="historyGradient" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%"   stopColor="#f59e0b" stopOpacity={0.45} />
-              <stop offset="100%" stopColor="#f59e0b" stopOpacity={0} />
-            </linearGradient>
-          </defs>
+      {/* Plain LineChart, fixed width — no ResponsiveContainer. overflow:
+          hidden clips on screens narrower than 600px. */}
+      <div style={{ width: "100%", height: 280, minHeight: 280, overflow: "hidden" }}>
+        <LineChart width={600} height={280} data={chartData} margin={{ top: 10, right: 12, left: 0, bottom: 0 }}>
           <CartesianGrid stroke="rgba(255,255,255,0.04)" strokeDasharray="2 4" />
           <XAxis
             dataKey="ts"
-            type="number" domain={["dataMin", "dataMax"]}
+            type="number"
+            domain={["dataMin", "dataMax"]}
             tickFormatter={(t) => new Date(t).toLocaleDateString(undefined, { month: "short", day: "numeric" })}
             tick={{ fill: "#64748b", fontSize: 11 }}
             stroke="rgba(255,255,255,0.08)"
           />
           <YAxis
+            domain={["auto", "auto"]}
             tickFormatter={(v) => `$${Math.round(v).toLocaleString()}`}
             tick={{ fill: "#64748b", fontSize: 11 }}
             stroke="rgba(255,255,255,0.08)"
             width={68}
           />
           <Tooltip content={<HistoryTooltip />} cursor={{ stroke: "rgba(245,158,11,0.4)", strokeWidth: 1 }} />
-          {/* Cost basis is rendered first so the value line draws on top of
-              it visually. We use Area with no fill so the line still
-              sits inside the same Recharts series type without forcing
-              an extra import; dashed stroke distinguishes it from
-              portfolio value at a glance. */}
+          <Line
+            type="monotone"
+            dataKey="value"
+            name="Portfolio Value"
+            stroke="#f59e0b"
+            strokeWidth={2.5}
+            dot={false}
+            isAnimationActive={false}
+          />
           {hasCostData && (
-            <Area
+            <Line
               type="monotone"
               dataKey="cost"
+              name="Cost Basis"
               stroke="#3b82f6"
               strokeWidth={2}
               strokeDasharray="4 3"
-              fill="none"
+              dot={false}
               connectNulls
-              isAnimationActive
-              animationDuration={800}
+              isAnimationActive={false}
             />
           )}
-          <Area
-            type="monotone"
-            dataKey="value"
-            stroke="#f59e0b"
-            strokeWidth={2.5}
-            fill="url(#historyGradient)"
-            isAnimationActive
-            animationDuration={800}
-          />
-        </AreaChart>
-      </ResponsiveContainer>
+        </LineChart>
       </div>
     </section>
   );
@@ -2246,7 +2278,7 @@ const st = {
   },
   statsRow: {
     display: "grid",
-    gridTemplateColumns: "repeat(3, 1fr)",
+    gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
     gap: "1rem",
   },
   stat: {},
@@ -2468,6 +2500,12 @@ const st = {
     // Triggered when the tile is the target of a deep-link highlight.
     // Three pulses (1.5s × 3) then style is removed by the timeout in CardTile.
     animation: "fadeInUp 0.5s ease-out backwards, goldPulse 1.5s ease-in-out 3",
+    borderColor: "rgba(245,158,11,0.75)",
+  },
+  tileTradePulse: {
+    // Triggered for cards just received in a trade. Two pulses × 1.5s = 3s,
+    // matching the spec. Same gold visual as tileHighlight but no scroll.
+    animation: "scp-trade-card-pulse 1.5s ease-in-out 2",
     borderColor: "rgba(245,158,11,0.75)",
   },
 

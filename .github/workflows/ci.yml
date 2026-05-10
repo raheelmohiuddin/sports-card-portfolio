@@ -1,0 +1,96 @@
+# Continuous integration — runs on every push to master and every PR.
+# Three parallel jobs so a slow build doesn't block the test runs and
+# vice-versa. GitHub posts each as a status check; PRs surface them in
+# the merge box.
+#
+# This repo uses npm workspaces (see root package.json). One `npm ci`
+# at the root installs frontend, backend, and infrastructure together.
+
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+# Cancel in-flight runs when a new commit lands on the same ref — no
+# point burning minutes on a stale SHA when the branch has moved on.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend-tests:
+    name: Backend tests (Jest)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install workspace dependencies
+        run: npm ci
+
+      - name: Run Jest
+        run: npm test --workspace backend
+
+  frontend-tests:
+    name: Frontend tests (Vitest)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install workspace dependencies
+        run: npm ci
+
+      - name: Run Vitest
+        run: npm test --workspace frontend
+
+  frontend-build:
+    name: Frontend build (Vite)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install workspace dependencies
+        run: npm ci
+
+      # aws-exports.js is gitignored (per-environment Cognito IDs). The
+      # build only needs SOMETHING to import — Amplify Hosting injects
+      # the real values at deploy time. Stub keeps the import resolvable.
+      - name: Stub aws-exports for build
+        run: |
+          cat > frontend/src/aws-exports.js <<'EOF'
+          const awsExports = {
+            Auth: {
+              Cognito: {
+                userPoolId: "ci-stub",
+                userPoolClientId: "ci-stub",
+                loginWith: { email: true, username: true },
+              },
+            },
+          };
+          export default awsExports;
+          EOF
+
+      - name: Build (vite build)
+        run: npm run build --workspace frontend

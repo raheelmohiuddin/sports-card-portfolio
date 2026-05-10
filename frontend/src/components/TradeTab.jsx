@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useState } from "react";
-import { lookupPsaCert, previewPricing, executeTrade, confirmTradeCost, cancelTrade, refreshPortfolio } from "../services/api.js";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lookupPsaCert, previewPricing, executeTrade, confirmTradeCost, cancelTrade, refreshPortfolio, analyzeTrade } from "../services/api.js";
 import { isSold, isTraded } from "../utils/portfolio.js";
+import { computeTradeCostBasis } from "../utils/trade.js";
 import { gradients } from "../utils/theme.js";
 
-// My Trade tab — Phase 2 of the trade feature.
+// TradeDesk page — Phase 2 of the trade feature.
 //
 // State machine:
 //   step="building"   → user picks given cards, looks up received cards,
@@ -32,7 +33,7 @@ function isTradableCard(card) {
   return true;
 }
 
-export default function TradeTab({ cards, onTradeComplete }) {
+export default function TradeTab({ cards, onTradeComplete, pastTrades, historyLoading, historyError }) {
   const [step, setStep] = useState("building");
 
   // Building-step state
@@ -40,6 +41,9 @@ export default function TradeTab({ cards, onTradeComplete }) {
   const [receivedCards, setReceivedCards] = useState([]);
   const [cashGiven,     setCashGiven]     = useState("");
   const [cashReceived,  setCashReceived]  = useState("");
+  // Live filter on the left column. Matches case-insensitively against
+  // playerName, year, and brand — any field can match.
+  const [searchTerm,    setSearchTerm]    = useState("");
   const [certInput,     setCertInput]     = useState("");
   const [lookupLoading, setLookupLoading] = useState(false);
   const [lookupError,   setLookupError]   = useState(null);
@@ -66,11 +70,51 @@ export default function TradeTab({ cards, onTradeComplete }) {
   // /trades/confirm-cost lands.
   const [showConfirmModal, setShowConfirmModal] = useState(false);
 
+  // AI trade analysis state. Three flags coordinate the loading→result
+  // handoff:
+  //   - analyzing: loading modal is shown
+  //   - analysisResult: response from the Lambda (null while in flight)
+  //   - showResult: result modal is shown (set by loading-modal's
+  //     onComplete after it animates to 100% and the celebratory pause)
+  // analysisError surfaces directly without opening either modal.
+  const [analyzing,      setAnalyzing]      = useState(false);
+  const [analysisResult, setAnalysisResult] = useState(null);
+  const [showResult,     setShowResult]     = useState(false);
+  const [analysisError,  setAnalysisError]  = useState(null);
+
+  // Past Trades data is owned by TradeDeskPage and passed through as a prop
+  // tab unmount/remount — visiting the tab no longer re-fires
+  // listTrades() each time.
+
   const tradableCards = useMemo(() => cards.filter(isTradableCard), [cards]);
   const givenCards    = useMemo(
     () => tradableCards.filter((c) => selectedIds.has(c.id)),
     [tradableCards, selectedIds]
   );
+  // Cached analysis is invalidated when the trade composition changes —
+  // adding or removing cards on either side means the previous verdict
+  // no longer reflects what's being traded. Cash amounts and search-bar
+  // changes do NOT invalidate (the cached result is still meaningful at
+  // a glance, and a re-analysis is one click away). After invalidation
+  // the action button reverts to "Analyze Trade" so the user knows a
+  // fresh run is needed.
+  useEffect(() => {
+    setAnalysisResult(null);
+  }, [selectedIds, receivedCards]);
+
+  // Filtered view of tradable cards driven by the search input. Empty
+  // term passes everything through. Selected cards are kept visible
+  // even if they don't match the term so the user can always deselect
+  // them without clearing the filter first.
+  const filteredTradableCards = useMemo(() => {
+    const term = searchTerm.trim().toLowerCase();
+    if (!term) return tradableCards;
+    return tradableCards.filter((c) => {
+      if (selectedIds.has(c.id)) return true;
+      const hay = `${c.playerName ?? ""} ${c.year ?? ""} ${c.brand ?? ""}`.toLowerCase();
+      return hay.includes(term);
+    });
+  }, [tradableCards, searchTerm, selectedIds]);
 
   function toggleSelect(cardId) {
     setSelectedIds((prev) => {
@@ -139,11 +183,7 @@ export default function TradeTab({ cards, onTradeComplete }) {
 
   const cashGivenNum    = parseFloat(cashGiven)    || 0;
   const cashReceivedNum = parseFloat(cashReceived) || 0;
-  const givenCostSum    = givenCards.reduce(
-    (sum, c) => sum + (c.myCost != null ? parseFloat(c.myCost) : 0),
-    0
-  );
-  const totalCostBasis  = Math.max(0, givenCostSum - cashReceivedNum + cashGivenNum);
+  const totalCostBasis  = computeTradeCostBasis(givenCards, cashGivenNum, cashReceivedNum);
 
   // Side totals for the summary bar. Given side uses each card's
   // estimatedValue (already on the Card payload). Received side uses
@@ -171,27 +211,89 @@ export default function TradeTab({ cards, onTradeComplete }) {
     givenCards.length + receivedCards.length > 0 &&
     givenCards.length > 0 && receivedCards.length > 0; // spec: at least one on each side
 
+  // Analyze is permissive — even a one-sided trade (e.g. "what would I
+  // get if I tried to receive these"?) can yield useful analysis. Just
+  // requires at least one card on either side.
+  const canAnalyze    = !analyzing && (givenCards.length > 0 || receivedCards.length > 0);
+  const hasCachedAnalysis = !!analysisResult && !analyzing;
+
+  async function handleAnalyze() {
+    setAnalysisError(null);
+    setAnalysisResult(null);
+    setShowResult(false);
+    setAnalyzing(true);
+    try {
+      const res = await analyzeTrade({
+        cardsGiven:    givenCards.map((c) => c.id),
+        cardsReceived: receivedCards.map((r) => {
+          const p = pricingByCert[r.certNumber];
+          const estimatedValue =
+            p?.status === "loaded" && Number.isFinite(p.avgSalePrice) ? p.avgSalePrice : null;
+          return {
+            certNumber:          r.certNumber,
+            playerName:          r.playerName,
+            year:                r.year,
+            brand:               r.brand,
+            sport:               r.sport,
+            cardNumber:          r.cardNumber,
+            grade:               r.grade,
+            gradeDescription:    r.gradeDescription,
+            psaPopulation:       r.psaPopulation,
+            psaPopulationHigher: r.psaPopulationHigher,
+            estimatedValue,
+          };
+        }),
+        cashGiven:    cashGivenNum,
+        cashReceived: cashReceivedNum,
+      });
+      // Don't flip analyzing off here — the loading modal owns the
+      // 100% transition + celebratory hold and will call onComplete
+      // when it's ready to hand off to the result modal.
+      setAnalysisResult(res);
+    } catch (err) {
+      setAnalysisError(err?.message ?? "Analysis failed");
+      setAnalyzing(false);
+    }
+  }
+
+  function handleAnalysisLoadingComplete() {
+    setAnalyzing(false);
+    setShowResult(true);
+  }
+
   async function handleExecute() {
     setExecuteError(null);
     setExecuting(true);
     try {
       const res = await executeTrade({
         cardsGiven:    givenCards.map((c) => c.id),
-        cardsReceived: receivedCards.map((r) => ({
-          certNumber:          r.certNumber,
-          playerName:          r.playerName,
-          year:                r.year,
-          brand:               r.brand,
-          grade:               r.grade,
-          sport:               r.sport,
-          cardNumber:          r.cardNumber,
-          gradeDescription:    r.gradeDescription,
-          frontImageUrl:       r.frontImageUrl,
-          backImageUrl:        r.backImageUrl,
-          psaPopulation:       r.psaPopulation,
-          psaPopulationHigher: r.psaPopulationHigher,
-          psaData:             r.psaData,
-        })),
+        cardsReceived: receivedCards.map((r) => {
+          // Snapshot the trade-time value from the previewPricing result
+          // we already showed the user. Falls back to null when pricing
+          // is still loading or unavailable — server stores NULL in that
+          // case and Past Trades shows "—".
+          const p = pricingByCert[r.certNumber];
+          const estimatedValue =
+            p?.status === "loaded" && Number.isFinite(p.avgSalePrice)
+              ? p.avgSalePrice
+              : null;
+          return {
+            certNumber:          r.certNumber,
+            playerName:          r.playerName,
+            year:                r.year,
+            brand:               r.brand,
+            grade:               r.grade,
+            sport:               r.sport,
+            cardNumber:          r.cardNumber,
+            gradeDescription:    r.gradeDescription,
+            frontImageUrl:       r.frontImageUrl,
+            backImageUrl:        r.backImageUrl,
+            psaPopulation:       r.psaPopulation,
+            psaPopulationHigher: r.psaPopulationHigher,
+            psaData:             r.psaData,
+            estimatedValue,
+          };
+        }),
         cashGiven:    cashGivenNum,
         cashReceived: cashReceivedNum,
       });
@@ -455,56 +557,44 @@ export default function TradeTab({ cards, onTradeComplete }) {
             <span style={st.columnCount}>{givenCards.length}</span>
           </div>
 
-          {/* Empty spacer that mirrors the right column's lookup row so
-              the first row of tiles in each grid lines up at the same
-              vertical position. aria-hidden because it carries no info. */}
-          <div style={st.lookupSpacer} aria-hidden="true" />
+          {/* Search row — same 40px height as the right column's lookup
+              row so the first card in each column lines up vertically.
+              The icon sits inside the input via absolute positioning;
+              padding-left makes room for it. */}
+          <div style={st.searchRow}>
+            <span style={st.searchIcon} aria-hidden="true">⌕</span>
+            <input
+              type="text"
+              placeholder="Search by player, year, or brand"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              style={st.searchInput}
+              aria-label="Search your tradable cards"
+            />
+            {searchTerm && (
+              <button
+                type="button"
+                onClick={() => setSearchTerm("")}
+                style={st.searchClear}
+                aria-label="Clear search"
+              >×</button>
+            )}
+          </div>
 
           {tradableCards.length === 0 ? (
             <div style={st.columnEmpty}>
               No cards available to trade. Add cards to your portfolio first.
             </div>
-          ) : (
-            <div style={st.givenGrid}>
-              {tradableCards.map((c) => {
-                const selected = selectedIds.has(c.id);
-                const myCost   = c.myCost         != null ? parseFloat(c.myCost)         : null;
-                const estValue = c.estimatedValue != null ? parseFloat(c.estimatedValue) : null;
-                const pnl      = (myCost != null && estValue != null) ? estValue - myCost : null;
-                const pnlColor = pnl == null ? "#94a3b8" : (pnl >= 0 ? "#10b981" : "#f87171");
-                return (
-                  <button
-                    key={c.id}
-                    type="button"
-                    onClick={() => toggleSelect(c.id)}
-                    style={{ ...st.cardTile, ...(selected ? st.cardTileSelected : {}) }}
-                  >
-                    {c.imageUrl ? (
-                      <img src={c.imageUrl} alt="" style={st.cardImg} loading="lazy" />
-                    ) : <div style={st.cardImgEmpty}>🃏</div>}
-                    {selected && <div style={st.checkOverlay}>✓</div>}
-                    <div style={st.cardLabel}>
-                      <div style={st.cardPlayer}>{c.playerName ?? "Unknown"}</div>
-                      <div style={st.cardMeta}>PSA {c.grade}</div>
-                      <div style={st.financeRow}>
-                        <span style={st.financeLabel}>Cost</span>
-                        <span style={st.financeCost}>{fmtUsd(myCost)}</span>
-                      </div>
-                      <div style={st.financeRow}>
-                        <span style={st.financeLabel}>Value</span>
-                        <span style={st.financeValue}>{fmtUsd(estValue)}</span>
-                      </div>
-                      <div style={st.financeRow}>
-                        <span style={st.financeLabel}>P&amp;L</span>
-                        <span style={{ ...st.financePnl, color: pnlColor }}>
-                          {pnl == null ? "—" : `${pnl >= 0 ? "+" : "−"}${fmtUsd(Math.abs(pnl))}`}
-                        </span>
-                      </div>
-                    </div>
-                  </button>
-                );
-              })}
+          ) : filteredTradableCards.length === 0 ? (
+            <div style={st.columnEmpty}>
+              No cards match "{searchTerm}".
             </div>
+          ) : (
+            <TradeGivenScroller
+              cards={filteredTradableCards}
+              selectedIds={selectedIds}
+              onToggle={toggleSelect}
+            />
           )}
 
           <div style={st.cashRow}>
@@ -636,7 +726,26 @@ export default function TradeTab({ cards, onTradeComplete }) {
 
       {executeError && <div style={st.errorMsg}>{executeError}</div>}
 
+      {analysisError && <div style={st.errorMsg}>{analysisError}</div>}
+
       <div style={st.executeWrap}>
+        <button
+          type="button"
+          disabled={!hasCachedAnalysis && !canAnalyze}
+          onClick={hasCachedAnalysis ? () => setShowResult(true) : handleAnalyze}
+          style={{
+            ...st.analyzeBtn,
+            ...((!hasCachedAnalysis && !canAnalyze) ? st.analyzeBtnDisabled : {}),
+          }}
+        >
+          {analyzing ? (
+            <><span style={st.executeSpinner} aria-hidden="true" /> Analyzing…</>
+          ) : hasCachedAnalysis ? (
+            <><span style={st.analyzeMark}>✦</span> View Analysis</>
+          ) : (
+            <><span style={st.analyzeMark}>✦</span> Analyze Trade</>
+          )}
+        </button>
         <button
           type="button"
           disabled={!canExecute}
@@ -650,6 +759,22 @@ export default function TradeTab({ cards, onTradeComplete }) {
           )}
         </button>
       </div>
+
+      {analyzing && (
+        <AnalysisLoadingModal
+          result={analysisResult}
+          onComplete={handleAnalysisLoadingComplete}
+        />
+      )}
+
+      {showResult && analysisResult && (
+        <AnalysisModal
+          result={analysisResult}
+          onClose={() => setShowResult(false)}
+        />
+      )}
+
+      <TradeHistory trades={pastTrades} loading={historyLoading} error={historyError} />
     </section>
   );
 }
@@ -897,6 +1022,510 @@ function ConfirmModal({ givenCards, receivedCards, netCashFlow, onCancel, onConf
   );
 }
 
+// ── AI Analysis loading modal ──────────────────────────────────────────
+// Shown while the analyze-trade request is in flight. The progress bar
+// auto-advances 0→95% over ~12 seconds — never reaching 100% on its own.
+// When the parent passes the result down (`result` flips from null to
+// the analysis object), the bar jumps to 100%, the success message
+// shows for ~700ms (let the user see the celebratory finish), then
+// onComplete fires so the parent can swap to the result modal.
+//
+// Messages are mapped to the current progress %; the spec ties story
+// beats to specific brackets. Each message change triggers the
+// scp-msg-fade-in keyframe via React's key prop — when the key (the
+// message text itself) changes the element re-mounts and the animation
+// replays.
+const LOADING_MESSAGES = [
+  { upTo:  10, text: "Waking up the AI analyst…" },
+  { upTo:  20, text: "Reviewing your card portfolio… nice pulls 👀" },
+  { upTo:  30, text: "Checking recent sales data…" },
+  { upTo:  40, text: "Consulting the ghost of card shows past…" },
+  { upTo:  50, text: "Running predictive models… beep boop 🤖" },
+  { upTo:  60, text: "Analyzing population reports…" },
+  { upTo:  70, text: "Arguing with myself about short vs long term value…" },
+  { upTo:  80, text: "Cross-referencing with 847 data points…" },
+  { upTo:  90, text: "Drafting strongly worded opinions…" },
+  { upTo:  95, text: "Almost there… putting on finishing touches ✨" },
+];
+const LOADING_DONE_MSG = "Analysis complete! Here's what I found 🎯";
+
+function messageForProgress(p) {
+  if (p >= 100) return LOADING_DONE_MSG;
+  for (const m of LOADING_MESSAGES) {
+    if (p < m.upTo) return m.text;
+  }
+  return LOADING_MESSAGES[LOADING_MESSAGES.length - 1].text;
+}
+
+function AnalysisLoadingModal({ result, onComplete }) {
+  const [progress, setProgress] = useState(0);
+  const done = !!result;
+
+  // Auto-progress from 0 to 95 over ~12 seconds while the request is
+  // in flight. Tick every 100ms; capped at 95 so the bar never claims
+  // to be finished until the response actually lands.
+  useEffect(() => {
+    if (done) return;
+    const id = setInterval(() => {
+      setProgress((p) => Math.min(95, p + (95 / (12 * 10)))); // 95 over 12s @ 10Hz
+    }, 100);
+    return () => clearInterval(id);
+  }, [done]);
+
+  // When the response arrives: jump to 100%, hold briefly so the user
+  // sees the celebratory finish + completion message, then hand off to
+  // the result modal via onComplete.
+  useEffect(() => {
+    if (!done) return;
+    setProgress(100);
+    const t = setTimeout(() => onComplete?.(), 700);
+    return () => clearTimeout(t);
+  }, [done, onComplete]);
+
+  const message = messageForProgress(progress);
+  const pctLabel = Math.floor(progress);
+
+  return (
+    <div style={st.loadingBackdrop} role="dialog" aria-label="Analyzing trade" aria-live="polite">
+      <div style={st.loadingPanel}>
+        <div style={st.loadingSparkleWrap}>
+          <span style={st.loadingSparkle} aria-hidden="true">✦</span>
+        </div>
+
+        <div style={st.loadingTitle}>TradeDesk</div>
+        <div style={st.loadingSubtitle}>
+          <span>Powered by</span>
+          <img
+            src="/claude-logo.svg"
+            alt="Claude"
+            style={st.loadingSubtitleLogo}
+          />
+        </div>
+
+        <div style={st.loadingProgressTrack}>
+          <div style={{ ...st.loadingProgressFill, width: `${progress}%` }} />
+        </div>
+        <div style={st.loadingProgressPct}>{pctLabel}%</div>
+
+        <div
+          key={message}
+          style={st.loadingMessage}
+        >
+          {message}
+        </div>
+
+      </div>
+    </div>
+  );
+}
+
+// ── AI Trade Analysis modal ────────────────────────────────────────────
+// Renders the structured response from POST /trades/analyze. Sections
+// flow vertically; the verdict + confidence pill anchors the top so
+// the user can scan the headline result before reading the supporting
+// analysis. Esc / X / backdrop click all close.
+function AnalysisModal({ result, onClose }) {
+  useEffect(() => {
+    function onKey(e) { if (e.key === "Escape") onClose(); }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  const verdictStyle =
+    result.verdict === "FAVORABLE"   ? st.verdictFavorable :
+    result.verdict === "UNFAVORABLE" ? st.verdictUnfavorable :
+                                       st.verdictNeutral;
+
+  const confidence = Math.max(0, Math.min(100, Math.round(result.confidence ?? 0)));
+
+  return (
+    <div
+      style={st.analysisBackdrop}
+      onClick={onClose}
+      role="dialog"
+      aria-label="Trade analysis"
+    >
+      <div style={st.analysisPanel} onClick={(e) => e.stopPropagation()}>
+        <button
+          type="button"
+          style={st.analysisClose}
+          onClick={onClose}
+          aria-label="Close analysis"
+        >×</button>
+
+        <div style={st.analysisHeader}>
+          <div style={st.analysisTopRow}>
+            <p style={st.eyebrow}>
+              <span style={st.dot} /> AI Trade Analysis
+            </p>
+            <div style={st.analysisPoweredBy}>
+              <span>Powered by</span>
+              <img
+                src="/claude-logo.svg"
+                alt="Claude"
+                style={st.analysisPoweredByLogo}
+              />
+            </div>
+          </div>
+          <div style={st.analysisVerdictRow}>
+            <span style={{ ...st.verdictPill, ...verdictStyle }}>
+              {result.verdict ?? "—"}
+            </span>
+            <div style={st.confidenceWrap}>
+              <div style={st.confidenceLabel}>
+                Confidence <span style={st.confidenceValue}>{confidence}%</span>
+              </div>
+              <div style={st.confidenceTrack}>
+                <div style={{ ...st.confidenceFill, width: `${confidence}%` }} />
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {result.summary && (
+          <p style={st.analysisSummary}>{result.summary}</p>
+        )}
+
+        <AnalysisSection title="Value Analysis"        body={result.valueAnalysis} />
+        <AnalysisSection title="Short-Term Outlook (0–6 mo)"  body={result.shortTermOutlook} />
+        <AnalysisSection title="Long-Term Outlook (1–3 yr)"   body={result.longTermOutlook} />
+        <AnalysisSection title="Population Analysis"   body={result.populationAnalysis} />
+        <AnalysisSection title="Sales Velocity"        body={result.salesVelocity} />
+        <AnalysisSection title="Risk Assessment"       body={result.riskAssessment} />
+
+        {Array.isArray(result.keyReasons) && result.keyReasons.length > 0 && (
+          <>
+            <div style={st.analysisSectionHead}>Key Reasons</div>
+            <ul style={st.analysisReasons}>
+              {result.keyReasons.map((r, i) => (
+                <li key={i} style={st.analysisReasonItem}>{r}</li>
+              ))}
+            </ul>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function AnalysisSection({ title, body }) {
+  if (!body) return null;
+  return (
+    <div style={st.analysisSection}>
+      <div style={st.analysisSectionHead}>{title}</div>
+      <p style={st.analysisSectionBody}>{body}</p>
+    </div>
+  );
+}
+
+// ── Horizontal scroller for "You're Trading" tiles ────────────────────
+// Lifted into its own component so scroll-tracking state doesn't
+// re-render the whole TradeTab on every scroll tick. The progress bar
+// is updated via a ref directly (DOM mutation, no React re-render);
+// only the arrow-visibility booleans flow through React state, and
+// they're set with a referential-equality guard so identical-boundary
+// scrolls don't trigger renders.
+function TradeGivenScroller({ cards, selectedIds, onToggle }) {
+  const scrollerRef = useRef(null);
+  const progressRef = useRef(null);
+  const [bounds, setBounds] = useState({ atStart: true, atEnd: false });
+
+  const update = useCallback(() => {
+    const el = scrollerRef.current;
+    if (!el) return;
+    const max = el.scrollWidth - el.clientWidth;
+    const pct = max > 0 ? (el.scrollLeft / max) * 100 : 0;
+    if (progressRef.current) progressRef.current.style.width = `${pct}%`;
+    const next = {
+      atStart: el.scrollLeft <= 1,
+      atEnd:   max <= 1 || el.scrollLeft >= max - 1,
+    };
+    setBounds((prev) =>
+      prev.atStart === next.atStart && prev.atEnd === next.atEnd ? prev : next
+    );
+  }, []);
+
+  // Re-evaluate boundaries whenever the card list changes (filter typed,
+  // selection toggled). A ResizeObserver also kicks in if the container
+  // resizes (e.g. window resize on desktop).
+  useEffect(() => {
+    update();
+    const el = scrollerRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [cards.length, update]);
+
+  function nudge(dir) {
+    const el = scrollerRef.current;
+    if (!el) return;
+    // Scroll roughly one tile-and-a-half so the next/previous tile
+    // lands fully into view rather than half-revealed.
+    el.scrollBy({ left: dir * Math.round(el.clientWidth * 0.7), behavior: "smooth" });
+  }
+
+  return (
+    <div className="scp-trade-scroller-wrap" style={st.scrollerWrap}>
+      <div
+        ref={scrollerRef}
+        className="scp-trade-scroller"
+        style={st.scroller}
+        onScroll={update}
+      >
+        {cards.map((c) => {
+          const selected = selectedIds.has(c.id);
+          const myCost   = c.myCost         != null ? parseFloat(c.myCost)         : null;
+          const estValue = c.estimatedValue != null ? parseFloat(c.estimatedValue) : null;
+          const pnl      = (myCost != null && estValue != null) ? estValue - myCost : null;
+          const pnlColor = pnl == null ? "#94a3b8" : (pnl >= 0 ? "#10b981" : "#f87171");
+          return (
+            <button
+              key={c.id}
+              type="button"
+              onClick={() => onToggle(c.id)}
+              style={{ ...st.cardTile, ...st.scrollerTile, ...(selected ? st.cardTileSelected : {}) }}
+            >
+              {c.imageUrl ? (
+                <img src={c.imageUrl} alt="" style={st.cardImg} loading="lazy" />
+              ) : <div style={st.cardImgEmpty}>🃏</div>}
+              {selected && <div style={st.checkOverlay}>✓</div>}
+              <div style={st.cardLabel}>
+                <div style={st.cardPlayer}>{c.playerName ?? "Unknown"}</div>
+                <div style={st.cardMeta}>PSA {c.grade}</div>
+                <div style={st.financeRow}>
+                  <span style={st.financeLabel}>Cost</span>
+                  <span style={st.financeCost}>{fmtUsd(myCost)}</span>
+                </div>
+                <div style={st.financeRow}>
+                  <span style={st.financeLabel}>Value</span>
+                  <span style={st.financeValue}>{fmtUsd(estValue)}</span>
+                </div>
+                <div style={st.financeRow}>
+                  <span style={st.financeLabel}>P&amp;L</span>
+                  <span style={{ ...st.financePnl, color: pnlColor }}>
+                    {pnl == null ? "—" : `${pnl >= 0 ? "+" : "−"}${fmtUsd(Math.abs(pnl))}`}
+                  </span>
+                </div>
+              </div>
+            </button>
+          );
+        })}
+      </div>
+
+      {!bounds.atStart && (
+        <button
+          type="button"
+          onClick={() => nudge(-1)}
+          className="scp-trade-scroller-arrow"
+          style={{ ...st.scrollerArrow, ...st.scrollerArrowLeft }}
+          aria-label="Scroll left"
+        >‹</button>
+      )}
+      {!bounds.atEnd && (
+        <button
+          type="button"
+          onClick={() => nudge(1)}
+          className="scp-trade-scroller-arrow"
+          style={{ ...st.scrollerArrow, ...st.scrollerArrowRight }}
+          aria-label="Scroll right"
+        >›</button>
+      )}
+
+      <div style={st.scrollerProgressTrack} aria-hidden="true">
+        <div ref={progressRef} style={st.scrollerProgressFill} />
+      </div>
+    </div>
+  );
+}
+
+// ── Past Trades section ────────────────────────────────────────────────
+// Reverse-chronological list of executed trades. Each row collapses to a
+// summary (date · given chips · received chips · net P&L) and expands on
+// click into the full per-card detail. Trade-time snapshots are read from
+// trade_cards so the history stays accurate even if the live cards table
+// changes later.
+function TradeHistory({ trades, loading, error }) {
+  return (
+    <section style={st.historySection}>
+      <div style={st.historyHeader}>
+        <p style={st.eyebrow}><span style={st.dot} /> Past Trades</p>
+        <span style={st.historyCount}>
+          {loading ? "…" : trades.length}
+        </span>
+      </div>
+
+      {loading ? (
+        <div style={st.historyEmpty}>Loading trade history…</div>
+      ) : error ? (
+        <div style={{ ...st.historyEmpty, color: "#f87171" }}>Error: {error}</div>
+      ) : trades.length === 0 ? (
+        <div style={st.historyEmpty}>
+          You haven't executed any trades yet. Past trades will appear here.
+        </div>
+      ) : (
+        <div style={st.historyList}>
+          {trades.map((t) => (
+            <TradeHistoryRow key={t.id} trade={t} />
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+const dateFmt = new Intl.DateTimeFormat("en-US", {
+  month: "short", day: "numeric", year: "numeric",
+});
+
+function TradeHistoryRow({ trade }) {
+  const [expanded, setExpanded] = useState(false);
+  const date = trade.tradedAt ? dateFmt.format(new Date(trade.tradedAt)) : "—";
+  const pnlPositive = trade.netPnl >= 0;
+  const pnlColor    = Math.abs(trade.netPnl) < 0.01 ? "#94a3b8" : (pnlPositive ? "#10b981" : "#f87171");
+
+  return (
+    <div style={st.historyRow}>
+      <button
+        type="button"
+        onClick={() => setExpanded((v) => !v)}
+        style={st.historyRowSummary}
+        aria-expanded={expanded}
+      >
+        <div style={st.historyDate}>{date}</div>
+
+        <div style={st.historyMain}>
+          <div style={st.historySide}>
+            <span style={st.tradedBadge}>TRADED</span>
+            {trade.given.length === 0 ? (
+              <span style={st.historyChipsEmpty}>—</span>
+            ) : (
+              <div style={st.historyChips}>
+                {trade.given.map((c, i) => (
+                  <span key={`g${i}`} style={st.historyChip}>
+                    {c.playerName ?? "Unknown"}
+                    {c.grade && <span style={st.historyChipGrade}> · {c.grade}</span>}
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <span style={st.historyArrow}>⇄</span>
+
+          <div style={st.historySide}>
+            <span style={st.receivedBadge}>RECEIVED</span>
+            {trade.received.length === 0 ? (
+              <span style={st.historyChipsEmpty}>—</span>
+            ) : (
+              <div style={st.historyChips}>
+                {trade.received.map((c, i) => (
+                  <span key={`r${i}`} style={st.historyChip}>
+                    {c.playerName ?? "Unknown"}
+                    {c.grade && <span style={st.historyChipGrade}> · {c.grade}</span>}
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div style={st.historyRight}>
+          {(trade.cashGiven > 0 || trade.cashReceived > 0) && (
+            <div style={st.historyCashSummary}>
+              {trade.cashReceived > 0 && (
+                <span style={st.historyCashIn}>+{fmtUsd(trade.cashReceived)}</span>
+              )}
+              {trade.cashGiven > 0 && (
+                <span style={st.historyCashOut}>−{fmtUsd(trade.cashGiven)}</span>
+              )}
+            </div>
+          )}
+          <div style={{ ...st.historyPnl, color: pnlColor }}>
+            {Math.abs(trade.netPnl) < 0.01
+              ? "Even"
+              : `${pnlPositive ? "+" : "−"}${fmtUsd(Math.abs(trade.netPnl))}`}
+          </div>
+          <span style={{ ...st.historyChevron, transform: expanded ? "rotate(180deg)" : "rotate(0deg)" }}>
+            ▾
+          </span>
+        </div>
+      </button>
+
+      {expanded && (
+        <div style={st.historyDetail}>
+          <TradeDetailColumn label="Cards Traded Away" cards={trade.given} side="given" />
+          <TradeDetailColumn label="Cards Received"    cards={trade.received} side="received" />
+          {(trade.cashGiven > 0 || trade.cashReceived > 0 || trade.notes) && (
+            <div style={st.historyDetailFooter}>
+              {trade.cashGiven > 0 && (
+                <div style={st.historyDetailRow}>
+                  <span style={st.historyDetailLabel}>Cash Given</span>
+                  <span style={st.historyDetailValue}>−{fmtUsd(trade.cashGiven)}</span>
+                </div>
+              )}
+              {trade.cashReceived > 0 && (
+                <div style={st.historyDetailRow}>
+                  <span style={st.historyDetailLabel}>Cash Received</span>
+                  <span style={st.historyDetailValue}>+{fmtUsd(trade.cashReceived)}</span>
+                </div>
+              )}
+              {trade.notes && (
+                <div style={st.historyDetailRow}>
+                  <span style={st.historyDetailLabel}>Notes</span>
+                  <span style={st.historyDetailNotes}>{trade.notes}</span>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function TradeDetailColumn({ label, cards, side }) {
+  if (cards.length === 0) {
+    return (
+      <div style={st.historyDetailCol}>
+        <div style={st.historyDetailColLabel}>{label}</div>
+        <div style={st.historyDetailColEmpty}>No cards on this side.</div>
+      </div>
+    );
+  }
+  return (
+    <div style={st.historyDetailCol}>
+      <div style={st.historyDetailColLabel}>{label}</div>
+      <div style={st.historyDetailCardList}>
+        {cards.map((c, i) => (
+          <div key={i} style={st.historyDetailCard}>
+            <div style={st.historyDetailCardMain}>
+              <div style={st.historyDetailCardPlayer}>{c.playerName ?? "Unknown"}</div>
+              <div style={st.historyDetailCardMeta}>
+                {[c.year, c.brand, c.grade ? `PSA ${c.grade}` : null].filter(Boolean).join(" · ")}
+              </div>
+              {c.certNumber && <div style={st.historyDetailCardCert}>Cert {c.certNumber}</div>}
+            </div>
+            <div style={st.historyDetailCardFinance}>
+              {side === "given" ? (
+                <>
+                  <span style={st.historyDetailFinLabel}>Cost basis</span>
+                  <span style={st.historyDetailFinValue}>{fmtUsd(c.allocatedCost)}</span>
+                </>
+              ) : (
+                <>
+                  <span style={st.historyDetailFinLabel}>Trade-time value</span>
+                  <span style={st.historyDetailFinValue}>{fmtUsd(c.estimatedValue)}</span>
+                </>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ── Styles ─────────────────────────────────────────────────────────────
 const st = {
   page: { display: "flex", flexDirection: "column", gap: "1.5rem" },
@@ -918,6 +1547,11 @@ const st = {
   },
 
   // ── Two-column layout ──
+  // Equal-width columns. minWidth: 0 on the column itself is the
+  // critical bit — grid items default to min-width: auto (= min-content),
+  // which causes a column with wide flex content (the horizontal
+  // scroller's many tiles) to refuse to shrink and push the right
+  // column off-screen. Locking it to 0 makes 1fr 1fr actually behave.
   columns: {
     display: "grid",
     gridTemplateColumns: "1fr 1fr",
@@ -931,6 +1565,7 @@ const st = {
     display: "flex", flexDirection: "column",
     gap: "1.25rem",
     minHeight: 420,
+    minWidth: 0,
   },
   columnHeader: {
     display: "flex", alignItems: "center",
@@ -960,30 +1595,126 @@ const st = {
   },
 
   // ── Card tiles ──
-  // Both grids share the same template + gap so tile widths and
-  // horizontal positions match across columns. gridAutoRows: 1fr
-  // makes tiles in each grid stretch to the tallest in that row, so
-  // sibling tiles within a grid line up; combined with the
-  // lookupSpacer below, rows on the left visually align with rows on
-  // the right.
-  givenGrid: {
-    display: "grid",
-    gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))",
-    gridAutoRows: "1fr",
-    gap: "0.85rem",
-    maxHeight: 520, overflowY: "auto",
-  },
+  // Right column is still a grid (lookup → fixed list of received cards).
+  // Left column is now a single horizontal scroller — see scrollerWrap
+  // / scroller below. minmax(220px, 1fr) keeps received-card widths
+  // visually consistent with the scroller's fixed-220px tiles.
   receivedGrid: {
     display: "grid",
     gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))",
     gridAutoRows: "1fr",
     gap: "0.85rem",
   },
-  // Transparent height-matched stand-in for the right column's cert
-  // lookup row. Without it, the right grid starts ~40px lower than
-  // the left grid because the lookup row pushes content down.
-  lookupSpacer: {
+
+  // ── Left column search row ──
+  // Same 40px height as the right column's lookup row so both columns'
+  // first tile starts at the same vertical position.
+  searchRow: {
+    position: "relative",
+    display: "flex",
+    alignItems: "center",
+  },
+  searchIcon: {
+    position: "absolute",
+    left: "0.75rem",
+    color: "rgba(245,158,11,0.7)",
+    fontSize: "1rem",
+    pointerEvents: "none",
+  },
+  searchInput: {
+    flex: 1,
     height: 40,
+    padding: "0 2.25rem 0 2.1rem",
+    borderRadius: 8,
+    background: "rgba(15,23,42,0.85)",
+    border: "1px solid rgba(255,255,255,0.12)",
+    color: "#f1f5f9",
+    fontSize: "0.92rem", fontFamily: "inherit",
+    outline: "none",
+    transition: "border-color 0.15s ease, box-shadow 0.15s ease",
+  },
+  searchClear: {
+    position: "absolute",
+    right: "0.55rem",
+    width: 22, height: 22,
+    border: "none",
+    borderRadius: "50%",
+    background: "rgba(255,255,255,0.08)",
+    color: "#cbd5e1",
+    cursor: "pointer",
+    fontSize: "0.95rem",
+    lineHeight: "22px",
+    padding: 0,
+    fontFamily: "inherit",
+  },
+
+  // ── Horizontal scroller ──
+  // maxWidth caps the visible window at ~2 tiles (220px × 2 + 0.85rem
+  // gap ≈ 454px → rounded to 460). width: 100% lets it shrink on
+  // narrow viewports so it never overflows the column.
+  scrollerWrap: {
+    position: "relative",
+    width: "100%",
+    maxWidth: 460,
+    margin: "0 -0.25rem",   // bleed slightly past the column padding so
+                            // arrow circles don't crowd the first/last tile
+    padding: "0.25rem 0.25rem 0",
+  },
+  scroller: {
+    display: "flex",
+    flexDirection: "row",
+    gap: "0.85rem",
+    overflowX: "auto",
+    overflowY: "hidden",
+    scrollSnapType: "x mandatory",
+    scrollPadding: "0 0.25rem",
+    paddingBottom: "0.35rem",
+    WebkitOverflowScrolling: "touch",
+  },
+  // Override the grid-only scrollerTile sizing — fixed 220px per spec
+  // ("don't shrink to fit more in view"). flex: 0 0 means the tile
+  // never grows or shrinks, just sits at its declared basis.
+  scrollerTile: {
+    flex: "0 0 220px",
+    scrollSnapAlign: "start",
+  },
+
+  // ── Arrow buttons ──
+  scrollerArrow: {
+    position: "absolute",
+    top: "calc(50% - 0.6rem)",  // visually centred against the tile body,
+                                 // not the progress bar at the bottom
+    transform: "translateY(-50%)",
+    width: 36, height: 36,
+    borderRadius: "50%",
+    background: "rgba(245,158,11,0.85)",
+    color: "#0f172a",
+    border: "1px solid rgba(245,158,11,0.95)",
+    boxShadow: "0 6px 20px rgba(0,0,0,0.5), 0 0 0 4px rgba(15,23,42,0.6)",
+    fontSize: "1.2rem", fontWeight: 800, lineHeight: 1,
+    cursor: "pointer",
+    fontFamily: "inherit",
+    display: "flex", alignItems: "center", justifyContent: "center",
+    padding: 0,
+    zIndex: 2,
+  },
+  scrollerArrowLeft:  { left:  "-0.5rem" },
+  scrollerArrowRight: { right: "-0.5rem" },
+
+  // ── Progress indicator ──
+  scrollerProgressTrack: {
+    height: 2,
+    marginTop: "0.65rem",
+    background: "rgba(245,158,11,0.12)",
+    borderRadius: 999,
+    overflow: "hidden",
+  },
+  scrollerProgressFill: {
+    height: "100%",
+    width: "0%",
+    background: "linear-gradient(90deg, rgba(245,158,11,0.7), rgba(251,191,36,1))",
+    borderRadius: 999,
+    transition: "width 0.12s ease",
   },
   cardTile: {
     position: "relative",
@@ -1257,7 +1988,35 @@ const st = {
     fontVariantNumeric: "tabular-nums",
     letterSpacing: "-0.01em",
   },
-  executeWrap: { display: "flex", justifyContent: "center", marginTop: "0.5rem" },
+  executeWrap: {
+    display: "flex", justifyContent: "center",
+    gap: "0.85rem",
+    marginTop: "0.5rem",
+    flexWrap: "wrap",
+  },
+  // Gold-outlined secondary action — visually subordinate to the
+  // primary Execute button but still gold so it reads as an
+  // intelligence/action affordance.
+  analyzeBtn: {
+    display: "inline-flex", alignItems: "center", gap: "0.55rem",
+    padding: "1rem 1.6rem",
+    borderRadius: 10,
+    background: "transparent",
+    color: "#fbbf24",
+    border: "1.5px solid rgba(245,158,11,0.65)",
+    fontSize: "0.95rem", fontWeight: 800,
+    letterSpacing: "0.04em",
+    cursor: "pointer",
+    fontFamily: "inherit",
+    transition: "background 0.15s, color 0.15s, border-color 0.15s, transform 0.1s",
+  },
+  analyzeBtnDisabled: {
+    color: "rgba(245,158,11,0.4)",
+    borderColor: "rgba(245,158,11,0.25)",
+    cursor: "not-allowed",
+  },
+  analyzeMark: { fontSize: "1rem", lineHeight: 1 },
+
   executeBtn: {
     display: "inline-flex", alignItems: "center", gap: "0.6rem",
     padding: "1rem 2.4rem",
@@ -1691,5 +2450,459 @@ const st = {
     fontSize: "1.65rem", fontWeight: 800,
     color: "#f1f5f9",
     letterSpacing: "-0.02em",
+  },
+
+  // ── Past Trades section ──
+  historySection: {
+    marginTop: "1rem",
+    paddingTop: "1.5rem",
+    borderTop: "1px solid rgba(255,255,255,0.06)",
+    display: "flex", flexDirection: "column", gap: "1rem",
+  },
+  historyHeader: {
+    display: "flex", alignItems: "center", gap: "0.75rem",
+  },
+  historyCount: {
+    background: "rgba(245,158,11,0.15)",
+    border: "1px solid rgba(245,158,11,0.4)",
+    color: "#fbbf24",
+    fontSize: "0.7rem", fontWeight: 800,
+    padding: "0.1rem 0.55rem", borderRadius: 999,
+    fontVariantNumeric: "tabular-nums",
+    letterSpacing: "0.02em",
+  },
+  historyEmpty: {
+    color: "#64748b", fontSize: "0.85rem",
+    fontStyle: "italic", textAlign: "center",
+    padding: "2rem 1rem",
+    background: "rgba(255,255,255,0.02)",
+    border: "1px dashed rgba(255,255,255,0.08)",
+    borderRadius: 12,
+  },
+  historyList: {
+    display: "flex", flexDirection: "column", gap: "0.6rem",
+  },
+  historyRow: {
+    background: "#0f172a",
+    border: "1px solid rgba(255,255,255,0.06)",
+    borderRadius: 12,
+    overflow: "hidden",
+    transition: "border-color 0.15s ease, background 0.15s ease",
+  },
+  historyRowSummary: {
+    display: "grid",
+    gridTemplateColumns: "120px 1fr auto",
+    gap: "1.25rem",
+    alignItems: "center",
+    width: "100%",
+    background: "transparent",
+    border: "none",
+    padding: "1rem 1.1rem",
+    cursor: "pointer",
+    color: "#e2e8f0",
+    textAlign: "left",
+    fontFamily: "inherit",
+  },
+  historyDate: {
+    fontSize: "0.78rem", fontWeight: 700,
+    color: "#94a3b8",
+    letterSpacing: "0.04em",
+    fontVariantNumeric: "tabular-nums",
+  },
+  historyMain: {
+    display: "flex", alignItems: "center", gap: "0.75rem",
+    minWidth: 0,
+  },
+  historySide: {
+    display: "flex", alignItems: "center", gap: "0.55rem",
+    flex: 1, minWidth: 0,
+  },
+  historyChips: {
+    display: "flex", flexWrap: "wrap", gap: "0.3rem",
+    minWidth: 0,
+  },
+  historyChip: {
+    fontSize: "0.78rem", color: "#e2e8f0",
+    background: "rgba(255,255,255,0.04)",
+    border: "1px solid rgba(255,255,255,0.06)",
+    padding: "0.18rem 0.5rem",
+    borderRadius: 6,
+    whiteSpace: "nowrap",
+  },
+  historyChipGrade: {
+    color: "#94a3b8", fontWeight: 600,
+  },
+  historyChipsEmpty: {
+    color: "#64748b", fontSize: "0.78rem", fontStyle: "italic",
+  },
+  historyArrow: {
+    color: "#475569", fontSize: "1rem",
+    flexShrink: 0,
+  },
+  tradedBadge: {
+    fontSize: "0.62rem", fontWeight: 800,
+    letterSpacing: "0.12em",
+    background: "rgba(245,158,11,0.18)",
+    border: "1px solid rgba(245,158,11,0.45)",
+    color: "#fbbf24",
+    padding: "0.18rem 0.45rem",
+    borderRadius: 4,
+    flexShrink: 0,
+  },
+  receivedBadge: {
+    fontSize: "0.62rem", fontWeight: 800,
+    letterSpacing: "0.12em",
+    background: "rgba(16,185,129,0.15)",
+    border: "1px solid rgba(16,185,129,0.4)",
+    color: "#34d399",
+    padding: "0.18rem 0.45rem",
+    borderRadius: 4,
+    flexShrink: 0,
+  },
+  historyRight: {
+    display: "flex", alignItems: "center", gap: "0.85rem",
+    flexShrink: 0,
+  },
+  historyCashSummary: {
+    display: "flex", flexDirection: "column",
+    alignItems: "flex-end", gap: "0.1rem",
+    fontSize: "0.7rem",
+    fontVariantNumeric: "tabular-nums",
+  },
+  historyCashIn:  { color: "#34d399", fontWeight: 700 },
+  historyCashOut: { color: "#fbbf24", fontWeight: 700 },
+  historyPnl: {
+    fontSize: "0.95rem", fontWeight: 800,
+    fontVariantNumeric: "tabular-nums",
+    letterSpacing: "-0.01em",
+    minWidth: 80, textAlign: "right",
+  },
+  historyChevron: {
+    color: "#64748b", fontSize: "0.8rem",
+    transition: "transform 0.2s ease",
+    width: 14, textAlign: "center",
+  },
+
+  // Expanded detail panel
+  historyDetail: {
+    borderTop: "1px solid rgba(255,255,255,0.06)",
+    padding: "1.25rem",
+    display: "grid",
+    gridTemplateColumns: "1fr 1fr",
+    gap: "1.5rem",
+    background: "rgba(0,0,0,0.2)",
+  },
+  historyDetailCol: {
+    display: "flex", flexDirection: "column", gap: "0.6rem",
+    minWidth: 0,
+  },
+  historyDetailColLabel: {
+    fontSize: "0.66rem", fontWeight: 800,
+    letterSpacing: "0.16em", textTransform: "uppercase",
+    color: "#94a3b8",
+    paddingBottom: "0.4rem",
+    borderBottom: "1px solid rgba(255,255,255,0.05)",
+  },
+  historyDetailColEmpty: {
+    color: "#64748b", fontSize: "0.8rem", fontStyle: "italic",
+  },
+  historyDetailCardList: {
+    display: "flex", flexDirection: "column", gap: "0.5rem",
+  },
+  historyDetailCard: {
+    display: "flex", justifyContent: "space-between",
+    gap: "0.85rem",
+    padding: "0.7rem 0.85rem",
+    background: "#0b1220",
+    border: "1px solid rgba(255,255,255,0.04)",
+    borderRadius: 8,
+  },
+  historyDetailCardMain: { minWidth: 0, flex: 1 },
+  historyDetailCardPlayer: {
+    fontSize: "0.88rem", fontWeight: 700, color: "#f1f5f9",
+  },
+  historyDetailCardMeta: {
+    fontSize: "0.74rem", color: "#94a3b8", marginTop: "0.15rem",
+  },
+  historyDetailCardCert: {
+    fontSize: "0.66rem", color: "#64748b",
+    marginTop: "0.2rem",
+    fontVariantNumeric: "tabular-nums",
+  },
+  historyDetailCardFinance: {
+    display: "flex", flexDirection: "column",
+    alignItems: "flex-end", justifyContent: "center",
+    gap: "0.1rem",
+    flexShrink: 0,
+  },
+  historyDetailFinLabel: {
+    fontSize: "0.6rem", fontWeight: 700,
+    letterSpacing: "0.12em", textTransform: "uppercase",
+    color: "#64748b",
+  },
+  historyDetailFinValue: {
+    fontSize: "0.92rem", fontWeight: 800, color: "#f1f5f9",
+    fontVariantNumeric: "tabular-nums",
+  },
+  historyDetailFooter: {
+    gridColumn: "1 / -1",
+    paddingTop: "1rem",
+    borderTop: "1px solid rgba(255,255,255,0.05)",
+    display: "flex", flexDirection: "column", gap: "0.4rem",
+  },
+  historyDetailRow: {
+    display: "flex", justifyContent: "space-between",
+    fontSize: "0.82rem",
+  },
+  historyDetailLabel: {
+    color: "#94a3b8", fontWeight: 600,
+  },
+  historyDetailValue: {
+    color: "#f1f5f9", fontWeight: 700,
+    fontVariantNumeric: "tabular-nums",
+  },
+  historyDetailNotes: {
+    color: "#cbd5e1", fontStyle: "italic",
+    textAlign: "right",
+    maxWidth: "60%",
+  },
+
+  // ── AI Analysis loading modal ──
+  loadingBackdrop: {
+    position: "fixed", inset: 0,
+    background: "rgba(2, 6, 23, 0.85)",
+    display: "flex", alignItems: "center", justifyContent: "center",
+    padding: "2rem 1rem",
+    zIndex: 210, // above the result modal so it can dismiss into it
+    backdropFilter: "blur(2px)",
+  },
+  loadingPanel: {
+    width: "100%", maxWidth: 480,
+    background: gradients.goldPanel,
+    border: "1px solid rgba(245,158,11,0.25)",
+    borderRadius: 16,
+    boxShadow: "0 24px 64px rgba(0,0,0,0.6), 0 0 0 1px rgba(245,158,11,0.08)",
+    padding: "2rem 1.75rem 1.5rem",
+    textAlign: "center",
+  },
+  loadingSparkleWrap: {
+    display: "flex", justifyContent: "center",
+    marginBottom: "1.1rem",
+  },
+  loadingSparkle: {
+    display: "inline-block",
+    color: "#fbbf24",
+    fontSize: "3rem",
+    lineHeight: 1,
+    animation: "scp-claude-sparkle 2.4s ease-in-out infinite",
+  },
+  loadingTitle: {
+    fontSize: "1.75rem", fontWeight: 800,
+    color: "#fbbf24",
+    letterSpacing: "-0.01em",
+    lineHeight: 1.1,
+    textAlign: "center",
+    textShadow: "0 0 20px rgba(245,158,11,0.35)",
+  },
+  // "Powered by [logo] Claude" — sits directly under TradeDesk, small
+  // and muted so it reads as attribution, not a competing headline.
+  loadingSubtitle: {
+    display: "flex", alignItems: "center", justifyContent: "center",
+    gap: "0.35rem",
+    marginTop: "0.4rem",
+    marginBottom: "1.4rem",
+    fontSize: 11,
+    color: "#fff",
+    opacity: 0.6,
+  },
+  loadingSubtitleLogo: {
+    height: 12, width: "auto",
+    filter: "brightness(0) invert(1)",
+    display: "block",
+  },
+  loadingProgressTrack: {
+    height: 6,
+    background: "rgba(245,158,11,0.12)",
+    border: "1px solid rgba(245,158,11,0.18)",
+    borderRadius: 999,
+    overflow: "hidden",
+  },
+  loadingProgressFill: {
+    height: "100%",
+    background: "linear-gradient(90deg, rgba(245,158,11,0.85), #fbbf24, #fde68a)",
+    borderRadius: 999,
+    boxShadow: "0 0 14px rgba(245,158,11,0.55)",
+    transition: "width 0.3s ease-out",
+  },
+  loadingProgressPct: {
+    marginTop: "0.5rem",
+    fontSize: "0.7rem",
+    fontWeight: 700,
+    color: "#fbbf24",
+    letterSpacing: "0.18em",
+    fontVariantNumeric: "tabular-nums",
+  },
+  // Each new message gets a fresh React key so the keyframe animation
+  // replays on every change. minHeight prevents a layout jump as
+  // text length varies between buckets.
+  loadingMessage: {
+    marginTop: "1.1rem",
+    minHeight: "2.6rem",
+    fontSize: "0.92rem",
+    color: "#cbd5e1",
+    lineHeight: 1.4,
+    animation: "scp-msg-fade-in 0.4s ease-out",
+  },
+  // ── AI Analysis modal ──
+  // Solid opaque panel on a near-black backdrop so the long-form text
+  // reads as a premium dark card, not a translucent overlay. The
+  // earlier gold-tinted gradient + 0.78 backdrop made body text fight
+  // the page underneath.
+  analysisBackdrop: {
+    position: "fixed", inset: 0,
+    background: "rgba(0,0,0,0.85)",
+    display: "flex", alignItems: "center", justifyContent: "center",
+    padding: "2rem 1rem",
+    zIndex: 200,
+    overflowY: "auto",
+  },
+  analysisPanel: {
+    position: "relative",
+    width: "100%", maxWidth: 720,
+    maxHeight: "85vh",
+    overflowY: "auto",
+    background: "#0f172a",
+    opacity: 1,
+    border: "1px solid rgba(245,158,11,0.28)",
+    borderRadius: 16,
+    boxShadow: "0 24px 64px rgba(0,0,0,0.7), 0 0 0 1px rgba(245,158,11,0.08)",
+    padding: "2rem 2rem 2.25rem",
+  },
+  analysisClose: {
+    position: "absolute", top: "0.85rem", right: "0.85rem",
+    width: 32, height: 32,
+    borderRadius: "50%",
+    background: "rgba(255,255,255,0.06)",
+    color: "#cbd5e1",
+    border: "1px solid rgba(255,255,255,0.08)",
+    fontSize: "1.1rem", lineHeight: 1,
+    cursor: "pointer",
+    fontFamily: "inherit",
+  },
+  analysisHeader: {
+    paddingBottom: "1rem",
+    marginBottom: "1.1rem",
+    borderBottom: "1px solid rgba(255,255,255,0.06)",
+  },
+  // Eyebrow on the left, "Powered by Claude" on the right. paddingRight
+  // leaves room for the absolute close button (top: 0.85rem, right:
+  // 0.85rem, 32px wide) so they don't visually overlap.
+  analysisTopRow: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: "1rem",
+    paddingRight: "2.5rem",
+    marginBottom: "0.9rem",
+  },
+  analysisPoweredBy: {
+    display: "flex",
+    alignItems: "center",
+    gap: "0.35rem",
+    fontSize: 10,
+    color: "#fff",
+    opacity: 0.5,
+    whiteSpace: "nowrap",
+  },
+  analysisPoweredByLogo: {
+    height: 16, width: "auto",
+    filter: "brightness(0) invert(1)",
+    display: "block",
+  },
+  analysisVerdictRow: {
+    display: "flex", alignItems: "center", gap: "1.2rem",
+    marginTop: "0.85rem",
+    flexWrap: "wrap",
+  },
+  verdictPill: {
+    fontSize: "0.85rem", fontWeight: 800,
+    letterSpacing: "0.12em", textTransform: "uppercase",
+    padding: "0.4rem 0.85rem",
+    borderRadius: 999,
+  },
+  verdictFavorable: {
+    background: "rgba(16,185,129,0.18)",
+    border: "1px solid rgba(16,185,129,0.5)",
+    color: "#34d399",
+  },
+  verdictNeutral: {
+    background: "rgba(148,163,184,0.16)",
+    border: "1px solid rgba(148,163,184,0.4)",
+    color: "#cbd5e1",
+  },
+  verdictUnfavorable: {
+    background: "rgba(248,113,113,0.18)",
+    border: "1px solid rgba(248,113,113,0.5)",
+    color: "#f87171",
+  },
+  confidenceWrap: {
+    flex: 1, minWidth: 160,
+    display: "flex", flexDirection: "column", gap: "0.35rem",
+  },
+  confidenceLabel: {
+    fontSize: "0.7rem", fontWeight: 700,
+    letterSpacing: "0.14em", textTransform: "uppercase",
+    color: "#94a3b8",
+  },
+  confidenceValue: {
+    color: "#fbbf24",
+    fontVariantNumeric: "tabular-nums",
+  },
+  confidenceTrack: {
+    height: 4,
+    background: "rgba(245,158,11,0.12)",
+    borderRadius: 999,
+    overflow: "hidden",
+  },
+  confidenceFill: {
+    height: "100%",
+    background: "linear-gradient(90deg, rgba(245,158,11,0.7), rgba(251,191,36,1))",
+    borderRadius: 999,
+    transition: "width 0.4s ease",
+  },
+  // Bumped contrast + line-height across the analysis body so text
+  // reads comfortably at length. Section heads stay tight gold caps;
+  // body text is bright slate-200 with 1.65 line-height; summary gets
+  // the brightest treatment so it pops as the lede.
+  analysisSummary: {
+    color: "#f1f5f9",
+    fontSize: "1rem", lineHeight: 1.65,
+    margin: "0 0 1.5rem",
+  },
+  analysisSection: {
+    paddingBottom: "0.85rem",
+    marginBottom: "0.85rem",
+    borderBottom: "1px solid rgba(255,255,255,0.04)",
+  },
+  analysisSectionHead: {
+    fontSize: "0.72rem", fontWeight: 800,
+    letterSpacing: "0.18em", textTransform: "uppercase",
+    color: "#f8fafc",
+    marginBottom: "0.6rem",
+  },
+  analysisSectionBody: {
+    color: "#e2e8f0",
+    fontSize: "0.95rem", lineHeight: 1.65,
+    margin: 0,
+  },
+  analysisReasons: {
+    margin: "0.6rem 0 0",
+    paddingLeft: "1.25rem",
+  },
+  analysisReasonItem: {
+    color: "#e2e8f0",
+    fontSize: "0.95rem", lineHeight: 1.55,
+    marginBottom: "0.7rem",
+    paddingLeft: "0.25rem",
   },
 };

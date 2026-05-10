@@ -66,8 +66,14 @@ export default function NavHeader() {
               <NavLink to="/about" label="About" active={pathname === "/about"} />
               {isAuth && (
                 <>
-                  <NavLink to="/portfolio" label="My Portfolio" active={pathname === "/portfolio"} badge="BETA" />
-                  <NavLink to="/shows"     label="My Shows"     active={pathname.startsWith("/shows")} />
+                  <PortfolioMenu pathname={pathname} />
+                  <NavLink
+                    to="/tradedesk"
+                    label="TradeDesk"
+                    active={pathname.startsWith("/tradedesk")}
+                    badge="BETA"
+                  />
+                  <NavLink to="/shows" label="My Shows" active={pathname.startsWith("/shows")} />
                 </>
               )}
             </nav>
@@ -111,6 +117,90 @@ function useIsMobile(breakpoint = 768) {
     return () => window.removeEventListener("resize", onResize);
   }, [breakpoint]);
   return isMobile;
+}
+
+// My Portfolio with a hover-driven sub-menu exposing the two tabs the
+// page hosts internally (Dashboard, My Cards). Hover opens, mouse-leave
+// after a short grace period closes — the grace prevents accidental
+// closes when the cursor crosses the gap between trigger and panel.
+// Clicking the trigger also navigates to /portfolio (default Dashboard
+// tab) so keyboard users have a path through.
+function PortfolioMenu({ pathname }) {
+  const [open, setOpen]   = useState(false);
+  const [hov, setHov]     = useState(false);
+  const closeTimer        = useRef(null);
+  const navigate          = useNavigate();
+  const active            = pathname === "/portfolio";
+
+  function show() {
+    if (closeTimer.current) { clearTimeout(closeTimer.current); closeTimer.current = null; }
+    setOpen(true);
+  }
+  function scheduleClose() {
+    closeTimer.current = setTimeout(() => setOpen(false), 120);
+  }
+
+  function go(target) {
+    setOpen(false);
+    navigate(target);
+  }
+
+  return (
+    <div
+      style={st.portfolioMenuWrap}
+      onMouseEnter={show}
+      onMouseLeave={scheduleClose}
+    >
+      <Link
+        to="/portfolio"
+        className="scp-nav-link"
+        onMouseEnter={() => setHov(true)}
+        onMouseLeave={() => setHov(false)}
+        style={{ ...st.link, ...(active ? st.linkActive : (hov ? st.linkHover : {})) }}
+      >
+        My Portfolio
+      </Link>
+
+      <div
+        role="menu"
+        style={{
+          ...st.portfolioMenuPanel,
+          opacity: open ? 1 : 0,
+          transform: open ? "translateY(0)" : "translateY(-6px)",
+          pointerEvents: open ? "auto" : "none",
+        }}
+      >
+        <PortfolioMenuItem label="Dashboard" onClick={() => go("/portfolio?tab=dashboard")} />
+        <PortfolioMenuItem label="My Cards"  onClick={() => go("/portfolio?tab=cards")} />
+        <div style={st.portfolioMenuDivider} />
+        <PortfolioMenuItem
+          label={<><span style={st.portfolioMenuActionIcon}>+</span> Add a Card</>}
+          onClick={() => go("/add-card")}
+          action
+        />
+      </div>
+    </div>
+  );
+}
+
+function PortfolioMenuItem({ label, onClick, action }) {
+  const [hov, setHov] = useState(false);
+  return (
+    <button
+      type="button"
+      role="menuitem"
+      onClick={onClick}
+      onMouseEnter={() => setHov(true)}
+      onMouseLeave={() => setHov(false)}
+      style={{
+        ...st.portfolioMenuItem,
+        ...(action ? st.portfolioMenuItemAction : {}),
+        ...(hov ? (action ? st.portfolioMenuItemActionHover : st.portfolioMenuItemHover) : {}),
+      }}
+    >
+      {label}
+    </button>
+  );
 }
 
 // Per-link component so each one tracks its own hover state — needed because
@@ -333,9 +423,15 @@ function MobileMenu({ pathname, isAuth, username, email, role, onSignOut }) {
           <>
             <MobileItem
               to="/portfolio"
-              label={<>My Portfolio <sup style={st.betaBadge}>BETA</sup></>}
+              label="My Portfolio"
               active={pathname === "/portfolio"}
               onClick={() => go("/portfolio")}
+            />
+            <MobileItem
+              to="/tradedesk"
+              label={<>TradeDesk <sup style={st.betaBadge}>BETA</sup></>}
+              active={pathname.startsWith("/tradedesk")}
+              onClick={() => go("/tradedesk")}
             />
             <MobileItem
               to="/shows"
@@ -480,6 +576,74 @@ const st = {
     color: "#fbbf24",
     background: "rgba(245,158,11,0.08)",
   },
+  // ── Portfolio hover-menu ──
+  // The parent nav is display:flex with default alignItems:stretch, so
+  // every nav item gets stretched to the full cross-axis height. Sibling
+  // NavLinks are direct flex children — their text-aligned padding sits
+  // wherever the Link's intrinsic baseline lands. PortfolioMenu wraps a
+  // Link in a div, so without flex+center the inner Link pinned to the
+  // wrapper's top edge and read as offset from the other items. flex +
+  // alignItems: center re-centres the Link inside the stretched wrapper
+  // so it shares a baseline with the other links.
+  portfolioMenuWrap: {
+    position: "relative",
+    display: "flex",
+    alignItems: "center",
+  },
+  portfolioMenuPanel: {
+    position: "absolute",
+    top: "calc(100% + 4px)",
+    left: 0,
+    minWidth: 180,
+    background: "#0f172a",
+    border: "1px solid rgba(255,255,255,0.07)",
+    borderRadius: 10,
+    boxShadow: "0 12px 36px rgba(0,0,0,0.45), 0 0 0 1px rgba(245,158,11,0.06)",
+    padding: "0.4rem",
+    transition: "opacity 150ms ease, transform 150ms ease",
+    zIndex: 110,
+    display: "flex", flexDirection: "column", gap: 2,
+  },
+  portfolioMenuItem: {
+    display: "flex", alignItems: "center", gap: "0.5rem",
+    width: "100%", textAlign: "left",
+    background: "transparent",
+    border: "none",
+    color: "#cbd5e1",
+    fontSize: "0.86rem", fontWeight: 500,
+    padding: "0.55rem 0.7rem",
+    borderRadius: 6,
+    cursor: "pointer",
+    fontFamily: "inherit",
+    transition: "background 0.12s, color 0.12s",
+  },
+  portfolioMenuItemHover: {
+    background: "rgba(245,158,11,0.08)",
+    color: "#fbbf24",
+  },
+  portfolioMenuDivider: {
+    height: 1,
+    margin: "4px 6px",
+    background: "rgba(255,255,255,0.07)",
+  },
+  // Action item ("+ Add a Card") visually distinct from nav items —
+  // gold text + icon so users read it as an action, not a link.
+  portfolioMenuItemAction: {
+    color: "#f59e0b",
+    fontWeight: 700,
+    letterSpacing: "0.01em",
+  },
+  portfolioMenuItemActionHover: {
+    background: "rgba(245,158,11,0.12)",
+    color: "#fbbf24",
+  },
+  portfolioMenuActionIcon: {
+    color: "#f59e0b",
+    fontSize: "1rem", fontWeight: 800,
+    lineHeight: 1,
+    width: 14, textAlign: "center",
+  },
+
   betaBadge: {
     display: "inline-block",
     marginLeft: "0.35rem",

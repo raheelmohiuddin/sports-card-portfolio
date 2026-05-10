@@ -158,6 +158,25 @@ a { color: inherit; text-decoration: none; }
   }
 }
 
+/* Trade-completion gold pulse — applied to received card tiles for 3s
+   when the user lands on My Cards after confirming a trade. Two
+   iterations of the existing goldPulse keyframe (1.5s × 2 = 3s)
+   matches the spec without redefining the visual. */
+@keyframes scp-trade-card-pulse {
+  0%, 100% {
+    box-shadow:
+      0 0 0 1px rgba(245,158,11,0.6),
+      0 12px 28px rgba(0,0,0,0.5),
+      0 0 32px rgba(245,158,11,0.25);
+  }
+  50% {
+    box-shadow:
+      0 0 0 2px rgba(245,158,11,1),
+      0 12px 32px rgba(0,0,0,0.5),
+      0 0 56px rgba(245,158,11,0.55);
+  }
+}
+
 /* Trade-execution overlay animations. Both rows of cards cross through
    the centre simultaneously with a scale pulse at the midpoint to sell
    the swap. translateX is GPU-accelerated; 80vw on each side is wide
@@ -363,3 +382,57 @@ form:has(input[name="given_name"]) :where(
   from { opacity: 0; transform: translateY(-4px); }
   to   { opacity: 1; transform: translateY(0); }
 }
+
+/* AI analysis loading modal animations.
+   - Sparkle pulses in size + opacity AND slowly rotates so the icon
+     reads as "thinking" rather than just blinking.
+   - Message fade-in plays whenever the message text changes (we key
+     the React element on the text so it re-mounts and the animation
+     replays on each new line). */
+@keyframes scp-claude-sparkle {
+  0%, 100% {
+    opacity: 0.55;
+    transform: scale(0.9) rotate(0deg);
+    filter: drop-shadow(0 0 8px rgba(245,158,11,0.4));
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.15) rotate(180deg);
+    filter: drop-shadow(0 0 24px rgba(245,158,11,0.85));
+  }
+}
+@keyframes scp-msg-fade-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* TradeDesk page — horizontal "You're Trading" scroller.
+   Arrows fade in on container hover. On touch devices (no hover capability)
+   they stay visible at all times since touch users can't trigger hover. */
+.scp-trade-scroller-arrow {
+  opacity: 0;
+  transition: opacity 0.18s ease, transform 0.15s ease;
+}
+.scp-trade-scroller-wrap:hover .scp-trade-scroller-arrow {
+  opacity: 1;
+}
+.scp-trade-scroller-arrow:hover {
+  transform: translateY(-50%) scale(1.08);
+}
+@media (hover: none) {
+  .scp-trade-scroller-arrow { opacity: 1; }
+}
+
+/* Slim gold scrollbar for the trade scroller — visible enough to hint
+   at scrollability without competing with the tiles. WebKit + Firefox
+   covered. */
+.scp-trade-scroller {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(245,158,11,0.35) transparent;
+}
+.scp-trade-scroller::-webkit-scrollbar { height: 6px; }
+.scp-trade-scroller::-webkit-scrollbar-thumb {
+  background: rgba(245,158,11,0.35);
+  border-radius: 3px;
+}
+.scp-trade-scroller::-webkit-scrollbar-track { background: transparent; }

@@ -12,13 +12,21 @@ exports.handler = async (event) => {
   const db = await getPool();
   const userId = await ensureUser(db, claims.sub, claims.email);
 
-  const result = await db.query(
-    `SELECT id, manual_price, my_cost,
-            estimated_value, avg_sale_price, last_sale_price,
-            num_sales, price_source, value_last_updated
-     FROM cards WHERE user_id = $1`,
-    [userId]
-  );
+  // Cards + executed-trade count fetched in parallel — same connection pool,
+  // independent queries.
+  const [result, tradeCount] = await Promise.all([
+    db.query(
+      `SELECT id, manual_price, my_cost,
+              estimated_value, avg_sale_price, last_sale_price,
+              num_sales, price_source, value_last_updated
+       FROM cards WHERE user_id = $1`,
+      [userId]
+    ),
+    db.query(
+      "SELECT COUNT(*)::int AS n FROM trades WHERE user_id = $1 AND status = 'executed'",
+      [userId]
+    ),
+  ]);
 
   let totalValue = 0;
   let totalCost  = 0;
@@ -63,5 +71,9 @@ exports.handler = async (event) => {
     console.warn("Snapshot write failed:", err.message);
   }
 
-  return json(200, { totalValue: finalTotal, cards });
+  return json(200, {
+    totalValue: finalTotal,
+    cards,
+    tradesExecuted: tradeCount.rows[0]?.n ?? 0,
+  });
 };

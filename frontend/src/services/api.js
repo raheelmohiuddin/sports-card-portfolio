@@ -131,6 +131,32 @@ export async function executeTrade(payload) {
   return res.json();
 }
 
+// AI trade analysis — sends the in-progress trade payload, server enriches
+// the given side from the DB (raw_comps, cost basis, pop), then calls
+// Claude Sonnet 4.6 with structured tool_use to return a verdict.
+// Returns the analysis object: { summary, valueAnalysis, shortTermOutlook,
+// longTermOutlook, populationAnalysis, salesVelocity, riskAssessment,
+// verdict, confidence, keyReasons }.
+export async function analyzeTrade(payload) {
+  const headers = await authHeaders();
+  const res = await fetch(`${API_BASE}/trades/analyze`, {
+    method: "POST", headers, body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw await readError(res);
+  return res.json();
+}
+
+// Returns the user's executed trade history. Each row carries the
+// pre-snapshotted given + received card metadata from trade_cards plus
+// the trade-time net P&L. Used by the TradeDesk page's "Past Trades"
+// section.
+export async function listTrades() {
+  const headers = await authHeaders();
+  const res = await fetch(`${API_BASE}/trades`, { headers });
+  if (!res.ok) throw new Error(`List trades failed: ${res.status}`);
+  return res.json();
+}
+
 // Atomic rollback of a pending trade. Used by the Trade Builder's Back
 // button on the allocation screen — restores given cards to active,
 // deletes the inserted received cards, and removes the trade row.
@@ -177,12 +203,12 @@ export async function refreshPortfolio(payload) {
   return res.json();
 }
 
-export async function getCardSales(id, grade) {
+export async function getCardSales(id, grade, { signal } = {}) {
   const headers = await authHeaders();
   const url = grade
     ? `${API_BASE}/cards/${id}/sales?grade=${encodeURIComponent(grade)}`
     : `${API_BASE}/cards/${id}/sales`;
-  const res = await fetch(url, { headers });
+  const res = await fetch(url, { headers, signal });
   if (!res.ok) throw new Error(`Card sales failed: ${res.status}`);
   return res.json();
 }

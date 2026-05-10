@@ -51,6 +51,15 @@ exports.handler = async (event) => {
     if (!c || !isValidCertNumber(c.certNumber)) {
       return json(400, { error: "Invalid certNumber in cardsReceived" });
     }
+    // estimatedValue is optional; null/undefined are fine. When provided it
+    // must be a finite, non-negative number — that's the trade-time price
+    // from /pricing/preview that the user saw in the builder.
+    if (c.estimatedValue != null) {
+      const v = Number(c.estimatedValue);
+      if (!Number.isFinite(v) || v < 0) {
+        return json(400, { error: "estimatedValue must be a non-negative number" });
+      }
+    }
   }
   if (!isValidPrice(cashGiven) || !isValidPrice(cashReceived)) {
     return json(400, { error: "cashGiven and cashReceived must be non-negative numbers" });
@@ -185,11 +194,12 @@ exports.handler = async (event) => {
            (trade_id, card_id, side, cert_number, player_name, year, brand,
             grade, estimated_value, allocated_cost)
          SELECT $1, card_id, 'received', cert_number, player_name, year, brand,
-                grade, NULL, NULL
+                grade, estimated_value, NULL
          FROM unnest(
            $2::uuid[], $3::text[], $4::text[], $5::text[], $6::text[],
-           $7::text[]
-         ) AS t(card_id, cert_number, player_name, year, brand, grade)`,
+           $7::text[], $8::numeric[]
+         ) AS t(card_id, cert_number, player_name, year, brand, grade,
+                estimated_value)`,
         [
           tradeId,
           receivedCardIds.map((rc) => rc.id),
@@ -198,6 +208,7 @@ exports.handler = async (event) => {
           cardsReceived.map((r) => sanitize(r.year, 10)),
           cardsReceived.map((r) => sanitize(r.brand, 200)),
           cardsReceived.map((r) => sanitize(r.grade, 10)),
+          cardsReceived.map((r) => r.estimatedValue != null ? Number(r.estimatedValue) : null),
         ]
       );
     }

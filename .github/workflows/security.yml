@@ -1,0 +1,121 @@
+# Security audit — weekly cron + on-demand. Runs npm audit across the
+# workspace and a TruffleHog secret scan. If anything surfaces, a
+# GitHub issue is filed with the findings so it stays visible until
+# closed.
+
+name: Security audit
+
+on:
+  schedule:
+    - cron: "0 9 * * 1"   # 09:00 UTC every Monday
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write           # for filing the findings issue
+
+jobs:
+  npm-audit:
+    name: npm audit (workspace)
+    runs-on: ubuntu-latest
+    outputs:
+      findings: ${{ steps.collect.outputs.findings }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install workspace dependencies
+        run: npm ci
+
+      # `audit --omit=dev` skips dev-only deps so a Vitest CVE doesn't
+      # page anyone for a non-shipped dependency. Threshold is "high"
+      # — moderates pass through but don't fail the run.
+      - name: Audit
+        id: audit
+        continue-on-error: true
+        run: npm audit --audit-level=high --omit=dev > audit.txt 2>&1 || echo "FAILED" >> audit.txt
+
+      - name: Collect findings
+        id: collect
+        run: |
+          {
+            echo "## npm audit"
+            echo
+            echo '```'
+            tail -80 audit.txt
+            echo '```'
+          } > findings.md
+          if grep -qE "FAILED|high severity|critical severity" audit.txt; then
+            echo "findings=yes" >> "$GITHUB_OUTPUT"
+          else
+            echo "findings=no" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Upload findings artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: audit-findings
+          path: findings.md
+
+  secret-scan:
+    name: Secret scan (TruffleHog)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (full history for diff scan)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # `--only-verified` cuts noise — TruffleHog's verifier confirms a
+      # match is an actual live credential before reporting, vs. random
+      # high-entropy strings that look secret-shaped but aren't.
+      - name: Run TruffleHog
+        uses: trufflesecurity/trufflehog@main
+        with:
+          path: ./
+          base: ""
+          head: HEAD
+          extra_args: --only-verified
+
+  file-issue:
+    name: File issue if anything found
+    needs: [npm-audit, secret-scan]
+    runs-on: ubuntu-latest
+    if: |
+      needs.npm-audit.outputs.findings == 'yes' ||
+      needs.secret-scan.result == 'failure'
+    steps:
+      - name: Download audit findings
+        uses: actions/download-artifact@v4
+        with:
+          name: audit-findings
+          path: ./
+        continue-on-error: true
+
+      - name: Open issue
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            let body = `Weekly security audit surfaced one or more findings on ${new Date().toISOString().slice(0,10)}.\n\n`;
+            try {
+              body += fs.readFileSync('findings.md', 'utf8');
+            } catch {
+              body += '_See workflow logs for details — findings file unavailable._';
+            }
+            if (${{ needs.secret-scan.result == 'failure' && 'true' || 'false' }}) {
+              body += '\n\n**TruffleHog secret scan reported verified findings — review the workflow logs immediately.**';
+            }
+            body += `\n\n[Run details](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})`;
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo:  context.repo.repo,
+              title: `Security audit findings — ${new Date().toISOString().slice(0,10)}`,
+              body,
+              labels: ['security'],
+            });
