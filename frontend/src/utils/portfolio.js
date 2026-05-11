@@ -17,12 +17,16 @@ export function isTraded(card) {
 }
 
 // The "value" we report for a card today.
-//   sold (with price)  → soldPrice  (the realized exit)
-//   anything else      → estimatedValue (manual override or auto market)
+//   sold (with sellers_net) → sellersNet (what the collector actually pocketed
+//                              after the consignment fee — the true realized
+//                              exit for P&L purposes)
+//   sold (legacy / no fee)  → consignmentSoldPrice (gross; used pre-fee schema
+//                              and when admin hasn't entered a fee yet)
+//   anything else           → estimatedValue (manual override or auto market)
 // Falls back to null when neither is available.
 export function effectiveValue(card) {
   if (!card) return null;
-  if (isSold(card)) return card.consignmentSoldPrice;
+  if (isSold(card)) return card.sellersNet ?? card.consignmentSoldPrice;
   return card.estimatedValue ?? null;
 }
 
@@ -56,10 +60,14 @@ export function summarizePortfolio(cards) {
     const cost = c.myCost ?? null;
     if (isSold(c)) {
       out.soldCount += 1;
-      out.realizedValue += c.consignmentSoldPrice;
+      // Realized cash-out is what the collector received, not the gross sale.
+      // Prefer sellers_net; fall back to soldPrice for legacy rows (consignment
+      // predates the fee schema) or sales where admin hasn't entered a fee yet.
+      const realized = c.sellersNet ?? c.consignmentSoldPrice;
+      out.realizedValue += realized;
       if (cost != null) {
         out.investedSold += cost;
-        out.realizedPnl  += c.consignmentSoldPrice - cost;
+        out.realizedPnl  += realized - cost;
         out.hasSoldCost = true;
       }
     } else {

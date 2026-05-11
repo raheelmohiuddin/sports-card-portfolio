@@ -8,7 +8,7 @@ import { getRarityTier, TIER_LABELS } from "../utils/rarity.js";
 import GhostIcon from "./GhostIcon.jsx";
 import CardPop from "./CardPop.jsx";
 import SalesHistory from "./SalesHistory.jsx";
-import ConsignBlock from "./ConsignBlock.jsx";
+import ConsignBlock, { SoldBreakdown } from "./ConsignBlock.jsx";
 
 const CONSIGNMENT_TYPE_LABEL = { auction: "Auction", private: "Private Sale" };
 const CONSIGNMENT_STATUS_LABEL = {
@@ -149,8 +149,9 @@ export default function CardModal({
 
   // (Sales fetch lives inside SalesHistory now — see component below.)
 
-  // Sold cards display their realized soldPrice as the headline value;
-  // everything else falls back to the existing manual/auto chain.
+  // Sold cards display their realized exit as the headline value — prefer
+  // sellers_net (what the collector pocketed after the consignment fee)
+  // and fall back to consignmentSoldPrice for legacy/pre-fee sales.
   // Memoized as one block so neither value recomputes when state
   // unrelated to `card` changes (pop toggle, hydration, role fetch).
   const { sold, displayValue } = useMemo(() => {
@@ -159,7 +160,7 @@ export default function CardModal({
     return {
       sold: isSoldCard,
       displayValue: isSoldCard
-        ? card.consignmentSoldPrice
+        ? (card.sellersNet ?? card.consignmentSoldPrice)
         : (card.estimatedValue ?? card.avgSalePrice),
     };
   }, [card]);
@@ -293,6 +294,8 @@ export default function CardModal({
               cardStatus={card.status}
               consignmentStatus={card.consignmentStatus ?? null}
               consignmentSoldPrice={card.consignmentSoldPrice ?? null}
+              consignmentFeePct={card.consignmentFeePct ?? null}
+              sellersNet={card.sellersNet ?? null}
               consignmentBlocked={card.consignmentBlocked ?? false}
               onConsigned={(status) => onCardUpdate?.(card.id, { consignmentStatus: status })}
             />
@@ -337,6 +340,8 @@ export default function CardModal({
               cardStatus={card.status}
               consignmentStatus={card.consignmentStatus ?? null}
               consignmentSoldPrice={card.consignmentSoldPrice ?? null}
+              consignmentFeePct={card.consignmentFeePct ?? null}
+              sellersNet={card.sellersNet ?? null}
               consignmentBlocked={card.consignmentBlocked ?? false}
               onConsigned={(status) => onCardUpdate?.(card.id, { consignmentStatus: status })}
             />
@@ -514,10 +519,20 @@ function PopStat({ label, value, highlight, highlightColor = "#d97706" }) {
 
 // Admin-only consignment summary inside CardModal. Pure read-only —
 // the actual editable controls live in /admin/consignments.
+// When the consignment is sold with a recorded fee + sellers_net, the
+// "Sold For" single row is replaced with the same three-row Sold/Fee/Net
+// breakdown the collector sees in ConsignBlock — visual parity between
+// admin and collector views of the same realized sale.
 function AdminConsignmentBlock({ consignment }) {
   const status = consignment.status;
   const statusLabel = CONSIGNMENT_STATUS_LABEL[status] ?? status;
   const statusColor = CONSIGNMENT_STATUS_COLOR[status] ?? "#cbd5e1";
+
+  const showBreakdown =
+    status === "sold"
+    && consignment.soldPrice         != null
+    && consignment.consignmentFeePct != null
+    && consignment.sellersNet        != null;
 
   return (
     <>
@@ -541,7 +556,8 @@ function AdminConsignmentBlock({ consignment }) {
             <span style={st.adminConsignValue}>{fmt(consignment.askingPrice)}</span>
           </div>
         )}
-        {status === "sold" && consignment.soldPrice != null && (
+        {/* Legacy single-row "Sold For" — shown when sold but fee not yet entered. */}
+        {!showBreakdown && status === "sold" && consignment.soldPrice != null && (
           <div style={st.adminConsignRow}>
             <span style={st.adminConsignLabel}>Sold For</span>
             <span style={{ ...st.adminConsignValue, ...st.adminConsignSold }}>
@@ -562,6 +578,16 @@ function AdminConsignmentBlock({ consignment }) {
           </div>
         )}
       </div>
+
+      {/* Three-row sold/fee/net breakdown sits below the consignment summary,
+          matching the panel position the collector sees in ConsignBlock. */}
+      {showBreakdown && (
+        <SoldBreakdown
+          soldPrice={consignment.soldPrice}
+          feePct={consignment.consignmentFeePct}
+          sellersNet={consignment.sellersNet}
+        />
+      )}
     </>
   );
 }

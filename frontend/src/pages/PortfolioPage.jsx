@@ -1300,7 +1300,11 @@ function PastCollectionSummary({ pastCards }) {
       if (isSold(c)) {
         soldCount += 1;
         if (c.myCost != null) {
-          realizedPnl += c.consignmentSoldPrice - c.myCost;
+          // Match the rest of the app: realized P&L is based on what the
+          // collector actually pocketed (sellers_net), falling back to gross
+          // soldPrice for legacy rows whose consignment predates the fee schema.
+          const realized = c.sellersNet ?? c.consignmentSoldPrice;
+          realizedPnl += realized - c.myCost;
           hasRealizedCost = true;
         }
       }

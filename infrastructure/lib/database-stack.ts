@@ -29,7 +29,11 @@ export class DatabaseStack extends Construct {
       description: "Allow Lambda access to Aurora",
     });
 
-    // Aurora Serverless v2 PostgreSQL — cost-effective, auto-scales to zero when idle
+    // Aurora Serverless v2 PostgreSQL — cost-effective, auto-scales to zero when idle.
+    // Data API is enabled so the RDS Query Editor (and any IAM-authed callers)
+    // can issue SQL against this isolated cluster without a bastion/VPN — the
+    // cluster lives in PRIVATE_ISOLATED subnets and would otherwise be
+    // unreachable from outside the VPC.
     this.cluster = new rds.DatabaseCluster(this, "Cluster", {
       engine: rds.DatabaseClusterEngine.auroraPostgres({
         version: rds.AuroraPostgresEngineVersion.VER_16_4,
@@ -42,6 +46,7 @@ export class DatabaseStack extends Construct {
       securityGroups: [this.dbSecurityGroup],
       defaultDatabaseName: "cardportfolio",
       credentials: rds.Credentials.fromGeneratedSecret("dbadmin"),
+      enableDataApi: true,
       removalPolicy: cdk.RemovalPolicy.RETAIN,
       deletionProtection: true,
     });

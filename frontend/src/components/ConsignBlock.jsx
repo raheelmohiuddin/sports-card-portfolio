@@ -20,7 +20,17 @@ import { createConsignment } from "../services/api.js";
 // Also hidden when the card has been traded away (cardStatus === "traded"):
 // the card is no longer owned, so consigning it makes no sense and showing
 // any consignment UI would be misleading.
-export default function ConsignBlock({ cardId, role, cardStatus, consignmentStatus, consignmentSoldPrice, consignmentBlocked, onConsigned }) {
+export default function ConsignBlock({
+  cardId,
+  role,
+  cardStatus,
+  consignmentStatus,
+  consignmentSoldPrice,
+  consignmentFeePct,
+  sellersNet,
+  consignmentBlocked,
+  onConsigned,
+}) {
   const [stage, setStage]       = useState("collapsed"); // collapsed | form
   const [type, setType]         = useState("auction");
   const [platform, setPlatform] = useState("fanatics");  // auction-only
@@ -44,7 +54,14 @@ export default function ConsignBlock({ cardId, role, cardStatus, consignmentStat
   // consistent regardless of how the user got here.
   if (consignmentBlocked) return <BlockedMessage />;
 
-  if (status) return <StatusPill status={status} soldPrice={consignmentSoldPrice ?? null} />;
+  if (status) return (
+    <StatusPill
+      status={status}
+      soldPrice={consignmentSoldPrice ?? null}
+      feePct={consignmentFeePct ?? null}
+      sellersNet={sellersNet ?? null}
+    />
+  );
 
   const isAuction = type === "auction";
 
@@ -165,11 +182,19 @@ function BlockedMessage() {
 // ─── Read-only status pill ──────────────────────────────────────────
 // Used once a consignment exists for the card. Colors per status follow
 // the spec: pending=amber, in_review=blue, listed/sold=green, declined=red.
-// When status === "sold" and the admin has entered a sold price, we show
-// it prominently in gold below the pill — the realized exit value.
-function StatusPill({ status, soldPrice }) {
+// When status === "sold":
+//   * If the platform also recorded a fee % and computed sellers_net,
+//     render the full Sold/Fee/Net breakdown — Seller's Net is the
+//     dominant figure since that's what the collector actually receives.
+//   * Otherwise fall back to the legacy single "Sold For" gold figure
+//     so historical rows without fee data still display the realized exit.
+function StatusPill({ status, soldPrice, feePct, sellersNet }) {
   const variant = STATUS_VARIANTS[status];
   if (!variant) return null;
+
+  const showBreakdown =
+    status === "sold" && soldPrice != null && feePct != null && sellersNet != null;
+
   return (
     <div style={st.statusBlock}>
       <div style={{ ...st.statusPill, ...variant.pill }}>
@@ -177,7 +202,11 @@ function StatusPill({ status, soldPrice }) {
         <span>{variant.label}</span>
       </div>
 
-      {status === "sold" && soldPrice != null && (
+      {showBreakdown && (
+        <SoldBreakdown soldPrice={soldPrice} feePct={feePct} sellersNet={sellersNet} />
+      )}
+
+      {!showBreakdown && status === "sold" && soldPrice != null && (
         <div style={st.soldBlock}>
           <div style={st.soldLabel}>Sold For</div>
           <div style={st.soldValue}>{fmtUsd(soldPrice)}</div>
@@ -189,6 +218,38 @@ function StatusPill({ status, soldPrice }) {
           Contact us to discuss options.
         </p>
       )}
+    </div>
+  );
+}
+
+// Three-row breakdown of a sold consignment. Visual hierarchy:
+//   Sold Price — gross sale, neutral white
+//   Consignment Fee (X%) — what the platform took, muted red
+//   Seller's Net — what the collector receives, dominant bright gold
+// The Net row is intentionally bigger / heavier so the eye lands there first.
+//
+// Exported so the admin CardModal (which suppresses the collector ConsignBlock)
+// can render the same panel inside AdminConsignmentBlock — keeps the visual
+// treatment identical between collector and admin views of the same sale.
+export function SoldBreakdown({ soldPrice, feePct, sellersNet }) {
+  const feeAmount = soldPrice - sellersNet;
+  return (
+    <div style={st.breakdownBlock}>
+      <div style={st.breakdownRow}>
+        <span style={st.breakdownLabel}>Sold Price</span>
+        <span style={st.breakdownPrice}>{fmtUsd(soldPrice)}</span>
+      </div>
+      <div style={st.breakdownRow}>
+        <span style={st.breakdownLabel}>
+          Consignment Fee ({parseFloat(feePct).toFixed(2)}%)
+        </span>
+        <span style={st.breakdownFee}>−{fmtUsd(feeAmount)}</span>
+      </div>
+      <div style={st.breakdownDivider} />
+      <div style={st.breakdownRow}>
+        <span style={st.breakdownNetLabel}>Seller's Net</span>
+        <span style={st.breakdownNet}>{fmtUsd(sellersNet)}</span>
+      </div>
     </div>
   );
 }
@@ -378,5 +439,64 @@ const st = {
     fontVariantNumeric: "tabular-nums",
     letterSpacing: "-0.02em",
     textShadow: "0 0 32px rgba(245,158,11,0.18)",
+  },
+
+  // ── Sold/Fee/Net breakdown (shown when sellers_net is populated) ──
+  // Container mirrors the soldBlock dimensions so transitioning from the
+  // legacy single-value display to the breakdown doesn't visually shift.
+  breakdownBlock: {
+    marginTop: "0.75rem",
+    padding: "0.95rem 1rem 1.05rem",
+    background: "rgba(245,158,11,0.06)",
+    border: "1px solid rgba(245,158,11,0.28)",
+    borderRadius: 10,
+    display: "flex", flexDirection: "column", gap: "0.55rem",
+  },
+  breakdownRow: {
+    display: "flex", alignItems: "baseline", justifyContent: "space-between",
+    gap: "1rem",
+  },
+  breakdownLabel: {
+    color: "#94a3b8",
+    fontSize: "0.78rem", fontWeight: 600,
+    letterSpacing: "0.02em",
+  },
+  // Gross sale — neutral white. Tabular nums so the digits sit cleanly
+  // against the fee/net rows below.
+  breakdownPrice: {
+    color: "#f1f5f9",
+    fontSize: "0.95rem", fontWeight: 700,
+    fontVariantNumeric: "tabular-nums",
+    letterSpacing: "-0.01em",
+  },
+  // Fee deduction — muted red so it reads as "money leaving" without
+  // alarming the user (it's an expected platform fee, not an error).
+  breakdownFee: {
+    color: "#fca5a5",
+    fontSize: "0.95rem", fontWeight: 600,
+    fontVariantNumeric: "tabular-nums",
+    letterSpacing: "-0.01em",
+  },
+  // Hairline between the deduction row and the net row — visually
+  // separates "math inputs" from "final number" without a hard border.
+  breakdownDivider: {
+    height: 1,
+    margin: "0.2rem 0 0.15rem",
+    background: "rgba(255,255,255,0.08)",
+  },
+  breakdownNetLabel: {
+    color: "#fbbf24",
+    fontSize: "0.7rem", fontWeight: 800,
+    letterSpacing: "0.16em", textTransform: "uppercase",
+  },
+  // Seller's Net — dominant figure. Bright gold, larger than the gross
+  // row, heavy weight, soft glow. This is what the collector actually
+  // receives; the spec says it should be the most prominent number.
+  breakdownNet: {
+    color: "#fbbf24",
+    fontSize: "1.55rem", fontWeight: 800,
+    fontVariantNumeric: "tabular-nums",
+    letterSpacing: "-0.02em",
+    textShadow: "0 0 32px rgba(245,158,11,0.22)",
   },
 };

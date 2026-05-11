@@ -36,8 +36,17 @@ describe("isSold / isTraded", () => {
 });
 
 describe("effectiveValue", () => {
-  test("returns soldPrice for sold cards (realized exit)", () => {
+  test("returns soldPrice for sold cards (realized exit, legacy/no fee)", () => {
     expect(effectiveValue(soldCard())).toBe(120);
+  });
+
+  test("prefers sellersNet over soldPrice for sold cards (post-fee schema)", () => {
+    // Gross 120, fee, collector pockets 100 — P&L should use 100, not 120.
+    expect(effectiveValue(soldCard({ sellersNet: 100 }))).toBe(100);
+  });
+
+  test("falls back to soldPrice when sellersNet is null", () => {
+    expect(effectiveValue(soldCard({ sellersNet: null }))).toBe(120);
   });
 
   test("returns estimatedValue for held cards", () => {
@@ -56,6 +65,12 @@ describe("cardPnl", () => {
     expect(cardPnl(soldCard())).toBe(40);
   });
 
+  test("uses sellersNet over soldPrice for realized P&L when present", () => {
+    // Cost 80, sold 120 gross, fee deducted → collector pockets 100.
+    // Realized P&L should be 100 - 80 = 20, not 120 - 80 = 40.
+    expect(cardPnl(soldCard({ sellersNet: 100 }))).toBe(20);
+  });
+
   test("returns null when myCost or value missing", () => {
     expect(cardPnl({ estimatedValue: 100 })).toBeNull();
     expect(cardPnl({ myCost: 100 })).toBeNull();
@@ -71,7 +86,7 @@ describe("summarizePortfolio", () => {
     const s = summarizePortfolio([
       heldCard({ myCost: 100, estimatedValue: 150 }), // +50 unrealized
       heldCard({ id: "h2", myCost: 80, estimatedValue: 60 }), // -20 unrealized
-      soldCard({ myCost: 80, consignmentSoldPrice: 120 }), // +40 realized
+      soldCard({ myCost: 80, consignmentSoldPrice: 120 }), // +40 realized (no fee)
     ]);
     expect(s.realizedPnl).toBe(40);
     expect(s.unrealizedPnl).toBe(30);
@@ -80,6 +95,16 @@ describe("summarizePortfolio", () => {
     expect(s.totalValue).toBe(330);    // 150 + 60 + 120
     expect(s.heldCount).toBe(2);
     expect(s.soldCount).toBe(1);
+  });
+
+  test("realized roll-up uses sellersNet when present", () => {
+    const s = summarizePortfolio([
+      // Gross 120, collector pockets 100 → realized P&L = 100 - 80 = 20
+      soldCard({ myCost: 80, consignmentSoldPrice: 120, sellersNet: 100 }),
+    ]);
+    expect(s.realizedValue).toBe(100); // not 120
+    expect(s.realizedPnl).toBe(20);    // not 40
+    expect(s.totalValue).toBe(100);
   });
 
   test("excludes cards without cost from invested totals", () => {

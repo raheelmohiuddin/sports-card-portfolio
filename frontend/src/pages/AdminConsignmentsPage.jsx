@@ -34,6 +34,8 @@ const COLUMNS = [
   { key: "estimated",  label: "Estimated",      get: (r) => r.card.estimatedValue ?? 0 },
   { key: "asking",     label: "Asking",         get: (r) => r.askingPrice ?? 0 },
   { key: "soldPrice",  label: "Sold Price",     get: (r) => r.soldPrice   ?? 0 },
+  { key: "feePct",     label: "Consignment Fee %", get: (r) => r.consignmentFeePct ?? 0 },
+  { key: "sellersNet", label: "Seller's Net",      get: (r) => r.sellersNet ?? 0 },
   { key: "type",       label: "Type",           get: (r) => r.type },
   { key: "status",     label: "Status",         get: (r) => STATUS_RANK[r.status] ?? 99 },
   { key: "notes",      label: "Internal Notes", get: (r) => (r.internalNotes ?? "").toLowerCase(), unsortable: true },
@@ -68,12 +70,21 @@ export default function AdminConsignmentsPage() {
   // edit mode on error). Optimistic state update happens immediately;
   // failure path refetches to re-sync.
   function patchRow(id, patch) {
+    // Optimistic local merge for the keys the admin sent. The server
+    // response is then merged on top — important because sellers_net is
+    // computed server-side from sold_price + consignment_fee_pct, so the
+    // client never authors that field and needs the round-trip to see it.
     setRows((prev) => prev.map((r) => r.id === id ? { ...r, ...patch } : r));
-    return updateAdminConsignment(id, patch).catch((e) => {
-      setError(e?.message ?? "Update failed");
-      getAdminConsignments().then(setRows).catch(() => {});
-      throw e;
-    });
+    return updateAdminConsignment(id, patch)
+      .then((response) => {
+        setRows((prev) => prev.map((r) => r.id === id ? { ...r, ...response } : r));
+        return response;
+      })
+      .catch((e) => {
+        setError(e?.message ?? "Update failed");
+        getAdminConsignments().then(setRows).catch(() => {});
+        throw e;
+      });
   }
 
   function toggleSort(key) {
@@ -231,7 +242,8 @@ function ConsignmentRow({ row, onPatch, onOpen }) {
   // active cell's controls mid-edit.
   const [statusEditing, setStatusEditing] = useState(false);
   const [priceEditing,  setPriceEditing]  = useState(false);
-  const isEditing = statusEditing || priceEditing;
+  const [feePctEditing, setFeePctEditing] = useState(false);
+  const isEditing = statusEditing || priceEditing || feePctEditing;
   const cardLabel = [row.card.year, row.card.brand, row.card.playerName].filter(Boolean).join(" ") || "—";
 
   useEffect(() => { setNotes(row.internalNotes ?? ""); }, [row.id, row.internalNotes]);
@@ -287,6 +299,19 @@ function ConsignmentRow({ row, onPatch, onOpen }) {
           onSave={(next) => onPatch(row.id, { soldPrice: next })}
           setEditing={setPriceEditing}
         />
+      </td>
+      <td style={st.td}>
+        <EditableFeePct
+          value={row.consignmentFeePct}
+          enabled={row.status === "sold"}
+          onSave={(next) => onPatch(row.id, { consignmentFeePct: next })}
+          setEditing={setFeePctEditing}
+        />
+      </td>
+      <td style={st.td}>
+        {row.sellersNet != null ? (
+          <span style={st.sellersNetText}>{fmt(row.sellersNet)}</span>
+        ) : <span style={st.tdMuted}>—</span>}
       </td>
       <td style={st.td}>{TYPE_LABEL[row.type] ?? row.type}</td>
       <td style={st.td}>
@@ -453,6 +478,79 @@ function EditableSoldPrice({ value, enabled, onSave, setEditing }) {
         placeholder="0.00"
         style={st.bareInput}
       />
+      <ConfirmCancel busy={busy} onConfirm={confirm} onCancel={cancel} />
+    </span>
+  );
+}
+
+// ─── Editable consignment fee % (text → input + ✓/✗) ─────────────────
+// Same pattern as EditableSoldPrice but bounded 0–100 with a "%" suffix
+// instead of a "$" prefix. Triggers a server-side sellers_net recompute
+// on save (admin patchRow merges the server response).
+function EditableFeePct({ value, enabled, onSave, setEditing }) {
+  const [mode, setMode]   = useState("display");
+  const [draft, setDraft] = useState(value != null ? String(value) : "");
+
+  useEffect(() => {
+    if (mode === "display") setDraft(value != null ? String(value) : "");
+  }, [value, mode]);
+
+  useEffect(() => {
+    setEditing?.(mode === "edit" || mode === "saving");
+  }, [mode, setEditing]);
+
+  useEffect(() => {
+    if (mode !== "success") return;
+    const t = setTimeout(() => setMode("display"), 1200);
+    return () => clearTimeout(t);
+  }, [mode]);
+
+  if (!enabled) return <span style={st.tdMuted}>—</span>;
+
+  if (mode === "display" || mode === "success") {
+    return (
+      <span style={st.cellInline}>
+        <span style={value != null ? st.priceText : st.priceTextEmpty}>
+          {value != null ? `${parseFloat(value).toFixed(2)}%` : "—"}
+        </span>
+        {mode === "success"
+          ? <span style={st.successFlash} aria-label="Saved">✓</span>
+          : <EditIcon onClick={() => setMode("edit")} ariaLabel="Edit consignment fee" />}
+      </span>
+    );
+  }
+
+  const busy = mode === "saving";
+  async function confirm() {
+    const trimmed = draft.trim();
+    const next = trimmed === "" ? null : parseFloat(trimmed);
+    if (next != null && (Number.isNaN(next) || next < 0 || next > 100)) return;
+    if (next === (value ?? null)) { setMode("display"); return; }
+    setMode("saving");
+    try { await onSave(next); setMode("success"); }
+    catch { setMode("edit"); }
+  }
+  function cancel() {
+    setDraft(value != null ? String(value) : "");
+    setMode("display");
+  }
+
+  return (
+    <span style={st.cellInline}>
+      <input
+        autoFocus
+        type="number" min="0" max="100" step="0.01" inputMode="decimal"
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter")  confirm();
+          if (e.key === "Escape") cancel();
+        }}
+        disabled={busy}
+        placeholder="0"
+        style={st.bareInput}
+      />
+      <span style={st.priceInputDollar}>%</span>
       <ConfirmCancel busy={busy} onConfirm={confirm} onCancel={cancel} />
     </span>
   );
@@ -686,6 +784,15 @@ const st = {
   },
   priceTextEmpty: {
     color: colors.textVeryFaint,
+    fontVariantNumeric: "tabular-nums",
+    fontSize: "0.86rem",
+  },
+  // Read-only Seller's Net cell — green so it visually pairs with the
+  // pill colour for the "sold" status and reads as "money the collector
+  // actually receives." Server-computed; admin can't edit directly.
+  sellersNetText: {
+    color: "#6ee7b7",
+    fontWeight: 700,
     fontVariantNumeric: "tabular-nums",
     fontSize: "0.86rem",
   },
