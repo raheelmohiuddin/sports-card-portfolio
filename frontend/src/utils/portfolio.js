@@ -10,8 +10,8 @@ export function isSold(card) {
 }
 
 // Card was traded away in a /trades/execute call. Surfaced via the cards
-// table's status column. Same UI-visibility pattern as sold: still shown
-// in My Cards with a TRADED badge so the user can see their history.
+// table's status column. Same exit semantics as sold; rendered in the
+// Collection History tab with a TRADED badge so the user keeps history.
 export function isTraded(card) {
   return card?.status === "traded";
 }

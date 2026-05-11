@@ -105,19 +105,23 @@ export default function HomePage() {
         </section>
       )}
 
-      {/* ── Footer ── */}
-      <footer style={st.footer}>
-        <div className="container" style={st.footerInner}>
-          <span style={st.footerBrand}>
-            <span style={{ color: "#d4af37" }}>◆</span> Collector's Reserve
-          </span>
-          <nav style={st.footerNav}>
-            <Link to="/" style={st.footerLink}>Home</Link>
-            <Link to="/about" style={st.footerLink}>About</Link>
-            {!isAuth && <Link to="/signin" style={st.footerLink}>Sign In</Link>}
-          </nav>
-        </div>
-      </footer>
+      {/* ── Footer ── marketing chrome for visitors only.
+           Authenticated users get the global SiteFooter from App.jsx,
+           so this branded footer would otherwise duplicate Home/About. */}
+      {!isAuth && (
+        <footer style={st.footer}>
+          <div className="container" style={st.footerInner}>
+            <span style={st.footerBrand}>
+              <span style={{ color: "#d4af37" }}>◆</span> Collector's Reserve
+            </span>
+            <nav style={st.footerNav}>
+              <Link to="/" style={st.footerLink}>Home</Link>
+              <Link to="/about" style={st.footerLink}>About</Link>
+              <Link to="/signin" style={st.footerLink}>Sign In</Link>
+            </nav>
+          </div>
+        </footer>
+      )}
     </div>
   );
 }

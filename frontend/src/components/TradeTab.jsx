@@ -381,7 +381,7 @@ export default function TradeTab({ cards, onTradeComplete, pastTrades, historyLo
       });
       // Targeted CardHedger refresh for the cards just received.
       // Bypasses the staleness gate and populates pricing before we
-      // navigate so the user lands on My Cards with values already
+      // navigate so the user lands on My Collection with values already
       // filled in. Failures are swallowed — the next dashboard mount's
       // SWR refresh will pick up any cards that didn't get refreshed
       // here.

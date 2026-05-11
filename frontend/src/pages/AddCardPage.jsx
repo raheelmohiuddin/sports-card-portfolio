@@ -95,7 +95,7 @@ export default function AddCardPage() {
         frontUploadUrl, frontFile: front.file,
         backUploadUrl,  backFile:  back.file,
       });
-      navigate("/portfolio?tab=cards");
+      navigate("/portfolio?tab=collection");
     } catch (err) {
       if (err.status === 409) {
         setDuplicateId(err.data?.existingCardId ?? "");
@@ -192,8 +192,8 @@ export default function AddCardPage() {
               </div>
               <Link
                 to={duplicateId
-                  ? `/portfolio?tab=cards&highlight=${duplicateId}`
-                  : "/portfolio?tab=cards"}
+                  ? `/portfolio?tab=collection&highlight=${duplicateId}`
+                  : "/portfolio?tab=collection"}
                 style={st.dupCta}
               >
                 View card →

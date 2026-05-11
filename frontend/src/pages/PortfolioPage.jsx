@@ -212,21 +212,38 @@ export default function PortfolioPage() {
     [cards]
   );
 
-  const visibleCards = useMemo(() => {
-    let out = cards;
-    if (filters.sport)   out = out.filter((c) => c.sport === filters.sport);
-    if (filters.grade)   out = out.filter((c) => c.grade === filters.grade);
-    if (filters.rare)    out = out.filter(isRare);
-    if (filters.targetHit) out = out.filter((c) => c.targetReached);
-    if (filters.cost === "has") out = out.filter((c) => c.myCost != null);
-    if (filters.cost === "no")  out = out.filter((c) => c.myCost == null);
-    return sortCards(out, sortBy);
-  }, [cards, filters, sortBy]);
+  // Split the portfolio into active (held) and past (sold or traded) sets.
+  // My Collection only shows active cards; Collection History shows the rest.
+  // Dashboard intentionally still summarizes the full portfolio.
+  const activeCards = useMemo(
+    () => cards.filter((c) => !isSold(c) && !isTraded(c)),
+    [cards]
+  );
+  const pastCards = useMemo(
+    () => cards.filter((c) => isSold(c) || isTraded(c)),
+    [cards]
+  );
+
+  // Same toolbar filter+sort applied to whichever base set the active tab uses.
+  const visibleCards = useMemo(
+    () => applyToolbarFilters(activeCards, filters, sortBy),
+    [activeCards, filters, sortBy]
+  );
+  const visiblePastCards = useMemo(
+    () => applyToolbarFilters(pastCards, filters, sortBy),
+    [pastCards, filters, sortBy]
+  );
 
   // ── Tab routing via URL search params ──
+  // Three tabs now: dashboard | collection | past. Legacy "cards" deep-links
+  // (from old emails / share URLs / pre-rename code paths) silently map to
+  // "collection" so they don't 404 to the dashboard.
   const [searchParams, setSearchParams] = useSearchParams();
   const tabRaw = searchParams.get("tab");
-  const tab = tabRaw === "cards" ? "cards" : "dashboard";
+  const tab =
+    tabRaw === "collection" || tabRaw === "cards" ? "collection"
+    : tabRaw === "past" ? "past"
+    : "dashboard";
   const highlightId = searchParams.get("highlight");
 
   function selectTab(next) {
@@ -235,13 +252,13 @@ export default function PortfolioPage() {
       np.set("tab", next);
       // Clearing highlight on a manual tab click feels right —
       // it should only apply when the user arrived via a deep link.
-      if (next !== "cards") np.delete("highlight");
+      if (next !== "collection") np.delete("highlight");
       return np;
     });
   }
 
   // ── Trade-completion pulse, driven by URL param ──
-  // TradeDeskPage navigates to /portfolio?tab=cards&pulse=id1,id2 after
+  // TradeDeskPage navigates to /portfolio?tab=collection&pulse=id1,id2 after
   // a confirm. Read the IDs once, drive the gold pulse, then strip the
   // param so a refresh doesn't re-trigger.
   useEffect(() => {
@@ -267,8 +284,9 @@ export default function PortfolioPage() {
       <div className="container" style={st.inner}>
         {/* ── Tab bar ── */}
         <nav style={st.tabBar}>
-          <TabButton label="Dashboard" active={tab === "dashboard"} onClick={() => selectTab("dashboard")} />
-          <TabButton label="My Cards"  active={tab === "cards"}     onClick={() => selectTab("cards")} />
+          <TabButton label="Dashboard"          active={tab === "dashboard"}  onClick={() => selectTab("dashboard")} />
+          <TabButton label="My Collection"      active={tab === "collection"} onClick={() => selectTab("collection")} />
+          <TabButton label="Collection History" active={tab === "past"}       onClick={() => selectTab("past")} />
         </nav>
 
         {/* ── Dashboard ── */}
@@ -312,13 +330,13 @@ export default function PortfolioPage() {
           </>
         )}
 
-        {/* ── My Cards ── */}
-        {tab === "cards" && (
+        {/* ── My Collection ── (active cards: not sold, not traded) */}
+        {tab === "collection" && (
           <>
             <div style={st.cardsBar}>
               <div>
                 <p style={st.cardsBarLabel}>
-                  <span style={st.heroDot} /> My Cards
+                  <span style={st.heroDot} /> My Collection
                 </p>
                 <p style={st.cardsBarSub}>
                   Browse, filter, and manage your collection.
@@ -329,13 +347,13 @@ export default function PortfolioPage() {
               </Link>
             </div>
 
-            {!loading && !error && cards.length > 0 && (
+            {!loading && !error && activeCards.length > 0 && (
               <CardsToolbar
                 sortBy={sortBy} setSortBy={setSortBy}
                 filters={filters} setFilter={setFilter}
                 uniqueSports={uniqueSports} uniqueGrades={uniqueGrades}
                 viewMode={viewMode} setViewMode={setViewMode}
-                totalCount={cards.length} visibleCount={visibleCards.length}
+                totalCount={activeCards.length} visibleCount={visibleCards.length}
               />
             )}
 
@@ -345,6 +363,8 @@ export default function PortfolioPage() {
               <div style={{ ...st.stateMsg, color: "#f87171" }}>Error: {error}</div>
             ) : cards.length === 0 ? (
               <EmptyState />
+            ) : activeCards.length === 0 ? (
+              <AllInPastState onShowPast={() => selectTab("past")} />
             ) : visibleCards.length === 0 ? (
               <NoMatches onClear={clearFilters} />
             ) : viewMode === "list" ? (
@@ -364,6 +384,67 @@ export default function PortfolioPage() {
                 onEdit={startEdit}
                 onDelete={handleDelete}
                 onCardUpdate={handleCardUpdate}
+              />
+            )}
+          </>
+        )}
+
+        {/* ── Collection History ── (sold or traded; read-only) */}
+        {tab === "past" && (
+          <>
+            <div style={st.cardsBar}>
+              <div>
+                <p style={st.cardsBarLabel}>
+                  <span style={st.heroDot} /> Collection History
+                </p>
+                <p style={st.cardsBarSub}>
+                  Cards you've sold or traded away. Read-only history.
+                </p>
+              </div>
+              {/* No Add Card button — Collection History is read-only by design. */}
+            </div>
+
+            {!loading && !error && pastCards.length > 0 && (
+              <PastCollectionSummary pastCards={pastCards} />
+            )}
+
+            {!loading && !error && pastCards.length > 0 && (
+              <CardsToolbar
+                sortBy={sortBy} setSortBy={setSortBy}
+                filters={filters} setFilter={setFilter}
+                uniqueSports={uniqueSports} uniqueGrades={uniqueGrades}
+                viewMode={viewMode} setViewMode={setViewMode}
+                totalCount={pastCards.length} visibleCount={visiblePastCards.length}
+              />
+            )}
+
+            {loading ? (
+              <SkeletonGrid />
+            ) : error ? (
+              <div style={{ ...st.stateMsg, color: "#f87171" }}>Error: {error}</div>
+            ) : pastCards.length === 0 ? (
+              <NoPastCardsState />
+            ) : visiblePastCards.length === 0 ? (
+              <NoMatches onClear={clearFilters} />
+            ) : viewMode === "list" ? (
+              <CardListView
+                cards={visiblePastCards}
+                highlightId={highlightId}
+                onOpen={openCardModal}
+                onEdit={startEdit}
+                onDelete={handleDelete}
+                readOnly
+              />
+            ) : (
+              <CardGrid
+                visibleCards={visiblePastCards}
+                highlightId={highlightId}
+                pulseIds={pulseIds}
+                onOpen={openCardModal}
+                onEdit={startEdit}
+                onDelete={handleDelete}
+                onCardUpdate={handleCardUpdate}
+                readOnly
               />
             )}
           </>
@@ -668,6 +749,20 @@ function sortCards(cards, sortBy) {
   }
 }
 
+// Toolbar filter chain + sort, applied to either the active or past set.
+// Module-scope so it can be referenced from both useMemos without juggling
+// useCallback deps. Same semantics that My Collection has always used.
+function applyToolbarFilters(base, filters, sortBy) {
+  let out = base;
+  if (filters.sport)          out = out.filter((c) => c.sport === filters.sport);
+  if (filters.grade)          out = out.filter((c) => c.grade === filters.grade);
+  if (filters.rare)           out = out.filter(isRare);
+  if (filters.targetHit)      out = out.filter((c) => c.targetReached);
+  if (filters.cost === "has") out = out.filter((c) => c.myCost != null);
+  if (filters.cost === "no")  out = out.filter((c) => c.myCost == null);
+  return sortCards(out, sortBy);
+}
+
 // ─── Cards toolbar (sort + filters + view toggle) ─────────────────────
 function CardsToolbar({
   sortBy, setSortBy, filters, setFilter,
@@ -784,7 +879,7 @@ function NoMatches({ onClear }) {
 }
 
 // ─── List view ────────────────────────────────────────────────────────
-function CardListView({ cards, highlightId, onOpen, onEdit, onDelete }) {
+function CardListView({ cards, highlightId, onOpen, onEdit, onDelete, readOnly = false }) {
   // Pre-compute the comparison side once per parent render — the map
   // body then does a single string equality per row instead of two
   // String() conversions.
@@ -811,6 +906,7 @@ function CardListView({ cards, highlightId, onOpen, onEdit, onDelete }) {
             onOpen={onOpen}
             onEdit={onEdit}
             onDelete={onDelete}
+            readOnly={readOnly}
           />
         ))}
       </div>
@@ -818,7 +914,7 @@ function CardListView({ cards, highlightId, onOpen, onEdit, onDelete }) {
   );
 }
 
-function CardListRowImpl({ card, highlighted, onOpen, onEdit, onDelete }) {
+function CardListRowImpl({ card, highlighted, onOpen, onEdit, onDelete, readOnly = false }) {
   const [hovered, setHovered] = useState(false);
   const [pulsing, setPulsing] = useState(false);
   const [imgErr, setImgErr]   = useState(false);
@@ -902,21 +998,27 @@ function CardListRowImpl({ card, highlighted, onOpen, onEdit, onDelete }) {
         ) : <span style={{ color: "#475569" }}>—</span>}
       </div>
 
+      {/* Action cell — kept in the row so the grid column count matches the
+          header even when read-only (Collection History has no edit/delete). */}
       <div style={st.listActions}>
-        <button
-          type="button"
-          onClick={(e) => { e.stopPropagation(); onEdit(card); }}
-          style={st.listActionEdit}
-          title="Edit cost"
-          aria-label="Edit cost"
-        >✎</button>
-        <button
-          type="button"
-          onClick={(e) => { e.stopPropagation(); onDelete(card.id); }}
-          style={st.listActionDel}
-          title="Remove card"
-          aria-label="Remove card"
-        >✕</button>
+        {!readOnly && (
+          <>
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); onEdit(card); }}
+              style={st.listActionEdit}
+              title="Edit cost"
+              aria-label="Edit cost"
+            >✎</button>
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); onDelete(card.id); }}
+              style={st.listActionDel}
+              title="Remove card"
+              aria-label="Remove card"
+            >✕</button>
+          </>
+        )}
       </div>
     </div>
   );
@@ -1156,6 +1258,85 @@ function EmptyState() {
   );
 }
 
+// Shown on the My Collection tab when every card has been sold or traded.
+// Cards still exist in the portfolio (dashboard summary picks them up); they
+// just don't belong on the active-collection view.
+function AllInPastState({ onShowPast }) {
+  return (
+    <div style={st.empty}>
+      <div style={st.emptyIcon}>◆</div>
+      <h2 style={st.emptyTitle}>No cards in your active collection</h2>
+      <p style={st.emptySub}>
+        Every card you've added has been sold or traded — view them in Collection History.
+      </p>
+      <button type="button" onClick={onShowPast} style={st.emptyCtaBtn}>
+        View Collection History →
+      </button>
+    </div>
+  );
+}
+
+// Shown on the Collection History tab when the user hasn't sold or traded
+// anything yet. Distinct from EmptyState because the user may still have an
+// active collection — they just don't have any "past" entries.
+function NoPastCardsState() {
+  return (
+    <div style={st.empty}>
+      <div style={st.emptyIcon}>◆</div>
+      <h2 style={st.emptyTitle}>No collection history yet</h2>
+      <p style={st.emptySub}>Cards you sell or trade away will appear here as a permanent history.</p>
+    </div>
+  );
+}
+
+// Three-stat strip at the top of Collection History: cards sold, realized
+// P&L (sum of soldPrice − myCost where both present), cards traded. Mirrors
+// the Editorial Dark hero aesthetic — flat surface, hairline divider, gold
+// reserved for the realized number when it's a positive exit.
+function PastCollectionSummary({ pastCards }) {
+  const stats = useMemo(() => {
+    let soldCount = 0, tradedCount = 0, realizedPnl = 0, hasRealizedCost = false;
+    for (const c of pastCards) {
+      if (isSold(c)) {
+        soldCount += 1;
+        if (c.myCost != null) {
+          realizedPnl += c.consignmentSoldPrice - c.myCost;
+          hasRealizedCost = true;
+        }
+      }
+      if (isTraded(c)) tradedCount += 1;
+    }
+    return { soldCount, tradedCount, realizedPnl, hasRealizedCost };
+  }, [pastCards]);
+
+  const positive = stats.realizedPnl >= 0;
+  const pnlColor = positive ? "#10b981" : "#f87171";
+  const pnlText = stats.hasRealizedCost
+    ? `${positive ? "+" : "−"}${fmtUsd(Math.abs(stats.realizedPnl))}`
+    : "—";
+
+  return (
+    <div style={st.pastSummary}>
+      <div style={st.pastSummaryItem}>
+        <div style={st.pastSummaryValue}>{stats.soldCount.toLocaleString()}</div>
+        <div style={st.pastSummaryLabel}>Total Cards Sold</div>
+      </div>
+      <div style={st.pastSummaryDivider} />
+      <div style={st.pastSummaryItem}>
+        <div style={{ ...st.pastSummaryValue, color: stats.hasRealizedCost ? pnlColor : "#94a3b8" }}>
+          {pnlText}
+        </div>
+        <div style={st.pastSummaryLabel}>Total Realized P&amp;L</div>
+      </div>
+      <div style={st.pastSummaryDivider} />
+      <div style={st.pastSummaryItem}>
+        <div style={st.pastSummaryValue}>{stats.tradedCount.toLocaleString()}</div>
+        <div style={st.pastSummaryLabel}>Total Cards Traded</div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Tier badges ──────────────────────────────────────────────────────
 // Grid-tile ribbon. Ghost renders as a bare floating icon (no pill); the
 // other two tiers use a text pill in their tier colour.
@@ -1243,7 +1424,7 @@ function LazyTile({ children, placeholderHeight = 360 }) {
 
 // Memoized grid wrapper. highlightIdStr is computed ONCE per parent
 // render here, instead of running String() inside every map iteration.
-function CardGridImpl({ visibleCards, highlightId, pulseIds, onOpen, onEdit, onDelete, onCardUpdate }) {
+function CardGridImpl({ visibleCards, highlightId, pulseIds, onOpen, onEdit, onDelete, onCardUpdate, readOnly = false }) {
   const highlightIdStr = highlightId == null ? null : String(highlightId);
   return (
     <div style={st.grid}>
@@ -1258,6 +1439,7 @@ function CardGridImpl({ visibleCards, highlightId, pulseIds, onOpen, onEdit, onD
             onEdit={onEdit}
             onDelete={onDelete}
             onCardUpdate={onCardUpdate}
+            readOnly={readOnly}
           />
         </LazyTile>
       ))}
@@ -1266,7 +1448,7 @@ function CardGridImpl({ visibleCards, highlightId, pulseIds, onOpen, onEdit, onD
 }
 const CardGrid = memo(CardGridImpl);
 
-function CardTileImpl({ card, index, highlighted, pulse, onOpen, onEdit, onDelete, onCardUpdate }) {
+function CardTileImpl({ card, index, highlighted, pulse, onOpen, onEdit, onDelete, onCardUpdate, readOnly = false }) {
   const [hovered, setHovered] = useState(false);
   const [imgErr, setImgErr]   = useState(false);
   const [pulsing, setPulsing] = useState(false);
@@ -1328,21 +1510,24 @@ function CardTileImpl({ card, index, highlighted, pulse, onOpen, onEdit, onDelet
           </div>
         )}
 
-        {/* Top-right hover overlay: edit + delete */}
-        <div style={{ ...st.tileActions, opacity: hovered ? 1 : 0 }}>
-          <button
-            style={st.editBtn}
-            onClick={(e) => { e.stopPropagation(); onEdit(card); }}
-            title="Edit cost"
-            aria-label="Edit cost"
-          >✎</button>
-          <button
-            style={st.deleteBtn}
-            onClick={(e) => { e.stopPropagation(); onDelete(card.id); }}
-            title="Remove card"
-            aria-label="Remove card"
-          >✕</button>
-        </div>
+        {/* Top-right hover overlay: edit + delete. Collection History passes
+            readOnly so sold/traded cards don't expose mutating actions. */}
+        {!readOnly && (
+          <div style={{ ...st.tileActions, opacity: hovered ? 1 : 0 }}>
+            <button
+              style={st.editBtn}
+              onClick={(e) => { e.stopPropagation(); onEdit(card); }}
+              title="Edit cost"
+              aria-label="Edit cost"
+            >✎</button>
+            <button
+              style={st.deleteBtn}
+              onClick={(e) => { e.stopPropagation(); onDelete(card.id); }}
+              title="Remove card"
+              aria-label="Remove card"
+            >✕</button>
+          </div>
+        )}
 
         {/* Bottom-left grade badge — grader logo + grade. PSA gets the
             stickered AVIF; BGS / SGC get a text badge (no licensed
@@ -1973,7 +2158,7 @@ const st = {
     color: "#fbbf24",
   },
 
-  // ─── My Cards header bar (above the grid) ───
+  // ─── Collection / Past header bar (above the grid) ───
   cardsBar: {
     display: "flex", alignItems: "center",
     justifyContent: "space-between", gap: "1rem",
@@ -2893,6 +3078,65 @@ const st = {
     letterSpacing: "0.02em",
     textDecoration: "none",
     transition: "background 0.2s, transform 0.1s",
+  },
+  // Same visual as emptyCta but renders as <button> — used by AllInPastState
+  // to switch tabs without a route navigation.
+  emptyCtaBtn: {
+    display: "inline-flex", alignItems: "center", gap: "0.45rem",
+    marginTop: "1.5rem",
+    background: "#f59e0b", color: "#0f172a",
+    padding: "0.65rem 1.2rem",
+    borderRadius: 8,
+    fontSize: "0.9rem", fontWeight: 700,
+    letterSpacing: "0.02em",
+    border: "none",
+    cursor: "pointer",
+    fontFamily: "inherit",
+    transition: "background 0.2s, transform 0.1s",
+  },
+
+  // ─── Collection History summary strip ───
+  // Three-stat row at the top of the Collection History tab. Hairline
+  // dividers between stats; tabular-nums on values so digits don't jitter
+  // when the data refreshes after a sale lands.
+  pastSummary: {
+    display: "flex",
+    alignItems: "center",
+    gap: "0",
+    background: "rgba(15,23,42,0.6)",
+    border: "1px solid rgba(255,255,255,0.06)",
+    borderRadius: 12,
+    padding: "1.25rem 1.5rem",
+    margin: "1.25rem 0 1.5rem",
+  },
+  pastSummaryItem: {
+    flex: 1,
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    gap: "0.35rem",
+    minWidth: 0,
+  },
+  pastSummaryDivider: {
+    alignSelf: "stretch",
+    width: 1,
+    background: "rgba(255,255,255,0.06)",
+    margin: "0 1rem",
+  },
+  pastSummaryValue: {
+    fontSize: "1.5rem",
+    fontWeight: 700,
+    color: "#f8fafc",
+    letterSpacing: "-0.01em",
+    fontVariantNumeric: "tabular-nums",
+  },
+  pastSummaryLabel: {
+    fontSize: "0.72rem",
+    fontWeight: 600,
+    color: "#94a3b8",
+    letterSpacing: "0.08em",
+    textTransform: "uppercase",
+    textAlign: "center",
   },
 
   // ─── Edit cost modal ───

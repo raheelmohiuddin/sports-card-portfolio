@@ -290,6 +290,7 @@ export default function CardModal({
             <ConsignBlock
               cardId={card.id}
               role={role}
+              cardStatus={card.status}
               consignmentStatus={card.consignmentStatus ?? null}
               consignmentSoldPrice={card.consignmentSoldPrice ?? null}
               consignmentBlocked={card.consignmentBlocked ?? false}
@@ -333,6 +334,7 @@ export default function CardModal({
             <ConsignBlock
               cardId={card.id}
               role={role}
+              cardStatus={card.status}
               consignmentStatus={card.consignmentStatus ?? null}
               consignmentSoldPrice={card.consignmentSoldPrice ?? null}
               consignmentBlocked={card.consignmentBlocked ?? false}

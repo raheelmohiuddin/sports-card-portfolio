@@ -2,7 +2,7 @@
 // cards + executed-trade history once on mount and hands them down to
 // the TradeTab UI.
 //
-// On a successful trade-confirm, navigates to /portfolio?tab=cards with
+// On a successful trade-confirm, navigates to /portfolio?tab=collection with
 // a pulse=<ids> query param. PortfolioPage reads that param, applies
 // the gold-pulse highlight to the matching tiles for 3s, then strips
 // the param from the URL.
@@ -44,9 +44,9 @@ export default function TradeDeskPage() {
     // Refresh history so the new trade lands in Past Trades on the
     // user's next visit to TradeDesk.
     listTrades().then(setPastTrades).catch(() => {});
-    // Navigate back to the portfolio's My Cards tab. The pulse param
+    // Navigate back to the portfolio's My Collection tab. The pulse param
     // is read by PortfolioPage to drive the gold highlight effect.
-    const params = new URLSearchParams({ tab: "cards" });
+    const params = new URLSearchParams({ tab: "collection" });
     if (newCardIds && newCardIds.length > 0) {
       params.set("pulse", newCardIds.join(","));
     }

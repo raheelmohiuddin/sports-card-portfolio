@@ -140,7 +140,7 @@ a { color: inherit; text-decoration: none; }
 }
 
 /* Trade-completion gold pulse — applied to received card tiles for 3s
-   when the user lands on My Cards after confirming a trade. Two
+   when the user lands on My Collection after confirming a trade. Two
    iterations of the existing goldPulse keyframe (1.5s × 2 = 3s)
    matches the spec without redefining the visual. */
 @keyframes scp-trade-card-pulse {

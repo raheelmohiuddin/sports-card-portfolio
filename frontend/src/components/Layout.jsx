@@ -61,10 +61,11 @@ export default function NavHeader() {
           />
         ) : (
           <>
+            {/* Authenticated users get the app's collector tools in the
+                header; Home and About move to the footer for them. Logged-out
+                visitors keep Home/About here as marketing entry points. */}
             <nav style={st.nav}>
-              <NavLink to="/" label="Home" active={pathname === "/"} />
-              <NavLink to="/about" label="About" active={pathname === "/about"} />
-              {isAuth && (
+              {isAuth ? (
                 <>
                   <PortfolioMenu pathname={pathname} />
                   <NavLink
@@ -74,6 +75,11 @@ export default function NavHeader() {
                     badge="BETA"
                   />
                   <NavLink to="/shows" label="My Shows" active={pathname.startsWith("/shows")} />
+                </>
+              ) : (
+                <>
+                  <NavLink to="/" label="Home" active={pathname === "/"} />
+                  <NavLink to="/about" label="About" active={pathname === "/about"} />
                 </>
               )}
             </nav>
@@ -104,6 +110,37 @@ export default function NavHeader() {
   );
 }
 
+// ─── Site footer (authenticated only) ────────────────────────────────
+// Home + About move here when the user is signed in — they're marketing
+// pages, not part of the day-to-day app surface, so they don't deserve
+// header real estate alongside Portfolio / TradeDesk / My Shows.
+export function SiteFooter() {
+  const { authStatus } = useAuthenticator((ctx) => [ctx.authStatus]);
+  if (authStatus !== "authenticated") return null;
+  return (
+    <footer style={st.siteFooter}>
+      <div className="container" style={st.siteFooterInner}>
+        <SiteFooterLink to="/" label="Home" />
+        <SiteFooterLink to="/about" label="About" />
+      </div>
+    </footer>
+  );
+}
+
+function SiteFooterLink({ to, label }) {
+  const [hov, setHov] = useState(false);
+  return (
+    <Link
+      to={to}
+      onMouseEnter={() => setHov(true)}
+      onMouseLeave={() => setHov(false)}
+      style={{ ...st.siteFooterLink, ...(hov ? st.siteFooterLinkHover : null) }}
+    >
+      {label}
+    </Link>
+  );
+}
+
 // Tracks viewport width so we can swap nav layouts at the breakpoint.
 // Only the layout components need this; CSS-media-query alternatives can't
 // conditionally render different React subtrees.
@@ -120,7 +157,7 @@ function useIsMobile(breakpoint = 768) {
 }
 
 // My Portfolio with a hover-driven sub-menu exposing the two tabs the
-// page hosts internally (Dashboard, My Cards). Hover opens, mouse-leave
+// page hosts internally (Dashboard, My Collection, Collection History). Hover opens, mouse-leave
 // after a short grace period closes — the grace prevents accidental
 // closes when the cursor crosses the gap between trigger and panel.
 // Clicking the trigger also navigates to /portfolio (default Dashboard
@@ -170,8 +207,9 @@ function PortfolioMenu({ pathname }) {
           pointerEvents: open ? "auto" : "none",
         }}
       >
-        <PortfolioMenuItem label="Dashboard" onClick={() => go("/portfolio?tab=dashboard")} />
-        <PortfolioMenuItem label="My Cards"  onClick={() => go("/portfolio?tab=cards")} />
+        <PortfolioMenuItem label="Dashboard"          onClick={() => go("/portfolio?tab=dashboard")} />
+        <PortfolioMenuItem label="My Collection"      onClick={() => go("/portfolio?tab=collection")} />
+        <PortfolioMenuItem label="Collection History" onClick={() => go("/portfolio?tab=past")} />
         <div style={st.portfolioMenuDivider} />
         <PortfolioMenuItem
           label={<><span style={st.portfolioMenuActionIcon}>+</span> Add a Card</>}
@@ -417,8 +455,14 @@ function MobileMenu({ pathname, isAuth, username, email, role, onSignOut }) {
         transform: open ? "translateY(0)" : "translateY(-8px)",
         pointerEvents: open ? "auto" : "none",
       }}>
-        <MobileItem to="/"          label="Home"        active={pathname === "/"}          onClick={() => go("/")} />
-        <MobileItem to="/about"     label="About"       active={pathname === "/about"}     onClick={() => go("/about")} />
+        {/* Same split as desktop — auth users see app tools here; Home and
+            About live in the footer for them. */}
+        {!isAuth && (
+          <>
+            <MobileItem to="/"      label="Home"  active={pathname === "/"}      onClick={() => go("/")} />
+            <MobileItem to="/about" label="About" active={pathname === "/about"} onClick={() => go("/about")} />
+          </>
+        )}
         {isAuth && (
           <>
             <MobileItem
@@ -812,5 +856,31 @@ const st = {
     letterSpacing: "0.01em",
     whiteSpace: "nowrap",
     flexShrink: 0,
+  },
+
+  // ── Site footer (authenticated only) ──
+  // surface-1 with a hairline top divider; matches the Editorial Dark
+  // chrome elsewhere. Small muted text per spec.
+  siteFooter: {
+    background: "#0f172a",
+    borderTop: "1px solid rgba(255,255,255,0.06)",
+    padding: "1.5rem 0",
+  },
+  siteFooterInner: {
+    display: "flex",
+    gap: "1.75rem",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  siteFooterLink: {
+    color: "#64748b",
+    fontSize: "0.78rem",
+    fontWeight: 500,
+    letterSpacing: "0.02em",
+    textDecoration: "none",
+    transition: "color 0.15s ease",
+  },
+  siteFooterLinkHover: {
+    color: "#cbd5e1",
   },
 };

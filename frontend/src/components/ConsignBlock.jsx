@@ -17,7 +17,10 @@ import { createConsignment } from "../services/api.js";
 //
 // Hidden entirely for admin users — admins shouldn't consign their own
 // collection, and they manage status via the admin portal anyway.
-export default function ConsignBlock({ cardId, role, consignmentStatus, consignmentSoldPrice, consignmentBlocked, onConsigned }) {
+// Also hidden when the card has been traded away (cardStatus === "traded"):
+// the card is no longer owned, so consigning it makes no sense and showing
+// any consignment UI would be misleading.
+export default function ConsignBlock({ cardId, role, cardStatus, consignmentStatus, consignmentSoldPrice, consignmentBlocked, onConsigned }) {
   const [stage, setStage]       = useState("collapsed"); // collapsed | form
   const [type, setType]         = useState("auction");
   const [platform, setPlatform] = useState("fanatics");  // auction-only
@@ -32,6 +35,7 @@ export default function ConsignBlock({ cardId, role, consignmentStatus, consignm
   const [status, setStatus] = useState(consignmentStatus ?? null);
 
   if (role === "admin") return null;
+  if (cardStatus === "traded") return null;
 
   // Permanent block (server-derived from consignment_blocks keyed on
   // user_id + cert_number) takes precedence over every other render path.

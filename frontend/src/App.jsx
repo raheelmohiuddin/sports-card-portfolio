@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router-dom";
 import { Authenticator, useAuthenticator } from "@aws-amplify/ui-react";
 import "@aws-amplify/ui-react/styles.css";
-import NavHeader from "./components/Layout.jsx";
+import NavHeader, { SiteFooter } from "./components/Layout.jsx";
 import AdminGuard from "./components/AdminGuard.jsx";
 import HomePage from "./pages/HomePage.jsx";
 import AboutPage from "./pages/AboutPage.jsx";
@@ -41,7 +41,7 @@ function ProtectedRoute({ children }) {
 // swaps it the instant opacity hits 0 — so the old page stays mounted
 // during fade-out and the new page mounts already-invisible at the
 // start of fade-in. Pathname-only comparison so query-string-only
-// changes (e.g. PortfolioPage's ?tab=cards toggle) don't animate.
+// changes (e.g. PortfolioPage's ?tab=collection toggle) don't animate.
 function AnimatedRoutes() {
   const location = useLocation();
   const [displayLocation, setDisplayLocation] = useState(location);
@@ -112,6 +112,7 @@ export default function App() {
       <BrowserRouter>
         <NavHeader />
         <AnimatedRoutes />
+        <SiteFooter />
       </BrowserRouter>
     </Authenticator.Provider>
   );
