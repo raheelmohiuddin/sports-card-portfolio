@@ -26,14 +26,16 @@ html, body, #root {
 img, video, canvas { max-width: 100%; }
 
 body {
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  /* Dark navy so overscroll bouncing (iOS rubber-banding, etc.) and any
-     space below the page footer or above the hero shows the brand colour
-     instead of bare white. Page sections that need a white background
-     (features, story) set their own bg, so this only shows in those gaps. */
-  background: #0f172a;
+  font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  /* bg-base — overscroll bouncing and any gaps between sections show the
+     deepest surface in the tonal scale. */
+  background: #0a0e1a;
   color: #222;
 }
+
+/* Editorial Dark — feature card tonal hover (surface-1 → surface-2). */
+.scp-feature-card { transition: background-color 200ms ease; }
+.scp-feature-card:hover { background-color: #1a2332; }
 
 /* Partnership banner — stacks vertically on small screens so the 120px
    logo + flanking text don't fight for horizontal space inside a 1fr/auto/1fr
@@ -108,38 +110,17 @@ a { color: inherit; text-decoration: none; }
   75%      { transform: translate(-1.2px, -1.5px); }
 }
 
-/* ─── Floating-card hero background ─────────────────────────────── */
-/* Each card composes one drift animation (translate) on the outer wrapper
-   with one rotate animation on the inner — keeps the transforms on different
-   elements so they don't fight for the same CSS property. */
-@keyframes cardRotate {
-  from { transform: rotate(0deg); }
-  to   { transform: rotate(360deg); }
+/* ─── Spotlight Rotation hero background ─────────────────────────── */
+/* A single card sits behind the hero copy, gently tilting on Y-axis to
+   catch a diegetic specular highlight that sweeps the slab. No ambient
+   glow — the only "lighting" belongs to the card surface itself. */
+@keyframes spotlightTilt {
+  0%, 100% { transform: rotateY(-10deg); }
+  50%      { transform: rotateY( 10deg); }
 }
-@keyframes driftA {
-  0%, 100% { transform: translate(0, 0); }
-  25%      { transform: translate(22px, -18px); }
-  50%      { transform: translate(38px, 24px); }
-  75%      { transform: translate(-12px, 18px); }
-}
-@keyframes driftB {
-  0%, 100% { transform: translate(0, 0); }
-  50%      { transform: translate(-30px, -36px); }
-}
-@keyframes driftC {
-  0%, 100% { transform: translate(0, 0); }
-  25%      { transform: translate(-18px, 28px); }
-  75%      { transform: translate(26px, -14px); }
-}
-@keyframes driftD {
-  0%, 100% { transform: translate(0, 0); }
-  33%      { transform: translate(32px, 16px); }
-  66%      { transform: translate(-22px, -24px); }
-}
-/* Holographic shimmer sweep — a long gradient slid back and forth. */
-@keyframes cardShimmer {
-  0%, 100% { background-position: -120% center; }
-  50%      { background-position:  220% center; }
+@keyframes spotlightShine {
+  0%, 100% { background-position: -40% center; }
+  50%      { background-position: 140% center; }
 }
 
 /* Gold pulse for highlighting a deep-linked card tile (e.g. duplicate redirect) */
@@ -245,8 +226,50 @@ a { color: inherit; text-decoration: none; }
    (mobile Safari has historically had bugs clipping transformed
    absolutely-positioned descendants). The hero stays visually rich on
    desktop; mobile gets a cleaner, faster hero. */
+/* ─── Hero split layout ─────────────────────────────────────────── */
+/* Two-column grid on desktop; single column stack on mobile.          */
+.scp-hero-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 3rem;
+  align-items: center;
+}
+.scp-hero-left { text-align: left; }
+.scp-hero-left .scp-hero-sub { margin-left: 0; margin-right: 0; }
+.scp-hero-ctas { justify-content: flex-start; }
 @media (max-width: 768px) {
-  .scp-floating-cards { display: none !important; }
+  .scp-hero-grid {
+    grid-template-columns: 1fr;
+    gap: 2.5rem;
+  }
+  .scp-hero-left { text-align: center; }
+  .scp-hero-left .scp-hero-sub { margin-left: auto; margin-right: auto; }
+  .scp-hero-ctas { justify-content: center; }
+}
+
+/* Spotlight stage owns the dimensions; cards inside fill via inset:0
+   so two cards can overlap during a crossfade. 5:7 aspect → height. */
+.scp-spotlight-stage {
+  position: relative;
+  width: min(40vw, 360px);
+  aspect-ratio: 5 / 7;
+  perspective: 1400px;
+}
+@media (max-width: 768px) {
+  .scp-spotlight-stage { width: min(60vw, 240px); }
+}
+
+/* Card slot — full opacity desktop, 70% mobile. React inline-overrides
+   to opacity 0 + scale(0.96) for the "off" half of the crossfade. */
+.scp-spotlight-card {
+  position: absolute;
+  inset: 0;
+  opacity: 1;
+  transition: opacity 500ms ease, transform 500ms ease;
+  will-change: opacity, transform;
+}
+@media (max-width: 768px) {
+  .scp-spotlight-card { opacity: 0.7; }
 }
 
 /* Admin consignments table — show the inline edit icon only when the
