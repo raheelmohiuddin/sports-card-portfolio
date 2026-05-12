@@ -234,4 +234,87 @@ function round2(n) {
   return Math.round(n * 100) / 100;
 }
 
-module.exports = { fetchMarketValue, fetchComps, fetchAllPrices, gradeLabel };
+// ─────────────────────────────────────────────────────────────────────
+// Valuation rebuild (per .agents/valuation-rebuild-plan.md §3) — additive.
+//
+// New flow used by the rebuilt refresh + add-card paths:
+//   prices-by-cert → card-details → comps → price-estimate
+//
+// Existing fetchMarketValue / tryPricesByCert / tryCardMatch above remain
+// in place for fuzzy-match callers (no cert) and as the rollback path.
+// Nothing consumes the new functions yet — wired up in commit 3.
+// ─────────────────────────────────────────────────────────────────────
+
+// New: full structured response from card-details
+async function fetchCardDetails(cardId) {
+  const res = await chPost("/v1/cards/card-details", { card_id: cardId }, TIMEOUT_FAST_MS);
+  return res?.cards?.[0] ?? null;
+}
+
+// New: price-estimate at a specific grade
+async function fetchPriceEstimate(cardId, gradeLabelStr) {
+  const res = await chPost(
+    "/v1/cards/price-estimate",
+    { card_id: cardId, grade: gradeLabelStr },
+    TIMEOUT_FAST_MS,
+  );
+  if (!res || res.price == null) return null;
+  return {
+    price:          round2(res.price),
+    priceLow:       res.price_low  != null ? round2(res.price_low)  : null,
+    priceHigh:      res.price_high != null ? round2(res.price_high) : null,
+    confidence:     res.confidence ?? null,
+    method:         res.method     ?? null,
+    freshnessDays:  res.freshness_days ?? null,
+  };
+}
+
+// New orchestrator: cert -> {cardhedgerId, variant, comps, estimate}
+// Used by add-card.js and refresh-portfolio.js (cert path).
+// Cards without a cert continue using fetchMarketValue.
+async function fetchValuation({ certNumber, grader, grade }) {
+  const label = gradeLabel(grade);
+  if (!label) return null;
+
+  // 1. cert -> card_id (authoritative)
+  const certRes = await chPost(
+    "/v1/cards/prices-by-cert",
+    { cert: String(certNumber), grader: grader || "PSA", days: 90 },
+    TIMEOUT_FAST_MS,
+    { allow422: true },
+  );
+  if (!certRes?.card?.card_id) return null;
+  const cardId = certRes.card.card_id;
+
+  // 2-4. Run in parallel — independent calls, all keyed on cardId.
+  // Per-call try/catch isolates one failure from torpedoing the whole
+  // valuation (e.g. price-estimate rate-limited but comps still landed).
+  const [details, comps, estimate] = await Promise.all([
+    fetchCardDetails(cardId).catch(() => null),
+    fetchComps(cardId, label).catch(() => null),
+    fetchPriceEstimate(cardId, label).catch(() => null),
+  ]);
+
+  return {
+    cardhedgerId:       cardId,
+    cardhedgerImageUrl: safeImageUrl(certRes.card.image ?? details?.image),
+    variant:            details?.variant ?? null,
+    comps: comps ? {
+      avgSalePrice:  comps.comp_price != null ? round2(parseFloat(comps.comp_price)) : null,
+      lastSalePrice: comps.raw_prices?.[0]?.price != null ? round2(parseFloat(comps.raw_prices[0].price)) : null,
+      numSales:      comps.count_used ?? (comps.raw_prices?.length ?? 0),
+      rawComps:      comps.raw_prices ?? [],
+    } : null,
+    estimate,  // {price, priceLow, priceHigh, confidence, method, freshnessDays} or null
+  };
+}
+
+module.exports = {
+  fetchMarketValue,    // existing — kept for fuzzy-match path
+  fetchComps,          // existing
+  fetchAllPrices,      // existing
+  gradeLabel,          // existing
+  fetchValuation,      // new
+  fetchCardDetails,    // new
+  fetchPriceEstimate,  // new
+};
