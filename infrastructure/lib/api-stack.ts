@@ -561,10 +561,12 @@ export class ApiStack extends Construct {
 
     // CardHedger pricing API key — read by portfolio/pricing.js inside the
     // portfolio-refresh Lambda (and previously portfolio-value before the
-    // SWR split). Also granted to pricing-preview for the Trade Builder
-    // and to both card-sales Lambdas for the grade-filter dropdown's
-    // live comps fetch.
-    for (const fn of [portfolioRefreshFn, pricingPreviewFn, cardSalesFn, adminCardSalesFn]) {
+    // SWR split). Also granted to pricing-preview for the Trade Builder,
+    // to both card-sales Lambdas for the grade-filter dropdown's live
+    // comps fetch, and to add-card + psa-lookup for the synchronous
+    // fetchValuation / fetchEstimateForCert calls added in the valuation
+    // rebuild and the lookup-preview value block.
+    for (const fn of [portfolioRefreshFn, pricingPreviewFn, cardSalesFn, adminCardSalesFn, addCardFn, psaLookupFn]) {
       fn.addToRolePolicy(
         new iam.PolicyStatement({
           actions: ["secretsmanager:GetSecretValue"],
