@@ -63,13 +63,21 @@ exports.handler = async (event) => {
   // the admin email, so it doubles as the lookup.
   const cardRow = await db.query(
     `SELECT id, player_name, year, brand, grade, cert_number,
-            estimated_value, manual_price
+            estimated_value, manual_price, status
      FROM cards
      WHERE id = $1 AND user_id = $2`,
     [cardId, userId]
   );
   if (cardRow.rowCount === 0) return json(404, { error: "Card not found" });
   const card = cardRow.rows[0];
+
+  // Cross-path conflict guard per .agents/mark-as-sold-plan.md OQ-7.
+  // A card that's already been self-sold (cards.status='sold') cannot be
+  // re-consigned — the card has exited the portfolio via the mark-as-sold
+  // flow and the two paths must not contradict each other.
+  if (card.status === "sold") {
+    return json(409, { error: "Card already marked as sold; cannot create consignment" });
+  }
 
   // Permanent block check — defense-in-depth against a client that bypasses
   // the hidden UI button. Block is keyed on (user_id, cert_number) so it
