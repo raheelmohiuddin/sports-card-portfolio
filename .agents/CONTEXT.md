@@ -899,6 +899,18 @@ Frontend ships via Amplify auto-deploy from GitHub `master` — no manual fronte
 
 Reverse this order and you'll briefly serve 500s from `get-cards` (which fans out to the entire portfolio page for every user).
 
+### CI/CD
+
+- **CI** (`.github/workflows/ci.yml`) runs on every push to `master` and every PR. Three parallel jobs: backend Jest tests, frontend Vitest tests, frontend Vite build (with a stubbed `aws-exports.js` since the real file is gitignored). Concurrency cancels in-flight runs on a stale ref. The status check is the live gate — expected to be green before any merge or deploy.
+
+- **Deploys are manual.** Always have been. Use the `npx cdk deploy` flow above; frontend rides Amplify's own GitHub trigger. There is no automated CDK pipeline.
+
+- **A `deploy.yml` workflow used to sit alongside `ci.yml`** but it was aspirational scaffolding that never ran successfully. It expected three GitHub Actions secrets (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION`) that were never configured on the repo, and failed in 23–32 seconds on every push from **2026-05-10 to 2026-05-12 — 8 runs, 0 successes**, all dying at `Configure AWS credentials` with `Input required and not supplied: aws-region` before any deploy logic ran. It was removed (and this note added) so the red status check stops appearing on every push.
+
+- **Security audit** (`.github/workflows/security.yml`) runs weekly (Monday 09:00 UTC) and on-demand. `npm audit` over prod deps only (high/critical threshold) plus TruffleHog verified-only secret scan. Files a `security`-labeled GitHub issue when either surfaces findings.
+
+- **If auto-deploy is wanted in the future**, the preferred path is **GitHub OIDC → IAM role with cdk-deploy permissions**, not long-lived access keys. (The removed `deploy.yml`'s own header comment called this out.) Short-lived tokens scoped to a single workflow run; no secret rotation; no permanent CI access if the repo is ever compromised. The `aws-actions/configure-aws-credentials` action supports it via `role-to-assume`.
+
 ### Migrations
 
 Two patterns coexist:
