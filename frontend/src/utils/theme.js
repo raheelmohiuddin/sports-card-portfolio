@@ -5,10 +5,10 @@
 
 // ─── Colour palette ───────────────────────────────────────────────────
 export const colors = {
-  // Brand gold
-  gold:      "#f59e0b",
-  goldLight: "#fbbf24",
-  goldDark:  "#d97706",
+  // Brand gold — antique gold per MASTER.md §1.3 (replaces legacy warning amber).
+  gold:      "#d4af37",
+  goldLight: "#e6c463",
+  goldDark:  "#a8862a",
 
   // Dark surface / page background
   bg:       "#0f172a",
@@ -27,7 +27,7 @@ export const colors = {
 
   // Common border tints used on dark panels
   borderSoft: "rgba(255,255,255,0.06)",
-  borderGold: "rgba(245,158,11,0.4)",
+  borderGold: "rgba(212,175,55,0.4)",
 };
 
 // ─── Gradients ────────────────────────────────────────────────────────
@@ -41,14 +41,18 @@ export const gradients = {
   // surface inside the dark pages (analytics, insights row, history,
   // detail panels, edit cost modal). 3-stop variant.
   goldPanel:
-    "linear-gradient(135deg, rgba(245,158,11,0.04) 0%, rgba(255,255,255,0.02) 50%, rgba(245,158,11,0.03) 100%)",
+    "linear-gradient(135deg, rgba(212,175,55,0.04) 0%, rgba(255,255,255,0.02) 50%, rgba(212,175,55,0.03) 100%)",
 
   // 2-stop variant for slightly less wash (toolbar / cards bar).
   goldPanelSimple:
-    "linear-gradient(135deg, rgba(245,158,11,0.04), rgba(255,255,255,0.02))",
+    "linear-gradient(135deg, rgba(212,175,55,0.04), rgba(255,255,255,0.02))",
 
+  // DEPRECATED for new work — MASTER.md §3.2 reserves CTA styling
+  // for white/slate, not gold. Existing consumers retain visual
+  // consistency at the new antique value; each will be migrated to
+  // proper CTA styling in a follow-up pass per surface.
   // Solid gold pill — used on primary CTAs and the Add Card button.
-  goldPill: "linear-gradient(135deg, #f59e0b 0%, #d97706 100%)",
+  goldPill: "linear-gradient(135deg, #d4af37 0%, #a8862a 100%)",
 
   // Admin variants — same dark page, but every "elevated" surface picks up
   // a violet wash so the admin portal reads as a sibling app rather than
