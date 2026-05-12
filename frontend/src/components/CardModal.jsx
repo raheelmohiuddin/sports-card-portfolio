@@ -19,8 +19,6 @@ const CONSIGNMENT_STATUS_LABEL = {
   declined: "Declined",
 };
 const CONSIGNMENT_STATUS_COLOR = {
-  // SEMANTIC WARNING — keep amber per consignment-status spec.
-  // Brand-gold (#d4af37) is intentionally NOT applied here.
   pending: "#fbbf24",
   in_review: "#93c5fd",
   listed: "#6ee7b7",
@@ -442,8 +440,8 @@ function sidebarTierStyle(tier) {
   }
   if (tier === "ultra_rare") {
     return {
-      borderLeft: "1px solid rgba(212,175,55,0.55)",
-      boxShadow: "-12px 0 40px rgba(0,0,0,0.6), 0 0 0 1px rgba(212,175,55,0.2), 0 0 80px rgba(212,175,55,0.1)",
+      borderLeft: "1px solid rgba(245,158,11,0.55)",
+      boxShadow: "-12px 0 40px rgba(0,0,0,0.6), 0 0 0 1px rgba(245,158,11,0.2), 0 0 80px rgba(245,158,11,0.1)",
     };
   }
   return {
@@ -483,7 +481,7 @@ function modalTierStyle(tier) {
   if (tier === "ghost")
     return { boxShadow: "0 24px 60px rgba(0,0,0,0.35), 0 0 0 2px rgba(226,232,240,0.85), 0 0 60px rgba(226,232,240,0.25)" };
   if (tier === "ultra_rare")
-    return { boxShadow: "0 24px 60px rgba(0,0,0,0.35), 0 0 0 2px #d4af37" };
+    return { boxShadow: "0 24px 60px rgba(0,0,0,0.35), 0 0 0 2px #f59e0b" };
   return { boxShadow: "0 24px 60px rgba(0,0,0,0.35), 0 0 0 2px rgba(147,197,253,0.85)" };
 }
 
@@ -508,7 +506,7 @@ function gradeBadgeTierStyle(tier) {
   };
 }
 
-function PopStat({ label, value, highlight, highlightColor = "#a8862a" }) {
+function PopStat({ label, value, highlight, highlightColor = "#d97706" }) {
   return (
     <div style={st.popStat}>
       <span style={st.popStatLabel}>{label}</span>
@@ -708,7 +706,7 @@ const st = {
     borderRadius: 999,
   },
   tierBannerUltraRare: {
-    background: "linear-gradient(135deg, #d4af37, #a8862a)",
+    background: "linear-gradient(135deg, #f59e0b, #d97706)",
     color: "#0f172a",
     boxShadow: "0 2px 12px rgba(217,119,6,0.45)",
   },
@@ -866,8 +864,8 @@ const st = {
     display: "flex", gap: "1.75rem",
   },
   popBlockRare: {
-    background: "rgba(212,175,55,0.06)",
-    border: "1px solid rgba(212,175,55,0.25)",
+    background: "rgba(245,158,11,0.06)",
+    border: "1px solid rgba(245,158,11,0.25)",
   },
   popStat: { display: "flex", flexDirection: "column", gap: "0.2rem" },
   popStatLabel: {
@@ -883,10 +881,10 @@ const st = {
   priceBlock: { marginBottom: "0.75rem" },
   mainPrice: {
     fontSize: "1.85rem", fontWeight: 800,
-    color: "#d4af37", lineHeight: 1,
+    color: "#f59e0b", lineHeight: 1,
     fontVariantNumeric: "tabular-nums",
     letterSpacing: "-0.02em",
-    textShadow: "0 0 32px rgba(212,175,55,0.18)",
+    textShadow: "0 0 32px rgba(245,158,11,0.18)",
   },
   // Realized exit — green instead of gold, shadow tinted to match.
   mainPriceSold: {
@@ -935,27 +933,27 @@ const st = {
   // ── Target price block ──
   targetBlock: {
     display: "flex", alignItems: "center", justifyContent: "space-between",
-    background: "rgba(212,175,55,0.06)",
-    border: "1px solid rgba(212,175,55,0.25)",
+    background: "rgba(245,158,11,0.06)",
+    border: "1px solid rgba(245,158,11,0.25)",
     borderRadius: 10,
     padding: "0.95rem 1.1rem",
   },
   targetValue: {
-    fontSize: "1.4rem", fontWeight: 800, color: "#e6c463",
+    fontSize: "1.4rem", fontWeight: 800, color: "#fbbf24",
     fontVariantNumeric: "tabular-nums",
     letterSpacing: "-0.02em",
   },
   targetReachedTag: {
     display: "inline-flex", alignItems: "center", gap: "0.4rem",
     fontSize: "0.6rem", fontWeight: 800,
-    color: "#e6c463", letterSpacing: "0.16em",
+    color: "#fbbf24", letterSpacing: "0.16em",
     background: "rgba(15,23,42,0.6)",
-    border: "1px solid rgba(212,175,55,0.55)",
+    border: "1px solid rgba(245,158,11,0.55)",
     padding: "0.25rem 0.55rem", borderRadius: 999,
   },
   targetReachedDot: {
     width: 6, height: 6, borderRadius: "50%",
-    background: "#d4af37",
+    background: "#f59e0b",
     animation: "livePulse 1.6s ease-in-out infinite",
   },
 
@@ -992,7 +990,7 @@ const st = {
     letterSpacing: "-0.01em",
   },
   adminConsignSold: {
-    color: "#e6c463",
+    color: "#fbbf24",
   },
   adminConsignNotesBlock: {
     paddingTop: "0.4rem",

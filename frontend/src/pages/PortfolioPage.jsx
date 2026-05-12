@@ -980,7 +980,7 @@ function CardListRowImpl({ card, highlighted, onOpen, onEdit, onDelete, readOnly
       <div style={{
         ...st.listCell, ...st.listMoney,
         textAlign: "right",
-        color: sold ? "#6ee7b7" : "#d4af37",
+        color: sold ? "#6ee7b7" : "#f59e0b",
         fontWeight: 700,
       }}>
         {value != null ? fmtUsd(value) : "—"}
@@ -1371,7 +1371,7 @@ const TierFlag = memo(TierFlagImpl);
 // React.memo's prop-equality check on style-shaped values cheap, and
 // avoids allocating a new object on every CardTile render.
 const TIER_TILE_STYLES = {
-  ultra_rare: { borderColor: "rgba(212,175,55,0.4)" },
+  ultra_rare: { borderColor: "rgba(245,158,11,0.4)" },
   ghost:      { borderColor: "rgba(255,255,255,0.32)" },
   rare:       { borderColor: "rgba(147,197,253,0.4)" },
 };
@@ -2157,9 +2157,9 @@ const st = {
   },
   tabHover: { color: "#cbd5e1" },
   tabActive: {
-    color: "#d4af37",
-    borderBottom: "2px solid #d4af37",
-    textShadow: "0 0 24px rgba(212,175,55,0.4)",
+    color: "#f59e0b",
+    borderBottom: "2px solid #f59e0b",
+    textShadow: "0 0 24px rgba(245,158,11,0.4)",
   },
   tabBadge: {
     display: "inline-flex", alignItems: "center", justifyContent: "center",
@@ -2173,8 +2173,8 @@ const st = {
     transition: "background 0.15s, color 0.15s",
   },
   tabBadgeActive: {
-    background: "rgba(212,175,55,0.18)",
-    color: "#e6c463",
+    background: "rgba(245,158,11,0.18)",
+    color: "#fbbf24",
   },
 
   // ─── Collection / Past header bar (above the grid) ───
@@ -2318,8 +2318,8 @@ const st = {
   },
   noMatchesBtn: {
     background: "transparent",
-    border: "1px solid rgba(212,175,55,0.4)",
-    color: "#e6c463",
+    border: "1px solid rgba(245,158,11,0.4)",
+    color: "#fbbf24",
     fontSize: "0.78rem", fontWeight: 700,
     padding: "0.45rem 1.15rem", borderRadius: 999,
     cursor: "pointer", letterSpacing: "0.01em",
@@ -2360,12 +2360,12 @@ const st = {
     transition: "background 0.15s, box-shadow 0.15s",
   },
   listRowHovered: {
-    background: "rgba(212,175,55,0.045)",
-    boxShadow: "inset 3px 0 0 rgba(212,175,55,0.7)",
+    background: "rgba(245,158,11,0.045)",
+    boxShadow: "inset 3px 0 0 rgba(245,158,11,0.7)",
   },
   listRowHighlight: {
     animation: "goldPulse 1.5s ease-in-out 3",
-    background: "rgba(212,175,55,0.06)",
+    background: "rgba(245,158,11,0.06)",
   },
 
   listThumbWrap: {
@@ -2395,9 +2395,9 @@ const st = {
   listFlagTarget: {
     flexShrink: 0,
     fontSize: "0.55rem", fontWeight: 800, letterSpacing: "0.1em",
-    color: "#e6c463",
-    background: "rgba(212,175,55,0.12)",
-    border: "1px solid rgba(212,175,55,0.5)",
+    color: "#fbbf24",
+    background: "rgba(245,158,11,0.12)",
+    border: "1px solid rgba(245,158,11,0.5)",
     padding: "0.05rem 0.3rem", borderRadius: 3,
   },
   // Green SOLD flag for the list-row name column. Lives next to TARGET so
@@ -2429,9 +2429,9 @@ const st = {
   listGradeBadge: {
     display: "inline-flex", alignItems: "center",
     fontSize: "0.7rem", fontWeight: 800,
-    color: "#d4af37",
+    color: "#f59e0b",
     background: "rgba(15,23,42,0.85)",
-    border: "1px solid rgba(212,175,55,0.4)",
+    border: "1px solid rgba(245,158,11,0.4)",
     padding: "0.2rem 0.5rem",
     borderRadius: 4,
     letterSpacing: "0.04em",
@@ -2442,8 +2442,8 @@ const st = {
   },
   listActionEdit: {
     background: "rgba(15,23,42,0.85)",
-    border: "1px solid rgba(212,175,55,0.4)",
-    color: "#d4af37",
+    border: "1px solid rgba(245,158,11,0.4)",
+    color: "#f59e0b",
     width: 28, height: 28, fontSize: "0.78rem", fontWeight: 700,
     borderRadius: "50%",
     display: "flex", alignItems: "center", justifyContent: "center",
@@ -2850,8 +2850,8 @@ const st = {
   },
   editBtn: {
     background: "rgba(15,23,42,0.85)",
-    border: "1px solid rgba(212,175,55,0.4)",
-    color: "#d4af37",
+    border: "1px solid rgba(245,158,11,0.4)",
+    color: "#f59e0b",
     borderRadius: "50%",
     width: 28, height: 28, fontSize: "0.78rem",
     cursor: "pointer",
@@ -2874,7 +2874,7 @@ const st = {
     position: "absolute", bottom: 10, left: 10,
     display: "flex", alignItems: "center", gap: "0.35rem",
     background: "rgba(15,23,42,0.88)",
-    border: "1px solid rgba(212,175,55,0.4)",
+    border: "1px solid rgba(245,158,11,0.4)",
     borderRadius: 4,
     padding: "2px 0.5rem 2px 2px",
     backdropFilter: "blur(8px)",
@@ -2893,7 +2893,7 @@ const st = {
   },
   gradeBadgeValue: {
     fontSize: "0.85rem", fontWeight: 800,
-    color: "#d4af37", lineHeight: 1,
+    color: "#f59e0b", lineHeight: 1,
     fontVariantNumeric: "tabular-nums",
     letterSpacing: "-0.01em",
   },
@@ -2920,9 +2920,9 @@ const st = {
     zIndex: 2,
   },
   tierRibbonUltraRare: {
-    background: "linear-gradient(135deg, #d4af37, #a8862a)",
+    background: "linear-gradient(135deg, #f59e0b, #d97706)",
     color: "#0f172a",
-    boxShadow: "0 2px 10px rgba(212,175,55,0.4)",
+    boxShadow: "0 2px 10px rgba(245,158,11,0.4)",
   },
   tierRibbonRare: {
     background: "linear-gradient(135deg, rgba(147,197,253,0.18), rgba(99,102,241,0.12))",
@@ -2955,7 +2955,7 @@ const st = {
     lineHeight: 1.4,
   },
   tierFlagUltraRare: {
-    background: "linear-gradient(135deg, #d4af37, #a8862a)",
+    background: "linear-gradient(135deg, #f59e0b, #d97706)",
     color: "#0f172a",
   },
   tierFlagRare: {
@@ -3125,18 +3125,18 @@ const st = {
   // ── Inline editor ──
   editBlock: {
     display: "flex", alignItems: "center", gap: "0.25rem",
-    background: "rgba(212,175,55,0.08)",
-    border: "1px solid rgba(212,175,55,0.4)",
+    background: "rgba(245,158,11,0.08)",
+    border: "1px solid rgba(245,158,11,0.4)",
     borderRadius: 6, padding: "0.15rem 0.35rem",
   },
-  editDollar: { fontSize: "0.85rem", color: "#d4af37", fontWeight: 700 },
+  editDollar: { fontSize: "0.85rem", color: "#f59e0b", fontWeight: 700 },
   editInput: {
     width: 70, background: "transparent", border: "none", outline: "none",
     fontSize: "0.9rem", fontWeight: 700, color: "#f1f5f9",
     fontVariantNumeric: "tabular-nums",
   },
   editOk: {
-    background: "#d4af37", color: "#0f172a", border: "none",
+    background: "#f59e0b", color: "#0f172a", border: "none",
     borderRadius: 4, width: 22, height: 22, fontSize: "0.7rem",
     cursor: "pointer", fontWeight: 800,
     display: "flex", alignItems: "center", justifyContent: "center",
@@ -3207,7 +3207,7 @@ const st = {
   emptyCtaBtn: {
     display: "inline-flex", alignItems: "center", gap: "0.45rem",
     marginTop: "1.5rem",
-    background: "#d4af37", color: "#0f172a",
+    background: "#f59e0b", color: "#0f172a",
     padding: "0.65rem 1.2rem",
     borderRadius: 8,
     fontSize: "0.9rem", fontWeight: 700,
@@ -3274,9 +3274,9 @@ const st = {
     position: "relative",
     width: "100%", maxWidth: 460,
     background: "linear-gradient(160deg, #0f172a 0%, #0a0f1f 100%)",
-    border: "1px solid rgba(212,175,55,0.18)",
+    border: "1px solid rgba(245,158,11,0.18)",
     borderRadius: 16,
-    boxShadow: "0 24px 60px rgba(0,0,0,0.6), 0 0 0 1px rgba(212,175,55,0.08), 0 0 80px rgba(212,175,55,0.06)",
+    boxShadow: "0 24px 60px rgba(0,0,0,0.6), 0 0 0 1px rgba(245,158,11,0.08), 0 0 80px rgba(245,158,11,0.06)",
     padding: "2rem 2rem 1.5rem",
     color: "#e2e8f0",
   },
@@ -3293,7 +3293,7 @@ const st = {
   editEyebrow: {
     fontSize: "0.7rem", fontWeight: 700,
     letterSpacing: "0.18em", textTransform: "uppercase",
-    color: "#d4af37", margin: "0 0 0.85rem",
+    color: "#f59e0b", margin: "0 0 0.85rem",
   },
   editTitle: {
     fontSize: "1.5rem", fontWeight: 800, color: "#f1f5f9",
@@ -3323,12 +3323,12 @@ const st = {
     transition: "border-color 0.2s, background 0.2s, box-shadow 0.2s",
   },
   costInputWrapFocused: {
-    borderColor: "rgba(212,175,55,0.65)",
+    borderColor: "rgba(245,158,11,0.65)",
     background: "rgba(15,23,42,0.95)",
-    boxShadow: "0 0 0 3px rgba(212,175,55,0.12)",
+    boxShadow: "0 0 0 3px rgba(245,158,11,0.12)",
   },
   costDollarLg: {
-    color: "#d4af37", fontSize: "1.4rem", fontWeight: 800,
+    color: "#f59e0b", fontSize: "1.4rem", fontWeight: 800,
     marginRight: "0.6rem",
   },
   costInputLg: {
@@ -3387,14 +3387,14 @@ const st = {
     letterSpacing: "0.01em",
   },
   editSave: {
-    background: "linear-gradient(135deg, #d4af37 0%, #a8862a 100%)",
+    background: "linear-gradient(135deg, #f59e0b 0%, #d97706 100%)",
     border: "none",
     color: "#0f172a",
     fontSize: "0.9rem", fontWeight: 800,
     padding: "0.7rem 1.5rem", borderRadius: 8,
     cursor: "pointer",
     letterSpacing: "0.01em",
-    boxShadow: "0 4px 16px rgba(212,175,55,0.25), 0 0 0 1px rgba(212,175,55,0.4)",
+    boxShadow: "0 4px 16px rgba(245,158,11,0.25), 0 0 0 1px rgba(245,158,11,0.4)",
   },
   eyebrowMark: { marginRight: "0.4rem" },
 
@@ -3437,20 +3437,20 @@ const st = {
     position: "absolute", bottom: 42, left: 10,
     display: "flex", alignItems: "center", gap: "0.3rem",
     background: "rgba(15,23,42,0.92)",
-    border: "1px solid rgba(212,175,55,0.6)",
+    border: "1px solid rgba(245,158,11,0.6)",
     borderRadius: 999,
     padding: "0.25rem 0.55rem",
     fontSize: "0.6rem", fontWeight: 800,
-    color: "#e6c463",
+    color: "#fbbf24",
     letterSpacing: "0.12em",
     backdropFilter: "blur(8px)",
-    boxShadow: "0 0 12px rgba(212,175,55,0.4)",
+    boxShadow: "0 0 12px rgba(245,158,11,0.4)",
     animation: "livePulse 2s ease-in-out infinite",
     zIndex: 3,
   },
   targetBadgeDot: {
     width: 6, height: 6, borderRadius: "50%",
-    background: "#d4af37",
+    background: "#f59e0b",
   },
 
   // ─── Performers panel header (used by the standalone PerformersPanel
@@ -3602,11 +3602,11 @@ const st = {
   },
   toast: {
     display: "flex", alignItems: "center", gap: "0.85rem",
-    background: "linear-gradient(135deg, #d4af37 0%, #a8862a 100%)",
+    background: "linear-gradient(135deg, #f59e0b 0%, #d97706 100%)",
     color: "#0f172a",
     padding: "1rem 1.5rem 1rem 1.25rem",
     borderRadius: 12,
-    boxShadow: "0 12px 40px rgba(212,175,55,0.4), 0 0 0 1px rgba(212,175,55,0.6), 0 0 60px rgba(212,175,55,0.3)",
+    boxShadow: "0 12px 40px rgba(245,158,11,0.4), 0 0 0 1px rgba(245,158,11,0.6), 0 0 60px rgba(245,158,11,0.3)",
     animation: "fadeInUp 0.4s ease-out",
     minWidth: 240,
   },

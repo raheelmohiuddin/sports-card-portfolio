@@ -260,8 +260,6 @@ function fmtUsd(n) {
 }
 
 const STATUS_VARIANTS = {
-  // SEMANTIC WARNING — keep amber per consignment-status spec.
-  // Brand-gold (#d4af37) is intentionally NOT applied here.
   pending: {
     label: "Consignment Pending — Under Review",
     dotColor: "#f59e0b",
@@ -312,7 +310,7 @@ const STATUS_VARIANTS = {
 const st = {
   cta: {
     width: "100%",
-    background: "linear-gradient(135deg, #d4af37 0%, #a8862a 100%)",
+    background: "linear-gradient(135deg, #f59e0b 0%, #d97706 100%)",
     color: "#0f172a",
     fontWeight: 800, fontSize: "0.9rem",
     letterSpacing: "0.04em", textTransform: "uppercase",
@@ -320,14 +318,14 @@ const st = {
     borderRadius: 10, border: "none",
     cursor: "pointer",
     fontFamily: "inherit",
-    boxShadow: "0 6px 20px rgba(212,175,55,0.25)",
+    boxShadow: "0 6px 20px rgba(245,158,11,0.25)",
     marginTop: "1.5rem", marginBottom: "0.5rem",
   },
   ctaBusy: { opacity: 0.7, cursor: "wait" },
 
   form: {
-    background: "rgba(212,175,55,0.05)",
-    border: "1px solid rgba(212,175,55,0.25)",
+    background: "rgba(245,158,11,0.05)",
+    border: "1px solid rgba(245,158,11,0.25)",
     borderRadius: 12,
     padding: "1.1rem 1.1rem 1rem",
     marginTop: "1.5rem",
@@ -338,7 +336,7 @@ const st = {
     marginBottom: "0.1rem",
   },
   formTitle: {
-    color: "#e6c463",
+    color: "#fbbf24",
     fontSize: "0.7rem", fontWeight: 800,
     letterSpacing: "0.16em", textTransform: "uppercase",
   },
@@ -425,8 +423,8 @@ const st = {
   soldBlock: {
     marginTop: "0.75rem",
     padding: "0.85rem 1rem",
-    background: "rgba(212,175,55,0.08)",
-    border: "1px solid rgba(212,175,55,0.32)",
+    background: "rgba(245,158,11,0.08)",
+    border: "1px solid rgba(245,158,11,0.32)",
     borderRadius: 10,
   },
   soldLabel: {
@@ -437,10 +435,10 @@ const st = {
   },
   soldValue: {
     fontSize: "1.65rem", fontWeight: 800,
-    color: "#d4af37",
+    color: "#f59e0b",
     fontVariantNumeric: "tabular-nums",
     letterSpacing: "-0.02em",
-    textShadow: "0 0 32px rgba(212,175,55,0.18)",
+    textShadow: "0 0 32px rgba(245,158,11,0.18)",
   },
 
   // ── Sold/Fee/Net breakdown (shown when sellers_net is populated) ──
@@ -449,8 +447,8 @@ const st = {
   breakdownBlock: {
     marginTop: "0.75rem",
     padding: "0.95rem 1rem 1.05rem",
-    background: "rgba(212,175,55,0.06)",
-    border: "1px solid rgba(212,175,55,0.28)",
+    background: "rgba(245,158,11,0.06)",
+    border: "1px solid rgba(245,158,11,0.28)",
     borderRadius: 10,
     display: "flex", flexDirection: "column", gap: "0.55rem",
   },
@@ -487,7 +485,7 @@ const st = {
     background: "rgba(255,255,255,0.08)",
   },
   breakdownNetLabel: {
-    color: "#e6c463",
+    color: "#fbbf24",
     fontSize: "0.7rem", fontWeight: 800,
     letterSpacing: "0.16em", textTransform: "uppercase",
   },
@@ -495,10 +493,10 @@ const st = {
   // row, heavy weight, soft glow. This is what the collector actually
   // receives; the spec says it should be the most prominent number.
   breakdownNet: {
-    color: "#e6c463",
+    color: "#fbbf24",
     fontSize: "1.55rem", fontWeight: 800,
     fontVariantNumeric: "tabular-nums",
     letterSpacing: "-0.02em",
-    textShadow: "0 0 32px rgba(212,175,55,0.22)",
+    textShadow: "0 0 32px rgba(245,158,11,0.22)",
   },
 };

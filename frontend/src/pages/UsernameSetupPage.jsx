@@ -130,17 +130,17 @@ const st = {
   card: {
     width: "100%", maxWidth: 460,
     background: "linear-gradient(160deg, #0f172a 0%, #0a0f1f 100%)",
-    border: "1px solid rgba(212,175,55,0.2)",
+    border: "1px solid rgba(245,158,11,0.2)",
     borderRadius: 16,
     boxShadow:
-      "0 24px 60px rgba(0,0,0,0.55), 0 0 0 1px rgba(212,175,55,0.08), 0 0 80px rgba(212,175,55,0.05)",
+      "0 24px 60px rgba(0,0,0,0.55), 0 0 0 1px rgba(245,158,11,0.08), 0 0 80px rgba(245,158,11,0.05)",
     padding: "2.5rem 2.25rem",
     color: "#e2e8f0",
     textAlign: "center",
   },
-  mark: { color: "#d4af37", fontSize: "1.4rem", display: "block", marginBottom: "1rem" },
+  mark: { color: "#f59e0b", fontSize: "1.4rem", display: "block", marginBottom: "1rem" },
   eyebrow: {
-    color: "#d4af37", fontSize: "0.7rem", fontWeight: 700,
+    color: "#f59e0b", fontSize: "0.7rem", fontWeight: 700,
     letterSpacing: "0.18em", textTransform: "uppercase", margin: "0 0 0.85rem",
   },
   title: {
@@ -160,11 +160,11 @@ const st = {
     transition: "border-color 0.2s, background 0.2s, box-shadow 0.2s",
   },
   inputWrapFocused: {
-    borderColor: "rgba(212,175,55,0.65)",
+    borderColor: "rgba(245,158,11,0.65)",
     background: "rgba(15,23,42,0.95)",
-    boxShadow: "0 0 0 3px rgba(212,175,55,0.12)",
+    boxShadow: "0 0 0 3px rgba(245,158,11,0.12)",
   },
-  at: { color: "#d4af37", fontSize: "1.4rem", fontWeight: 800, marginRight: "0.5rem" },
+  at: { color: "#f59e0b", fontSize: "1.4rem", fontWeight: 800, marginRight: "0.5rem" },
   input: {
     flex: 1, background: "transparent", border: "none", outline: "none",
     color: "#f1f5f9", fontSize: "1.1rem", fontWeight: 600,
@@ -184,12 +184,12 @@ const st = {
   },
   btn: {
     width: "100%",
-    background: "linear-gradient(135deg, #d4af37 0%, #a8862a 100%)",
+    background: "linear-gradient(135deg, #f59e0b 0%, #d97706 100%)",
     color: "#0f172a", border: "none", borderRadius: 10,
     fontSize: "0.95rem", fontWeight: 800,
     padding: "0.9rem 1.5rem", cursor: "pointer",
     letterSpacing: "0.01em",
-    boxShadow: "0 4px 16px rgba(212,175,55,0.25), 0 0 0 1px rgba(212,175,55,0.4)",
+    boxShadow: "0 4px 16px rgba(245,158,11,0.25), 0 0 0 1px rgba(245,158,11,0.4)",
   },
   btnDisabled: { opacity: 0.6, cursor: "not-allowed" },
 };

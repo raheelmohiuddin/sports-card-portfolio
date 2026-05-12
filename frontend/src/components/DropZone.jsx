@@ -142,11 +142,11 @@ export default function DropZone({ onFile, previewUrl, label, hint, verify }) {
 function Spinner() {
   return (
     <svg width="24" height="24" viewBox="0 0 24 24" style={{ animation: "scp-spin 0.9s linear infinite" }}>
-      <circle cx="12" cy="12" r="9" fill="none" stroke="rgba(212,175,55,0.2)" strokeWidth="3" />
+      <circle cx="12" cy="12" r="9" fill="none" stroke="rgba(245,158,11,0.2)" strokeWidth="3" />
       <path
         d="M12 3 a9 9 0 0 1 9 9"
         fill="none"
-        stroke="#d4af37"
+        stroke="#f59e0b"
         strokeWidth="3"
         strokeLinecap="round"
       />
@@ -175,7 +175,7 @@ const st = {
     width: "100%",
     aspectRatio: "5 / 7",
     background: "rgba(15,23,42,0.6)",
-    border: "2px dashed rgba(212,175,55,0.35)",
+    border: "2px dashed rgba(245,158,11,0.35)",
     borderRadius: 12,
     cursor: "pointer",
     overflow: "hidden",
@@ -184,15 +184,15 @@ const st = {
     outline: "none",
   },
   zoneHovered: {
-    borderColor: "rgba(212,175,55,0.7)",
+    borderColor: "rgba(245,158,11,0.7)",
     background: "rgba(15,23,42,0.85)",
-    boxShadow: "0 0 0 1px rgba(212,175,55,0.15), 0 0 24px rgba(212,175,55,0.1)",
+    boxShadow: "0 0 0 1px rgba(245,158,11,0.15), 0 0 24px rgba(245,158,11,0.1)",
   },
   zoneDragging: {
-    borderColor: "#d4af37",
-    background: "rgba(212,175,55,0.08)",
+    borderColor: "#f59e0b",
+    background: "rgba(245,158,11,0.08)",
     transform: "scale(1.01)",
-    boxShadow: "0 0 0 1px rgba(212,175,55,0.4), 0 0 32px rgba(212,175,55,0.2)",
+    boxShadow: "0 0 0 1px rgba(245,158,11,0.4), 0 0 32px rgba(245,158,11,0.2)",
   },
   zoneVerifying: {
     cursor: "wait",
@@ -212,7 +212,7 @@ const st = {
     zIndex: 2,
   },
   verifyText: {
-    color: "#e6c463",
+    color: "#fbbf24",
     fontSize: "0.78rem", fontWeight: 800,
     letterSpacing: "0.14em", textTransform: "uppercase",
   },
@@ -244,9 +244,9 @@ const st = {
     textAlign: "center",
   },
   iconWrap: {
-    color: "#d4af37",
-    background: "rgba(212,175,55,0.1)",
-    border: "1px solid rgba(212,175,55,0.3)",
+    color: "#f59e0b",
+    background: "rgba(245,158,11,0.1)",
+    border: "1px solid rgba(245,158,11,0.3)",
     borderRadius: "50%",
     width: 56, height: 56,
     display: "flex", alignItems: "center", justifyContent: "center",
@@ -255,7 +255,7 @@ const st = {
   },
   iconWrapActive: {
     transform: "scale(1.1)",
-    background: "rgba(212,175,55,0.18)",
+    background: "rgba(245,158,11,0.18)",
   },
   label: {
     fontSize: "0.85rem", fontWeight: 600,
@@ -279,7 +279,7 @@ const st = {
     transition: "opacity 0.2s",
   },
   replaceText: {
-    color: "#d4af37", fontSize: "0.72rem", fontWeight: 700,
+    color: "#f59e0b", fontSize: "0.72rem", fontWeight: 700,
     letterSpacing: "0.12em", textTransform: "uppercase",
   },
 };

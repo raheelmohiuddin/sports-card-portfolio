@@ -598,7 +598,7 @@ const st = {
     minWidth: 0,
     overflow: "hidden",
   },
-  brandMark: { color: "#d4af37", fontSize: "0.75rem", flexShrink: 0 },
+  brandMark: { color: "#f59e0b", fontSize: "0.75rem", flexShrink: 0 },
   brandText: {
     overflow: "hidden",
     textOverflow: "ellipsis",
@@ -617,8 +617,8 @@ const st = {
     background: "rgba(255,255,255,0.09)",
   },
   linkHover: {
-    color: "#e6c463",
-    background: "rgba(212,175,55,0.08)",
+    color: "#fbbf24",
+    background: "rgba(245,158,11,0.08)",
   },
   // ── Portfolio hover-menu ──
   // The parent nav is display:flex with default alignItems:stretch, so
@@ -642,7 +642,7 @@ const st = {
     background: "#0f172a",
     border: "1px solid rgba(255,255,255,0.07)",
     borderRadius: 10,
-    boxShadow: "0 12px 36px rgba(0,0,0,0.45), 0 0 0 1px rgba(212,175,55,0.06)",
+    boxShadow: "0 12px 36px rgba(0,0,0,0.45), 0 0 0 1px rgba(245,158,11,0.06)",
     padding: "0.4rem",
     transition: "opacity 150ms ease, transform 150ms ease",
     zIndex: 110,
@@ -662,8 +662,8 @@ const st = {
     transition: "background 0.12s, color 0.12s",
   },
   portfolioMenuItemHover: {
-    background: "rgba(212,175,55,0.08)",
-    color: "#e6c463",
+    background: "rgba(245,158,11,0.08)",
+    color: "#fbbf24",
   },
   portfolioMenuDivider: {
     height: 1,
@@ -673,16 +673,16 @@ const st = {
   // Action item ("+ Add a Card") visually distinct from nav items —
   // gold text + icon so users read it as an action, not a link.
   portfolioMenuItemAction: {
-    color: "#d4af37",
+    color: "#f59e0b",
     fontWeight: 700,
     letterSpacing: "0.01em",
   },
   portfolioMenuItemActionHover: {
-    background: "rgba(212,175,55,0.12)",
-    color: "#e6c463",
+    background: "rgba(245,158,11,0.12)",
+    color: "#fbbf24",
   },
   portfolioMenuActionIcon: {
-    color: "#d4af37",
+    color: "#f59e0b",
     fontSize: "1rem", fontWeight: 800,
     lineHeight: 1,
     width: 14, textAlign: "center",
@@ -694,7 +694,7 @@ const st = {
     fontSize: 9,
     padding: "2px 5px",
     borderRadius: 4,
-    background: "#d4af37",
+    background: "#f59e0b",
     color: "#000",
     fontWeight: 700,
     letterSpacing: 1,
@@ -712,16 +712,16 @@ const st = {
     padding: "0.35rem 0.65rem",
     borderRadius: 999,
     cursor: "pointer",
-    color: "#e6c463",
+    color: "#fbbf24",
     transition: "background 0.15s, border-color 0.15s",
     fontFamily: "inherit",
   },
   userTriggerActive: {
-    background: "rgba(212,175,55,0.08)",
-    borderColor: "rgba(212,175,55,0.28)",
+    background: "rgba(245,158,11,0.08)",
+    borderColor: "rgba(245,158,11,0.28)",
   },
   usernameText: {
-    color: "#e6c463",
+    color: "#fbbf24",
     fontSize: "0.85rem", fontWeight: 600,
     letterSpacing: "0.01em",
     fontVariantNumeric: "tabular-nums",
@@ -736,10 +736,10 @@ const st = {
     right: 0,
     minWidth: 210,
     background: "linear-gradient(160deg, #0f172a 0%, #0a0f1f 100%)",
-    border: "1px solid rgba(212,175,55,0.18)",
+    border: "1px solid rgba(245,158,11,0.18)",
     borderRadius: 10,
     boxShadow:
-      "0 10px 32px rgba(0,0,0,0.55), 0 0 0 1px rgba(212,175,55,0.08), 0 0 28px rgba(212,175,55,0.06)",
+      "0 10px 32px rgba(0,0,0,0.55), 0 0 0 1px rgba(245,158,11,0.08), 0 0 28px rgba(245,158,11,0.06)",
     padding: 6,
     transition: "opacity 150ms ease-out, transform 150ms ease-out",
     zIndex: 200,
@@ -761,8 +761,8 @@ const st = {
     fontFamily: "inherit",
   },
   menuItemHover: {
-    background: "rgba(212,175,55,0.1)",
-    color: "#e6c463",
+    background: "rgba(245,158,11,0.1)",
+    color: "#fbbf24",
   },
   // Admin menu items use a violet accent so they read as "different scope"
   // from the gold-accented collector menu — same shape, distinct identity.
@@ -787,14 +787,14 @@ const st = {
     border: "1px solid transparent",
     borderRadius: 999,
     width: 40, height: 40,
-    color: "#e6c463",
+    color: "#fbbf24",
     cursor: "pointer",
     transition: "background 0.15s, border-color 0.15s",
     padding: 0,
   },
   hamburgerActive: {
-    background: "rgba(212,175,55,0.08)",
-    borderColor: "rgba(212,175,55,0.28)",
+    background: "rgba(245,158,11,0.08)",
+    borderColor: "rgba(245,158,11,0.28)",
   },
   mobileMenu: {
     position: "absolute",
@@ -803,10 +803,10 @@ const st = {
     minWidth: 240,
     maxWidth: "calc(100vw - 2rem)",
     background: "linear-gradient(160deg, #0f172a 0%, #0a0f1f 100%)",
-    border: "1px solid rgba(212,175,55,0.18)",
+    border: "1px solid rgba(245,158,11,0.18)",
     borderRadius: 10,
     boxShadow:
-      "0 10px 32px rgba(0,0,0,0.55), 0 0 0 1px rgba(212,175,55,0.08), 0 0 28px rgba(212,175,55,0.06)",
+      "0 10px 32px rgba(0,0,0,0.55), 0 0 0 1px rgba(245,158,11,0.08), 0 0 28px rgba(245,158,11,0.06)",
     padding: 6,
     transition: "opacity 150ms ease-out, transform 150ms ease-out",
     zIndex: 200,
@@ -828,19 +828,19 @@ const st = {
     fontFamily: "inherit",
   },
   mobileItemActive: {
-    color: "#d4af37",
-    background: "rgba(212,175,55,0.08)",
+    color: "#f59e0b",
+    background: "rgba(245,158,11,0.08)",
   },
   mobileUsername: {
     fontSize: "0.7rem", fontWeight: 700,
     letterSpacing: "0.12em", textTransform: "uppercase",
-    color: "#e6c463",
+    color: "#fbbf24",
     padding: "0.5rem 0.85rem 0.25rem",
   },
   mobileSignInBtn: {
     display: "block", width: "calc(100% - 8px)",
     margin: "4px",
-    background: "#d4af37", color: "#0f172a",
+    background: "#f59e0b", color: "#0f172a",
     border: "none", borderRadius: 6,
     fontSize: "0.92rem", fontWeight: 800,
     padding: "0.7rem 1rem",
@@ -849,7 +849,7 @@ const st = {
     letterSpacing: "0.01em",
   },
   signInBtn: {
-    background: "#d4af37", color: "#0f172a",
+    background: "#f59e0b", color: "#0f172a",
     fontSize: "0.85rem", fontWeight: 700,
     padding: "0.4rem 1rem", borderRadius: 6,
     textDecoration: "none",
