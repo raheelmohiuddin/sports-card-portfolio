@@ -14,10 +14,15 @@ export const colors = {
   // stat, AboutPage headline, HomePage spotlight). Reserved gold per
   // MASTER §1.3. Do not use for general brand accents — use `gold` above.
   //
-  // Convention: rgba decompositions of (212,175,55) at various alphas
+  // Sunlit gold — chosen for higher luminosity against dark navy.
+  // Predecessor (#d4af37 antique gold) read as muted/recessive on hero
+  // surfaces; sunlit gold reads as radiant without crossing into
+  // highlighter territory.
+  //
+  // Convention: rgba decompositions of (240,198,81) at various alphas
   // are intentionally inline (matches the brand-gold pattern). Only the
   // hex value is tokenized here. See MASTER §1.3 for context.
-  heroGold:  "#d4af37",
+  heroGold:  "#f0c651",
 
   // Dark surface / page background
   bg:       "#0f172a",

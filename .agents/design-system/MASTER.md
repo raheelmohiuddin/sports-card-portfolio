@@ -48,7 +48,7 @@ canonical brand identity wherever the product references itself.
 | `goldDark` | `#d97706` | Pressed, deeper shade |
 | `borderGold` | `rgba(245,158,11,0.4)` | Border tint on dark panels |
 
-**Hero gold: `#d4af37`** (antique gold). Reserved for the single
+**Hero gold: `#f0c651`** (sunlit gold). Reserved for the single
 most important element on a hero surface — the centerpiece moment
 of a page. Currently consumed on three surfaces only: the Dashboard
 "Total Portfolio Value" hero stat, the AboutPage headline, and the
@@ -57,9 +57,9 @@ as a hero / centerpiece (see decision rule below).
 
 | Token | Hex | Use |
 |---|---|---|
-| `heroGold` | `#d4af37` | Hero surface accent (rare, scarcity rule applies) |
+| `heroGold` | `#f0c651` | Hero surface accent (rare, scarcity rule applies) |
 
-Rgba decompositions of `(212,175,55)` at various alphas (chart cursors, hero borders, focus rings, hover states) are intentionally inline rather than tokenized — matching the same convention used for brand gold, where only the hex value is tokenized.
+Rgba decompositions of `(240,198,81)` at various alphas (chart cursors, hero borders, focus rings, hover states) are intentionally inline rather than tokenized — matching the same convention used for brand gold, where only the hex value is tokenized.
 
 **Decision rule for future surfaces.** New code adding a gold accent
 uses `colors.gold` (brand) by default. Use `colors.heroGold` ONLY if
@@ -79,6 +79,15 @@ antique that had been adopted in earlier Editorial Dark refactors
 the basis of the two-gold system documented above. Reference
 commits: see git log around 2026-05-11 for the swap, revert, and
 formalization.
+
+Initial heroGold value was `#d4af37` (antique gold). Visual review
+on the Dashboard hero stat showed the antique read as dull against
+the dark navy surface — desaturated and recessive when the hero
+number should feel radiant. Token value updated to `#f0c651`
+(sunlit gold) for higher luminosity while preserving the warm,
+luxury-metal character that distinguishes hero gold from brand
+amber. Rgba decompositions in PortfolioPage.jsx updated to the new
+rgb triple (240,198,81) in the same commit.
 
 ### 1.4 Semantic — Gain / Loss / Info
 

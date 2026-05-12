@@ -2005,7 +2005,7 @@ function PriceHistoryChart({ history }) {
             stroke="rgba(255,255,255,0.08)"
             width={68}
           />
-          <Tooltip content={<HistoryTooltip />} cursor={{ stroke: "rgba(212,175,55,0.4)", strokeWidth: 1 }} />
+          <Tooltip content={<HistoryTooltip />} cursor={{ stroke: "rgba(240,198,81,0.4)", strokeWidth: 1 }} />
           <Line
             type="monotone"
             dataKey="value"
@@ -2248,9 +2248,9 @@ const st = {
     fontVariantNumeric: "tabular-nums",
   },
   selectFocused: {
-    borderColor: "rgba(212,175,55,0.55)",
+    borderColor: "rgba(240,198,81,0.55)",
     background: "rgba(15,23,42,0.95)",
-    boxShadow: "0 0 0 3px rgba(212,175,55,0.10)",
+    boxShadow: "0 0 0 3px rgba(240,198,81,0.10)",
   },
   // Native <option>s ignore most CSS in most browsers — set bg/color anyway
   // so Firefox renders a sensible dropdown.
@@ -2269,8 +2269,8 @@ const st = {
     transition: "border-color 0.2s, background 0.2s, color 0.2s",
   },
   togglePillActive: {
-    background: "rgba(212,175,55,0.10)",
-    border: "1px solid rgba(212,175,55,0.50)",
+    background: "rgba(240,198,81,0.10)",
+    border: "1px solid rgba(240,198,81,0.50)",
     color: colors.heroGold,
   },
   toggleDot: {
@@ -2296,7 +2296,7 @@ const st = {
     transition: "background 0.15s, color 0.15s",
   },
   viewBtnActive: {
-    background: "rgba(212,175,55,0.15)",
+    background: "rgba(240,198,81,0.15)",
     color: colors.heroGold,
   },
 
@@ -2688,7 +2688,7 @@ const st = {
   // ── Tooltip ── shared by donut + history chart. Antique gold accent.
   tooltip: {
     background: "rgba(15,23,42,0.96)",
-    border: "1px solid rgba(212,175,55,0.4)",
+    border: "1px solid rgba(240,198,81,0.4)",
     borderRadius: 8,
     padding: "0.7rem 0.95rem",
     boxShadow: "0 8px 24px rgba(0,0,0,0.5)",
@@ -2802,21 +2802,21 @@ const st = {
   // glow + slight surface tint — no shadow lift since the gallery feels
   // more grounded with hover changes that don't move the card.
   tileHovered: {
-    borderColor: "rgba(212,175,55,0.45)",
+    borderColor: "rgba(240,198,81,0.45)",
     background: "#111c33",
-    boxShadow: "0 0 0 1px rgba(212,175,55,0.15), 0 12px 28px rgba(0,0,0,0.5)",
+    boxShadow: "0 0 0 1px rgba(240,198,81,0.15), 0 12px 28px rgba(0,0,0,0.5)",
   },
   tileHighlight: {
     // Triggered when the tile is the target of a deep-link highlight.
     // Three pulses (1.5s × 3) then style is removed by the timeout in CardTile.
     animation: "fadeInUp 0.5s ease-out backwards, goldPulse 1.5s ease-in-out 3",
-    borderColor: "rgba(212,175,55,0.75)",
+    borderColor: "rgba(240,198,81,0.75)",
   },
   tileTradePulse: {
     // Triggered for cards just received in a trade. Two pulses × 1.5s = 3s,
     // matching the spec. Same gold visual as tileHighlight but no scroll.
     animation: "scp-trade-card-pulse 1.5s ease-in-out 2",
-    borderColor: "rgba(212,175,55,0.75)",
+    borderColor: "rgba(240,198,81,0.75)",
   },
 
   // ── Image ──
@@ -3047,7 +3047,7 @@ const st = {
   // Ultra Rare — gold, the second tier of premium
   tierPillUltraRare: {
     color: colors.heroGold,
-    borderColor: "rgba(212,175,55,0.5)",
+    borderColor: "rgba(240,198,81,0.5)",
   },
 
   // ── Corner ribbon (SOLD / TRADED) ──
@@ -3106,7 +3106,7 @@ const st = {
     whiteSpace: "nowrap",
   },
   priceBtnEmpty: {
-    background: "none", border: "1px dashed rgba(212,175,55,0.4)",
+    background: "none", border: "1px dashed rgba(240,198,81,0.4)",
     padding: "0.2rem 0.55rem", borderRadius: 4,
     fontSize: "0.72rem", fontWeight: 600,
     color: "#94a3b8", cursor: "pointer",
