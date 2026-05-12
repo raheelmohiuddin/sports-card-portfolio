@@ -219,7 +219,7 @@ const st = {
     borderRadius: 6,
     background: "rgba(15,23,42,0.85)",
     color: "#f1f5f9",
-    border: "1px solid rgba(245,158,11,0.3)",
+    border: "1px solid rgba(212,175,55,0.3)",
     fontSize: "0.78rem", fontFamily: "inherit", fontWeight: 700,
     cursor: "pointer",
     outline: "none",
@@ -231,7 +231,7 @@ const st = {
     padding: "1rem 0",
   },
   spinner: {
-    color: "#f59e0b", fontSize: "0.7rem",
+    color: "#d4af37", fontSize: "0.7rem",
     animation: "pulse 1.2s ease-in-out infinite",
   },
   placeholder: {
@@ -258,8 +258,8 @@ const st = {
     width: "100%",
     background: "transparent",
     border: "none",
-    borderTop: "1px solid rgba(245,158,11,0.15)",
-    color: "#fbbf24",
+    borderTop: "1px solid rgba(212,175,55,0.15)",
+    color: "#e6c463",
     fontSize: "0.78rem", fontWeight: 700,
     letterSpacing: "0.06em", textTransform: "uppercase",
     padding: "0.7rem 0.95rem",
@@ -278,7 +278,7 @@ const st = {
     gap: "0.85rem",
     padding: "0.65rem 0.95rem",
     fontSize: "0.82rem",
-    borderBottom: "1px solid rgba(245,158,11,0.08)",
+    borderBottom: "1px solid rgba(212,175,55,0.08)",
     fontVariantNumeric: "tabular-nums",
   },
   // No additional layout hint needed under flex — the gradePill slots
@@ -286,10 +286,10 @@ const st = {
   // empty entry in case future visual tweaks need a grade-mode hook.
   rowWithGrade: {},
   gradePill: {
-    color: "#fbbf24", fontWeight: 800,
+    color: "#e6c463", fontWeight: 800,
     fontSize: "0.62rem",
-    background: "rgba(245,158,11,0.12)",
-    border: "1px solid rgba(245,158,11,0.4)",
+    background: "rgba(212,175,55,0.12)",
+    border: "1px solid rgba(212,175,55,0.4)",
     padding: "0.1rem 0.4rem", borderRadius: 3,
     letterSpacing: "0.04em",
     fontVariantNumeric: "tabular-nums",
@@ -305,7 +305,7 @@ const st = {
     color: "#94a3b8", fontWeight: 700,
     fontSize: "0.7rem",
     background: "rgba(15,23,42,0.6)",
-    border: "1px solid rgba(245,158,11,0.3)",
+    border: "1px solid rgba(212,175,55,0.3)",
     padding: "0.1rem 0.4rem", borderRadius: 3,
     letterSpacing: "0.04em",
     textTransform: "uppercase",
@@ -323,7 +323,7 @@ const st = {
     verticalAlign: "middle",
   },
   price: {
-    color: "#f59e0b", fontWeight: 800,
+    color: "#d4af37", fontWeight: 800,
     letterSpacing: "-0.01em",
   },
 };

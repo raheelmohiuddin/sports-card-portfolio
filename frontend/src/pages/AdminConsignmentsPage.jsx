@@ -342,7 +342,7 @@ const STATUS_LABEL = Object.fromEntries(STATUSES.map((s) => [s.value, s.label]))
 // just without the box. Keeps the visual signal at a glance.
 function statusTextColor(s) {
   switch (s) {
-    case "pending":   return "#fbbf24";
+    case "pending":   return "#e6c463";
     case "in_review": return "#93c5fd";
     case "listed":    return "#6ee7b7";
     case "sold":      return "#a7f3d0";
@@ -777,7 +777,7 @@ const st = {
     fontSize: "0.78rem",
   },
   priceText: {
-    color: "#fbbf24",
+    color: "#e6c463",
     fontWeight: 700,
     fontVariantNumeric: "tabular-nums",
     fontSize: "0.86rem",
@@ -816,7 +816,7 @@ const st = {
   },
   // $ glyph that visually leads the price input.
   priceInputDollar: {
-    color: "#fbbf24",
+    color: "#e6c463",
     fontSize: "0.86rem",
     fontWeight: 700,
     marginRight: "-0.1rem",
@@ -824,7 +824,7 @@ const st = {
   bareInput: {
     width: 90,
     background: "transparent",
-    color: "#fbbf24",
+    color: "#e6c463",
     border: "none",
     outline: "none",
     padding: 0,
@@ -841,7 +841,7 @@ const st = {
     display: "inline-flex", alignItems: "center", justifyContent: "center",
     background: "transparent",
     border: "none",
-    color: "#f59e0b",
+    color: "#d4af37",
     cursor: "pointer",
     fontSize: "0.78rem",
     padding: 0,

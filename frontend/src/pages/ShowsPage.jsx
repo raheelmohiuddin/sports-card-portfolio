@@ -1363,7 +1363,7 @@ function ShowCard({ show, onToggle }) {
           <DatePill date={startDate} />
           {endDate && (
             <>
-              <span style={{ color: "#f59e0b", fontSize: "1.2rem", fontWeight: 700, flex: 1, textAlign: "center" }}>→</span>
+              <span style={{ color: "#d4af37", fontSize: "1.2rem", fontWeight: 700, flex: 1, textAlign: "center" }}>→</span>
               <DatePill date={endDate} />
             </>
           )}
@@ -1450,7 +1450,7 @@ function CarSvg() {
       width="28" height="14" viewBox="0 0 28 14" aria-hidden="true"
       style={{ animation: "travelCarDrive 3s linear infinite", display: "block" }}
     >
-      <path d="M2 9 L4 5 L18 5 L22 9 L26 9 L26 11 L2 11 Z" fill="#f59e0b" />
+      <path d="M2 9 L4 5 L18 5 L22 9 L26 9 L26 11 L2 11 Z" fill="#d4af37" />
       <path d="M5.5 6 L9 6 L9 8 L5.5 8 Z M10 6 L17 6 L19 8 L10 8 Z" fill="#1e293b" opacity="0.6" />
       <circle cx="7" cy="11.5" r="1.5" fill="#0f172a" />
       <circle cx="20" cy="11.5" r="1.5" fill="#0f172a" />
@@ -1466,8 +1466,8 @@ function PlaneSvg() {
       width="30" height="14" viewBox="0 0 30 14" aria-hidden="true"
       style={{ animation: "travelPlaneFly 3.5s ease-in-out infinite", display: "block" }}
     >
-      <path d="M2 7 L8 6 L18 4 L25 5 L28 7 L25 9 L18 10 L8 8 Z" fill="#f59e0b" />
-      <path d="M11 4 L13 1 L15 4 Z M11 10 L13 13 L15 10 Z" fill="#f59e0b" opacity="0.85" />
+      <path d="M2 7 L8 6 L18 4 L25 5 L28 7 L25 9 L18 10 L8 8 Z" fill="#d4af37" />
+      <path d="M11 4 L13 1 L15 4 Z M11 10 L13 13 L15 10 Z" fill="#d4af37" opacity="0.85" />
       <circle cx="22" cy="7" r="0.9" fill="#0f172a" opacity="0.5" />
     </svg>
   );
@@ -1714,11 +1714,11 @@ const st = {
   },
   dayCellToday: {
     borderColor: colors.borderGold,
-    boxShadow: "0 0 0 1px rgba(245,158,11,0.25)",
+    boxShadow: "0 0 0 1px rgba(212,175,55,0.25)",
   },
   dayCellExpanded: {
     borderColor: colors.gold,
-    background: "rgba(245,158,11,0.05)",
+    background: "rgba(212,175,55,0.05)",
   },
   // ─── Day number row ───
   // Fixed 20px tall, no auto sizing. The block-flow stack inside
@@ -1779,7 +1779,7 @@ const st = {
 
   expandedPane: {
     marginTop: "1rem",
-    background: "rgba(245,158,11,0.04)",
+    background: "rgba(212,175,55,0.04)",
     border: `1px solid ${colors.borderGold}`,
     borderRadius: 10,
     padding: "0.85rem 1.1rem",
@@ -1822,10 +1822,10 @@ const st = {
   countdownRow: {
     display: "flex", alignItems: "baseline",
     gap: "1rem",
-    color: "#fbbf24",
+    color: "#e6c463",
     fontVariantNumeric: "tabular-nums",
     letterSpacing: "-0.01em",
-    textShadow: "0 0 18px rgba(245,158,11,0.28)",
+    textShadow: "0 0 18px rgba(212,175,55,0.28)",
   },
   countdownTodayRow: {
     color: "#fde68a",
@@ -1963,7 +1963,7 @@ const st = {
     // selection highlight gold to match the rest of the app.
     // The trigger icon's color comes from CSS in index.css.
     colorScheme: "dark",
-    accentColor: "#f59e0b",
+    accentColor: "#d4af37",
   },
   // Wrapping anchor for the Near Me button + active pill + inline panel.
   // inline-flex so the active pill (when set) sits to the right of the
@@ -1984,24 +1984,24 @@ const st = {
     letterSpacing: "0.04em", textTransform: "uppercase",
     cursor: "pointer",
     fontFamily: "inherit",
-    boxShadow: "0 4px 12px rgba(245,158,11,0.2)",
+    boxShadow: "0 4px 12px rgba(212,175,55,0.2)",
   },
   nearMeBtnOpen: {
-    boxShadow: "0 0 0 2px rgba(245,158,11,0.55), 0 4px 12px rgba(245,158,11,0.25)",
+    boxShadow: "0 0 0 2px rgba(212,175,55,0.55), 0 4px 12px rgba(212,175,55,0.25)",
   },
   // Stronger gold treatment when a Near Me filter is currently
   // applied — distinguishes "you have proximity sorting on" from the
   // default idle button. Composes with nearMeBtnOpen when both apply.
   nearMeBtnActive: {
-    background: "linear-gradient(135deg, #fbbf24 0%, #f59e0b 100%)",
-    boxShadow: "0 0 0 1px rgba(245,158,11,0.7), 0 6px 18px rgba(245,158,11,0.35)",
+    background: "linear-gradient(135deg, #e6c463 0%, #d4af37 100%)",
+    boxShadow: "0 0 0 1px rgba(212,175,55,0.7), 0 6px 18px rgba(212,175,55,0.35)",
   },
   // Active proximity pill — only renders when a Near Me filter is set.
   // "ZIP · Nmi" with a click-to-clear × in gold.
   nearMeActivePill: {
     display: "inline-flex", alignItems: "center", gap: 6,
-    background: "rgba(245,158,11,0.12)",
-    border: "1px solid rgba(245,158,11,0.55)",
+    background: "rgba(212,175,55,0.12)",
+    border: "1px solid rgba(212,175,55,0.55)",
     color: colors.goldLight,
     fontSize: 12, fontWeight: 700,
     letterSpacing: "0.04em",
@@ -2014,7 +2014,7 @@ const st = {
     borderRadius: "50%",
     border: "none",
     background: "transparent",
-    color: "#fbbf24",
+    color: "#e6c463",
     fontSize: 14, fontWeight: 900, lineHeight: 1,
     cursor: "pointer",
     fontFamily: "inherit",
@@ -2030,7 +2030,7 @@ const st = {
     right: 0,
     width: 160,
     background: "rgba(15,23,42,0.95)",
-    border: "1px solid rgba(245,158,11,0.45)",
+    border: "1px solid rgba(212,175,55,0.45)",
     borderRadius: 8,
     padding: 10,
     boxShadow: "0 10px 30px rgba(0,0,0,0.45)",
@@ -2060,8 +2060,8 @@ const st = {
     transition: "border-color 0.12s, box-shadow 0.12s",
   },
   nearMeZipInputFocus: {
-    borderColor: "#f59e0b",
-    boxShadow: "0 0 0 1px rgba(245,158,11,0.5)",
+    borderColor: "#d4af37",
+    boxShadow: "0 0 0 1px rgba(212,175,55,0.5)",
   },
   nearMeRadiusSelect: {
     width: "100%",
@@ -2165,7 +2165,7 @@ const st = {
   },
   msItemChecked: {
     color: colors.goldLight,
-    background: "rgba(245,158,11,0.06)",
+    background: "rgba(212,175,55,0.06)",
     fontWeight: 700,
   },
   msCheckbox: {
@@ -2205,7 +2205,7 @@ const st = {
     fontSize: "0.75rem", fontWeight: 800,
     letterSpacing: "0.04em",
     cursor: "pointer",
-    boxShadow: "0 4px 12px rgba(245,158,11,0.2)",
+    boxShadow: "0 4px 12px rgba(212,175,55,0.2)",
   },
   statePillX: {
     fontSize: "0.95rem", fontWeight: 800, lineHeight: 1,
@@ -2304,7 +2304,7 @@ const st = {
     background: gradients.goldPill,
     color: "#0f172a",
     borderColor: colors.gold,
-    boxShadow: "0 4px 12px rgba(245,158,11,0.22)",
+    boxShadow: "0 4px 12px rgba(212,175,55,0.22)",
   },
   pageBtnDisabled: {
     // Per spec: 0.4 opacity, no hover effect (the .scp-page-btn:hover
@@ -2336,7 +2336,7 @@ const st = {
   cardAttending: {
     borderLeft: `3px solid ${colors.gold}`,
     paddingLeft: "calc(1.2rem - 2px)",
-    boxShadow: "0 0 0 1px rgba(245,158,11,0.15), 0 8px 24px rgba(245,158,11,0.08)",
+    boxShadow: "0 0 0 1px rgba(212,175,55,0.15), 0 8px 24px rgba(212,175,55,0.08)",
   },
   // ── Date header (original stacked-pill spec, restored verbatim) ──
   // dateBox / dateWeekday / dateDay / dateMonth match the
@@ -2376,7 +2376,7 @@ const st = {
     marginTop: "0.1rem",
   },
   dateArrow: {
-    color: colors.gold, // #f59e0b
+    color: colors.gold, // #d4af37
     fontSize: "1.25rem", fontWeight: 800,
     lineHeight: 1,
   },
@@ -2389,7 +2389,7 @@ const st = {
     marginBottom: "-0.1rem",
   },
   countdown: {
-    background: "rgba(245,158,11,0.14)",
+    background: "rgba(212,175,55,0.14)",
     border: `1px solid ${colors.borderGold}`,
     color: colors.goldLight,
     fontSize: "0.62rem", fontWeight: 800,
@@ -2441,7 +2441,7 @@ const st = {
     overflow: "hidden",
     flexShrink: 0,
     borderRadius: 4,
-    background: "rgba(245,158,11,0.05)",
+    background: "rgba(212,175,55,0.05)",
   },
   travelLabel: {
     color: colors.textMuted,
@@ -2451,8 +2451,8 @@ const st = {
   },
   travelSpinner: {
     width: 12, height: 12,
-    border: "1.5px solid rgba(245,158,11,0.25)",
-    borderTopColor: "#f59e0b",
+    border: "1.5px solid rgba(212,175,55,0.25)",
+    borderTopColor: "#d4af37",
     borderRadius: "50%",
     animation: "travelSpin 0.85s linear infinite",
     flexShrink: 0,
@@ -2484,6 +2484,6 @@ const st = {
   attendBtnOn: {
     background: gradients.goldPill,
     color: "#0f172a",
-    boxShadow: "0 4px 12px rgba(245,158,11,0.2)",
+    boxShadow: "0 4px 12px rgba(212,175,55,0.2)",
   },
 };

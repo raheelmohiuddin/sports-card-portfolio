@@ -196,7 +196,7 @@ const st = {
     gap: "2rem",
   },
   top: { textAlign: "center" },
-  mark: { color: "#f59e0b", fontSize: "1.5rem", display: "block", marginBottom: "0.5rem" },
+  mark: { color: "#d4af37", fontSize: "1.5rem", display: "block", marginBottom: "0.5rem" },
   title: { color: "#fff", fontSize: "1.6rem", fontWeight: 800, margin: 0, letterSpacing: "-0.02em" },
   sub: { color: "#64748b", fontSize: "0.9rem", marginTop: "0.4rem" },
 };

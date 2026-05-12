@@ -300,7 +300,7 @@ const st = {
 
   header: { marginBottom: "2.5rem" },
   eyebrow: {
-    color: "#f59e0b", fontSize: "0.7rem", fontWeight: 700,
+    color: "#d4af37", fontSize: "0.7rem", fontWeight: 700,
     letterSpacing: "0.18em", textTransform: "uppercase",
     marginBottom: "1rem",
   },
@@ -330,22 +330,22 @@ const st = {
     width: 96, height: 96,
     borderRadius: "50%",
     background: "linear-gradient(135deg, #1e293b, #0f172a)",
-    border: "1px solid rgba(245,158,11,0.3)",
+    border: "1px solid rgba(212,175,55,0.3)",
     overflow: "hidden",
     display: "flex", alignItems: "center", justifyContent: "center",
     flexShrink: 0,
-    boxShadow: "0 0 24px rgba(245,158,11,0.1), 0 4px 16px rgba(0,0,0,0.4)",
+    boxShadow: "0 0 24px rgba(212,175,55,0.1), 0 4px 16px rgba(0,0,0,0.4)",
   },
   avatarImg: { width: "100%", height: "100%", objectFit: "cover", display: "block" },
   avatarInitials: {
-    fontSize: "2rem", fontWeight: 800, color: "#f59e0b",
+    fontSize: "2rem", fontWeight: 800, color: "#d4af37",
     letterSpacing: "-0.02em",
   },
   avatarOverlay: {
     position: "absolute", inset: 0,
     background: "rgba(15,23,42,0.7)",
     display: "flex", alignItems: "center", justifyContent: "center",
-    color: "#f59e0b", fontSize: "1.2rem",
+    color: "#d4af37", fontSize: "1.2rem",
   },
   avatarMeta: { flex: 1, minWidth: 0 },
   avatarLabel: {
@@ -355,9 +355,9 @@ const st = {
   },
   uploadBtn: {
     display: "inline-block",
-    background: "rgba(245,158,11,0.1)",
-    border: "1px solid rgba(245,158,11,0.4)",
-    color: "#fbbf24",
+    background: "rgba(212,175,55,0.1)",
+    border: "1px solid rgba(212,175,55,0.4)",
+    color: "#e6c463",
     fontSize: "0.82rem", fontWeight: 700,
     padding: "0.5rem 1rem", borderRadius: 999,
     cursor: "pointer", letterSpacing: "0.01em",
@@ -414,13 +414,13 @@ const st = {
     transition: "border-color 0.2s, background 0.2s, box-shadow 0.2s",
   },
   inputWrapFocused: {
-    borderColor: "rgba(245,158,11,0.65)",
+    borderColor: "rgba(212,175,55,0.65)",
     background: "rgba(15,23,42,0.95)",
-    boxShadow: "0 0 0 3px rgba(245,158,11,0.12)",
+    boxShadow: "0 0 0 3px rgba(212,175,55,0.12)",
   },
   inputWrapDisabled: { opacity: 0.7 },
   inputPrefix: {
-    color: "#f59e0b", fontSize: "0.95rem", fontWeight: 700,
+    color: "#d4af37", fontSize: "0.95rem", fontWeight: 700,
     marginRight: "0.4rem",
   },
   input: {
@@ -450,7 +450,7 @@ const st = {
     fontSize: "0.88rem", fontWeight: 800,
     padding: "0.65rem 1.5rem", cursor: "pointer",
     letterSpacing: "0.01em",
-    boxShadow: "0 4px 16px rgba(245,158,11,0.2)",
+    boxShadow: "0 4px 16px rgba(212,175,55,0.2)",
   },
   secondaryBtn: {
     background: "transparent",

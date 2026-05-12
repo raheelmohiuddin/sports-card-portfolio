@@ -86,18 +86,18 @@ const st = {
   eyebrow: {
     display: "flex", alignItems: "center", gap: "0.5rem",
     fontSize: "0.7rem", fontWeight: 700, letterSpacing: "0.18em",
-    textTransform: "uppercase", color: "#fbbf24", margin: 0,
+    textTransform: "uppercase", color: "#e6c463", margin: 0,
   },
   dot: {
     width: 8, height: 8, borderRadius: "50%",
-    background: "#f59e0b",
-    boxShadow: "0 0 8px rgba(245,158,11,0.8)",
+    background: "#d4af37",
+    boxShadow: "0 0 8px rgba(212,175,55,0.8)",
   },
   beta: {
     display: "inline-block",
     fontSize: "8px", lineHeight: 1,
     padding: "2px 4px", borderRadius: 3,
-    background: "#f59e0b", color: "#000",
+    background: "#d4af37", color: "#000",
     fontWeight: 700, letterSpacing: "0.5px",
     verticalAlign: "super",
     position: "relative", top: "-0.2em",

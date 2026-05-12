@@ -422,7 +422,7 @@ const st = {
   // ─── Header ───
   header: { marginBottom: "2.5rem" },
   eyebrow: {
-    color: "#f59e0b",
+    color: "#d4af37",
     fontSize: "0.7rem", fontWeight: 700,
     letterSpacing: "0.18em", textTransform: "uppercase",
     marginBottom: "1rem",
@@ -451,9 +451,9 @@ const st = {
   graderTab: {
     padding: "0.45rem 1.1rem",
     background: "transparent",
-    border: "1px solid rgba(245,158,11,0.55)",
+    border: "1px solid rgba(212,175,55,0.55)",
     borderRadius: 999,
-    color: "#fbbf24",
+    color: "#e6c463",
     fontSize: "0.78rem", fontWeight: 800,
     letterSpacing: "0.1em",
     cursor: "pointer",
@@ -461,10 +461,10 @@ const st = {
     fontFamily: "inherit",
   },
   graderTabActive: {
-    background: "#f59e0b",
+    background: "#d4af37",
     color: "#0f172a",
-    borderColor: "#f59e0b",
-    boxShadow: "0 0 0 1px rgba(245,158,11,0.6), 0 4px 14px rgba(245,158,11,0.25)",
+    borderColor: "#d4af37",
+    boxShadow: "0 0 0 1px rgba(212,175,55,0.6), 0 4px 14px rgba(212,175,55,0.25)",
   },
   fieldLabel: {
     display: "block",
@@ -486,12 +486,12 @@ const st = {
     fontVariantNumeric: "tabular-nums",
   },
   certInputFocused: {
-    borderColor: "rgba(245,158,11,0.65)",
+    borderColor: "rgba(212,175,55,0.65)",
     background: "rgba(15,23,42,0.95)",
-    boxShadow: "0 0 0 3px rgba(245,158,11,0.12)",
+    boxShadow: "0 0 0 3px rgba(212,175,55,0.12)",
   },
   lookupBtn: {
-    background: "#f59e0b", color: "#0f172a",
+    background: "#d4af37", color: "#0f172a",
     border: "none", borderRadius: 999,
     padding: "0.85rem 1.75rem",
     fontSize: "0.92rem", fontWeight: 800,
@@ -522,14 +522,14 @@ const st = {
   dupAlert: {
     display: "flex", alignItems: "center", justifyContent: "space-between",
     gap: "1.25rem", flexWrap: "wrap",
-    background: "linear-gradient(135deg, rgba(245,158,11,0.1), rgba(217,119,6,0.04))",
-    border: "1px solid rgba(245,158,11,0.4)",
+    background: "linear-gradient(135deg, rgba(212,175,55,0.1), rgba(217,119,6,0.04))",
+    border: "1px solid rgba(212,175,55,0.4)",
     borderRadius: 12,
     padding: "1rem 1.25rem",
     marginTop: "1rem",
   },
   dupTitle: {
-    color: "#fbbf24", fontSize: "0.95rem", fontWeight: 700,
+    color: "#e6c463", fontSize: "0.95rem", fontWeight: 700,
     margin: 0, letterSpacing: "-0.01em",
   },
   dupSub: {
@@ -537,7 +537,7 @@ const st = {
     margin: "0.3rem 0 0", lineHeight: 1.5,
   },
   dupCta: {
-    background: "#f59e0b", color: "#0f172a",
+    background: "#d4af37", color: "#0f172a",
     fontWeight: 800, fontSize: "0.85rem",
     padding: "0.6rem 1.2rem", borderRadius: 999,
     textDecoration: "none", letterSpacing: "0.01em",
@@ -553,8 +553,8 @@ const st = {
     marginBottom: "2rem",
   },
   detailPanelRare: {
-    borderColor: "rgba(245,158,11,0.3)",
-    boxShadow: "0 0 0 1px rgba(245,158,11,0.1), 0 0 32px rgba(245,158,11,0.06)",
+    borderColor: "rgba(212,175,55,0.3)",
+    boxShadow: "0 0 0 1px rgba(212,175,55,0.1), 0 0 32px rgba(212,175,55,0.06)",
   },
   detailHeader: {
     display: "flex", alignItems: "flex-start",
@@ -573,7 +573,7 @@ const st = {
   gradeBadge: {
     display: "flex", alignItems: "center", gap: "0.4rem",
     background: "rgba(15,23,42,0.85)",
-    border: "1px solid rgba(245,158,11,0.45)",
+    border: "1px solid rgba(212,175,55,0.45)",
     borderRadius: 6,
     padding: "0.5rem 0.85rem",
     flexShrink: 0,
@@ -584,7 +584,7 @@ const st = {
   },
   gradeBadgeValue: {
     fontSize: "1.15rem", fontWeight: 800,
-    color: "#f59e0b", lineHeight: 1,
+    color: "#d4af37", lineHeight: 1,
   },
   gradeDesc: {
     fontSize: "0.78rem", color: "#cbd5e1",
@@ -602,10 +602,10 @@ const st = {
     display: "flex", alignItems: "center", gap: "0.55rem",
     marginTop: "1rem",
     padding: "0.55rem 0.85rem",
-    background: "rgba(245,158,11,0.08)",
-    border: "1px solid rgba(245,158,11,0.3)",
+    background: "rgba(212,175,55,0.08)",
+    border: "1px solid rgba(212,175,55,0.3)",
     borderRadius: 8,
-    color: "#fbbf24",
+    color: "#e6c463",
     fontSize: "0.78rem",
     lineHeight: 1.45,
     letterSpacing: "0.01em",
@@ -614,8 +614,8 @@ const st = {
     flexShrink: 0,
     width: 18, height: 18,
     borderRadius: "50%",
-    background: "rgba(245,158,11,0.25)",
-    color: "#fbbf24",
+    background: "rgba(212,175,55,0.25)",
+    color: "#e6c463",
     fontSize: "0.7rem", fontWeight: 900,
     display: "flex", alignItems: "center", justifyContent: "center",
     lineHeight: 1,
@@ -656,12 +656,12 @@ const st = {
 
   rareCallout: {
     display: "flex", alignItems: "center", gap: "0.6rem",
-    background: "linear-gradient(135deg, rgba(245,158,11,0.12), rgba(217,119,6,0.06))",
-    border: "1px solid rgba(245,158,11,0.3)",
+    background: "linear-gradient(135deg, rgba(212,175,55,0.12), rgba(217,119,6,0.06))",
+    border: "1px solid rgba(212,175,55,0.3)",
     borderRadius: 8,
     padding: "0.7rem 1rem",
     marginTop: "1.25rem",
-    color: "#fbbf24",
+    color: "#e6c463",
     fontSize: "0.82rem", fontWeight: 600,
   },
   rareCalloutMark: { fontSize: "1rem" },
@@ -729,7 +729,7 @@ const st = {
     maxWidth: 320,
   },
   costDollar: {
-    color: "#f59e0b", fontSize: "1.05rem", fontWeight: 700,
+    color: "#d4af37", fontSize: "1.05rem", fontWeight: 700,
     marginRight: "0.5rem",
   },
   costInput: {
@@ -743,9 +743,9 @@ const st = {
     MozAppearance: "textfield",
   },
   costInputWrapFocused: {
-    borderColor: "rgba(245,158,11,0.65)",
+    borderColor: "rgba(212,175,55,0.65)",
     background: "rgba(15,23,42,0.95)",
-    boxShadow: "0 0 0 3px rgba(245,158,11,0.12)",
+    boxShadow: "0 0 0 3px rgba(212,175,55,0.12)",
   },
 
   // ─── Save button ───
@@ -753,18 +753,18 @@ const st = {
     display: "flex", alignItems: "center", justifyContent: "center",
     gap: "0.6rem",
     width: "100%",
-    background: "linear-gradient(135deg, #f59e0b 0%, #d97706 100%)",
+    background: "linear-gradient(135deg, #d4af37 0%, #a8862a 100%)",
     color: "#0f172a", border: "none",
     borderRadius: 12,
     padding: "1.1rem 2rem",
     fontSize: "1.05rem", fontWeight: 800,
     cursor: "pointer",
     letterSpacing: "0.01em",
-    boxShadow: "0 6px 24px rgba(245,158,11,0.25), 0 0 0 1px rgba(245,158,11,0.4)",
+    boxShadow: "0 6px 24px rgba(212,175,55,0.25), 0 0 0 1px rgba(212,175,55,0.4)",
     transition: "transform 0.1s, box-shadow 0.2s",
   },
   saveBtnDisabled: {
-    background: "rgba(245,158,11,0.25)",
+    background: "rgba(212,175,55,0.25)",
     color: "rgba(15,23,42,0.6)",
     cursor: "not-allowed",
     boxShadow: "none",

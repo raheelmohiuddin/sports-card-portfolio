@@ -202,7 +202,7 @@ const st = {
 
   header: { marginBottom: "2.5rem" },
   eyebrow: {
-    color: "#f59e0b", fontSize: "0.7rem", fontWeight: 700,
+    color: "#d4af37", fontSize: "0.7rem", fontWeight: 700,
     letterSpacing: "0.18em", textTransform: "uppercase",
     marginBottom: "1rem",
   },
@@ -289,9 +289,9 @@ const st = {
     transition: "border-color 0.2s, background 0.2s, box-shadow 0.2s",
   },
   inputWrapFocused: {
-    borderColor: "rgba(245,158,11,0.65)",
+    borderColor: "rgba(212,175,55,0.65)",
     background: "rgba(15,23,42,0.95)",
-    boxShadow: "0 0 0 3px rgba(245,158,11,0.12)",
+    boxShadow: "0 0 0 3px rgba(212,175,55,0.12)",
   },
   inputWrapDisabled: { opacity: 0.7 },
   input: {
@@ -312,7 +312,7 @@ const st = {
     fontSize: "0.88rem", fontWeight: 800,
     padding: "0.65rem 1.5rem", cursor: "pointer",
     letterSpacing: "0.01em",
-    boxShadow: "0 4px 16px rgba(245,158,11,0.2)",
+    boxShadow: "0 4px 16px rgba(212,175,55,0.2)",
   },
 
   // ── Toggle ──
@@ -338,8 +338,8 @@ const st = {
     padding: 0,
   },
   switchOn: {
-    background: "rgba(245,158,11,0.45)",
-    borderColor: "rgba(245,158,11,0.65)",
+    background: "rgba(212,175,55,0.45)",
+    borderColor: "rgba(212,175,55,0.65)",
   },
   switchKnob: {
     position: "absolute",
@@ -351,6 +351,6 @@ const st = {
   },
   switchKnobOn: {
     transform: "translateX(20px)",
-    background: "#f59e0b",
+    background: "#d4af37",
   },
 };
