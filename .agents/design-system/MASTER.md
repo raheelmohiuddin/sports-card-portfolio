@@ -31,16 +31,54 @@ All foreground/background pairs verified at ≥4.5:1 on `bg-base` (WCAG AA).
 | `text-muted` | `#94a3b8` | Labels, axis ticks, metadata |
 | `text-subtle` | `#64748b` | Disabled, captions |
 
-### 1.3 Refined Gold (replaces previous `#f59e0b`)
+### 1.3 Brand Gold — A Two-Gold System
 
-`#f59e0b` reads as a warning-toast amber, not auction-house gold. Antique gold below.
+The app uses two distinct golds with clearly-separated roles. The
+decision rule is hero-surface scope.
+
+**Brand gold: `#f59e0b`** (amber-500). The everyday brand accent.
+Used on the brand mark, primary CTAs, tier badges for Ultra Rare,
+Consign affordances, accents throughout app pages, and as the
+canonical brand identity wherever the product references itself.
 
 | Token | Hex | Use |
 |---|---|---|
-| `gold-primary` | `#d4af37` | Antique gold — portfolio value, premium tier badges, brand mark |
-| `gold-bright` | `#e6c463` | Hover state, focus ring |
-| `gold-deep` | `#a8862a` | Pressed state |
-| `gold-tint` | `rgba(212,175,55,0.08)` | Subtle background wash on PSA 10 / premium rows |
+| `gold` | `#f59e0b` | Primary brand accent |
+| `goldLight` | `#fbbf24` | Hover, lighter shade |
+| `goldDark` | `#d97706` | Pressed, deeper shade |
+| `borderGold` | `rgba(245,158,11,0.4)` | Border tint on dark panels |
+
+**Hero gold: `#d4af37`** (antique gold). Reserved for the single
+most important element on a hero surface — the centerpiece moment
+of a page. Currently consumed on three surfaces only: the Dashboard
+"Total Portfolio Value" hero stat, the AboutPage headline, and the
+HomePage spotlight. Adding new uses requires the surface to qualify
+as a hero / centerpiece (see decision rule below).
+
+| Token | Hex | Use |
+|---|---|---|
+| `heroGold` | `#d4af37` | Hero surface accent (rare, scarcity rule applies) |
+
+Rgba decompositions of `(212,175,55)` at various alphas (chart cursors, hero borders, focus rings, hover states) are intentionally inline rather than tokenized — matching the same convention used for brand gold, where only the hex value is tokenized.
+
+**Decision rule for future surfaces.** New code adding a gold accent
+uses `colors.gold` (brand) by default. Use `colors.heroGold` ONLY if
+the surface is a hero stat or page centerpiece — the single most
+important element on its page, intended to feel reverent. When in
+doubt, default to brand gold. Do not introduce a third gold value
+without a doc update.
+
+**Design history.** This section previously prescribed antique gold
+as a wholesale replacement for amber. The codebase was reconciled to
+antique in three commits, then visual review showed antique read as
+muted and dated on operational surfaces (Shows, Add Card, profile,
+etc.); amber's higher saturation read as more premium in those
+contexts. The reconciliation was reverted. The hero-only uses of
+antique that had been adopted in earlier Editorial Dark refactors
+(Dashboard hero, AboutPage, HomePage) were preserved and now form
+the basis of the two-gold system documented above. Reference
+commits: see git log around 2026-05-11 for the swap, revert, and
+formalization.
 
 ### 1.4 Semantic — Gain / Loss / Info
 
@@ -107,8 +145,8 @@ Editorial Dark intent. **Playfair Display** for hero-only didone luxury.
 ### 3.1 Tabular figures everywhere prices live
 Without `font-variant-numeric: tabular-nums` on every price column, columns jitter as digits change. This single missing line will make the app feel amateurish no matter how good everything else is.
 
-### 3.2 Gold scarcity
-If gold appears on the primary CTA *and* the portfolio total *and* the nav active state *and* the PSA 10 badge, it stops meaning "premium." Pick **one or two roles only**. Default roles: portfolio value + premium-tier badges. Primary CTAs use white/slate, not gold.
+### 3.2 Hero-gold scarcity
+With the two-gold system formalized in §1.3, scarcity discipline applies to **hero gold** (`#d4af37`) only. If hero gold appears on more than the centerpiece moment of a page, it stops meaning "premium" — keep it to the single most important element per surface (Dashboard hero stat, AboutPage headline, HomePage spotlight). Brand gold (`#f59e0b`) is used freely per §1.3; its semantic role IS the everyday brand accent, so scarcity rules don't apply to it.
 
 ### 3.3 Gain/loss must carry an icon, not just color
 `▲ +$1,240` not just green `+$1,240`. Roughly 8% of the male audience is red-green colorblind, and the icon also makes scan-reading dense tables faster for everyone.

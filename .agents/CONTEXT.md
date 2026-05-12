@@ -283,6 +283,7 @@ TIER_COLORS = { ghost: "#e2e8f0", ultra_rare: "#f59e0b", rare: "#93c5fd" }
 ```js
 colors = {
   gold: "#f59e0b", goldLight: "#fbbf24", goldDark: "#d97706",
+  heroGold: "#d4af37",   // hero surfaces only — see MASTER §1.3 two-gold system
   bg: "#0f172a", bgDarker: "#0a0f1f",
   textPrimary: "#f1f5f9", textSecondary: "#cbd5e1",
   textMuted: "#94a3b8", textFaint: "#64748b", textVeryFaint: "#475569",
@@ -304,12 +305,12 @@ adminColors = { accent: "#a78bfa", accentLight: "#c4b5fd", accentDark: "#7c3aed"
 panelStyle = { background: gradients.goldPanel, border: 1px borderSoft, borderRadius: 16 }
 ```
 
-> **Note:** `theme.js` predates the Editorial Dark token system formalized
-> in `MASTER.md`. The `goldPanel` gradient + `colors.gold` (`#f59e0b`) are
-> legacy warning-amber values that survive in 7+ pages (TradeTab, Shows,
-> AddCard, Profile, Settings, AdminConsignments, AdminPage). New work
-> should consume MASTER.md tokens (`#d4af37` gold-primary, flat surface-1)
-> directly inline; `theme.js` is being phased out, not extended.
+> **Note:** `theme.js` is the canonical source for both brand gold
+> (`colors.gold` = `#f59e0b`) and hero gold (`colors.heroGold` = `#d4af37`).
+> Brand gold is the everyday accent used throughout the app; hero gold
+> is reserved for hero surfaces only (Dashboard hero stat, AboutPage,
+> HomePage spotlight). See `MASTER.md` §1.3 for the two-gold system
+> + design history.
 
 ### `frontend/src/services/api.js`
 
@@ -826,8 +827,7 @@ The `0001_consignment_fee.sql` file under `backend/db/migrations/` is the only m
 
 ### Known design-system inconsistencies (low-priority cleanup)
 
-- **`utils/theme.js` is legacy.** `colors.gold` is `#f59e0b` (warning amber); `gradients.goldPanel` consumes that color. 7+ pages still render the old gradient (TradeTab, ShowsPage, AdminPage, AdminConsignmentsPage, AddCardPage, ProfilePage, SettingsPage, plus PortfolioPage's `goldPanelSimple` use). New work should bypass `theme.js` and inline MASTER.md tokens; theme.js is being phased out, not extended.
-- **`utils/rarity.js` `TIER_COLORS.ultra_rare` is `#f59e0b`.** Same warning-amber drift; the corner pill in CardTile uses `#d4af37` directly, not this token.
+- **Two-gold system formalized (resolved this session, 2026-05-11).** What was previously flagged as "theme.js / rarity.js shipping legacy warning amber while MASTER.md prescribed antique" was investigated and resolved by formalizing a two-gold system in MASTER.md §1.3 rather than reconciling the codebase to a single gold. Brand gold (`#f59e0b`, amber) is the everyday accent — what `theme.js` and `rarity.js` consume; hero gold (`#d4af37`, antique) is reserved for hero surfaces and consumed via the new `colors.heroGold` token on the Dashboard hero stat + analytics chrome, AboutPage headline, and HomePage spotlight. `theme.js` + `rarity.js` are no longer legacy — they are canonical for brand gold. Audit trail: amber-to-antique swap was prototyped and reverted; the heroGold token + MASTER §1.3 rewrite formalized the split.
 - **`AnimatedRoutes` (App.jsx) hover stickiness on touch devices.** The route-fade transition can leave hover state stuck on mobile after a tap-navigate. Minor.
 
 ### Documentation drift to watch for
