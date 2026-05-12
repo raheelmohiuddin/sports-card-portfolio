@@ -1,6 +1,7 @@
 const { SecretsManagerClient, GetSecretValueCommand } = require("@aws-sdk/client-secrets-manager");
 const { json } = require("../_response");
 const { isValidCertNumber } = require("../_validate");
+const { fetchEstimateForCert } = require("../portfolio/pricing");
 
 const smClient = new SecretsManagerClient({});
 let psaApiKey;
@@ -51,6 +52,16 @@ exports.handler = async (event) => {
   const data = await apiResponse.json();
   const cert = data.PSACert;
 
+  // Best-effort estimate fetch — adds ~1s to the lookup but lets the
+  // preview panel show the user what the card is worth before they
+  // commit to adding it. Failure is non-fatal: identity preview still
+  // renders, and add-card.js will refresh on save anyway.
+  const estimate = await fetchEstimateForCert({
+    certNumber: cert.CertNumber,
+    grader:     "PSA",
+    grade:      cert.CardGrade,
+  }).catch(() => null);
+
   return json(200, {
     certNumber:          cert.CertNumber,
     year:                cert.Year,
@@ -66,5 +77,10 @@ exports.handler = async (event) => {
     frontImageUrl,
     backImageUrl,
     psaData:             cert,
+    estimatePrice:       estimate?.price      ?? null,
+    estimatePriceLow:    estimate?.priceLow   ?? null,
+    estimatePriceHigh:   estimate?.priceHigh  ?? null,
+    estimateConfidence:  estimate?.confidence ?? null,
+    estimateMethod:      estimate?.method     ?? null,
   });
 };

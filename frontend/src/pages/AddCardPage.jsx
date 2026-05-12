@@ -4,6 +4,12 @@ import { lookupCert, addCard, uploadCardImages } from "../services/api.js";
 import DropZone from "../components/DropZone.jsx";
 import { moderateFile } from "../utils/imageModeration.js";
 import { gradients } from "../utils/theme.js";
+import { confidenceLabel } from "../utils/portfolio.js";
+
+function fmt(n) {
+  if (n == null) return null;
+  return `$${parseFloat(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
 
 function useImageFile(psaUrl) {
   const [file, setFile] = useState(null);
@@ -218,6 +224,35 @@ export default function AddCardPage() {
                   <span style={st.gradeBadgeValue}>{cardData.grade}</span>
                 </div>
               </div>
+
+              {/* Headline answer to "is this worth my time?" Sits directly
+                  under the player/grade header so the user reads it before
+                  the detail grid. Hidden entirely when the estimate is
+                  missing — better than rendering "—" or "Unknown" since
+                  some cards genuinely have no estimate (CardHedger
+                  doesn't cover the variant, or grade isn't priced). */}
+              {cardData.estimatePrice != null && (
+                <div style={st.valueBlock}>
+                  <span style={st.valueLabel}>Estimated Value</span>
+                  <div style={st.valueRow}>
+                    <span style={st.valuePrice}>{fmt(cardData.estimatePrice)}</span>
+                    {(() => {
+                      const tier = confidenceLabel(cardData.estimateConfidence);
+                      if (!tier) return null;
+                      return (
+                        <span style={{ ...st.confidenceChipBase, ...st.confidenceChip[tier.toLowerCase()] }}>
+                          {tier} confidence
+                        </span>
+                      );
+                    })()}
+                  </div>
+                  {cardData.estimatePriceLow != null && cardData.estimatePriceHigh != null && (
+                    <span style={st.valueRange}>
+                      Range {fmt(cardData.estimatePriceLow)} – {fmt(cardData.estimatePriceHigh)}
+                    </span>
+                  )}
+                </div>
+              )}
 
               {cardData.gradeDescription && (
                 <div style={st.gradeDesc}>{cardData.gradeDescription}</div>
@@ -589,6 +624,50 @@ const st = {
   gradeDesc: {
     fontSize: "0.78rem", color: "#cbd5e1",
     fontStyle: "italic", marginTop: "0.4rem",
+  },
+
+  // Headline value block — slot between header and detail grid.
+  // Matches the popSection visual rhythm (eyebrow label, big tabular
+  // number, secondary line) but bumps the number size up so it reads
+  // as THE answer rather than a footnote. Gold price color anchors it
+  // to the rest of the brand.
+  valueBlock: {
+    marginTop: "1.25rem",
+    display: "flex", flexDirection: "column", gap: "0.45rem",
+  },
+  valueLabel: {
+    fontSize: "0.62rem", fontWeight: 700,
+    letterSpacing: "0.16em", textTransform: "uppercase",
+    color: "#64748b",
+  },
+  valueRow: {
+    display: "flex", alignItems: "center",
+    gap: "0.85rem", flexWrap: "wrap",
+  },
+  valuePrice: {
+    fontSize: "1.85rem", fontWeight: 800,
+    color: "#f59e0b", lineHeight: 1,
+    fontVariantNumeric: "tabular-nums",
+    letterSpacing: "-0.02em",
+  },
+  valueRange: {
+    fontSize: "0.82rem", color: "#94a3b8",
+    fontVariantNumeric: "tabular-nums",
+    letterSpacing: "0.01em",
+  },
+  // Confidence chip — same color tiers as CardModal sidebar (MASTER §1.5):
+  // slate for Low/Medium (quiet — the estimate is less certain), green for
+  // High. No red on Low — low confidence means "less certain", not "wrong".
+  confidenceChipBase: {
+    display: "inline-block",
+    fontSize: "0.62rem", fontWeight: 700,
+    letterSpacing: "0.08em", textTransform: "uppercase",
+    padding: "0.18rem 0.5rem", borderRadius: 3,
+  },
+  confidenceChip: {
+    low:    { color: "#94a3b8", background: "rgba(148,163,184,0.10)", border: "1px solid rgba(148,163,184,0.30)" },
+    medium: { color: "#cbd5e1", background: "rgba(203,213,225,0.10)", border: "1px solid rgba(203,213,225,0.30)" },
+    high:   { color: "#34d399", background: "rgba(52,211,153,0.10)",  border: "1px solid rgba(52,211,153,0.30)" },
   },
   detailDivider: {
     height: 1,

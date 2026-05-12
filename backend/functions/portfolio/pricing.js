@@ -269,6 +269,27 @@ async function fetchPriceEstimate(cardId, gradeLabelStr) {
   };
 }
 
+// Lean variant for the cert lookup-preview path. Calls only
+// prices-by-cert + price-estimate — skips comps (slow) and card-details
+// (variant already available to the preview Lambdas via their own
+// existing responses). Total latency ~1s vs fetchValuation's ~3-5s.
+// Returns null when the cert is unknown to CardHedger or the estimate
+// endpoint produces no answer.
+async function fetchEstimateForCert({ certNumber, grader, grade }) {
+  const label = gradeLabel(grade);
+  if (!label) return null;
+  const certRes = await chPost(
+    "/v1/cards/prices-by-cert",
+    { cert: String(certNumber), grader: grader || "PSA", days: 90 },
+    TIMEOUT_FAST_MS,
+    { allow422: true },
+  );
+  if (!certRes?.card?.card_id) return null;
+  const estimate = await fetchPriceEstimate(certRes.card.card_id, label)
+    .catch(() => null);
+  return estimate ? { ...estimate, cardhedgerId: certRes.card.card_id } : null;
+}
+
 // New orchestrator: cert -> {cardhedgerId, variant, comps, estimate}
 // Used by add-card.js and refresh-portfolio.js (cert path).
 // Cards without a cert continue using fetchMarketValue.
@@ -317,4 +338,5 @@ module.exports = {
   fetchValuation,      // new
   fetchCardDetails,    // new
   fetchPriceEstimate,  // new
+  fetchEstimateForCert,// new — lean preview-only variant
 };

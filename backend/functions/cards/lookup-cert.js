@@ -16,6 +16,7 @@
 const { json } = require("../_response");
 const { isValidCertNumber } = require("../_validate");
 const { safeImageUrl } = require("../_image-helpers");
+const { fetchEstimateForCert } = require("../portfolio/pricing");
 
 const { SecretsManagerClient, GetSecretValueCommand } = require("@aws-sdk/client-secrets-manager");
 
@@ -144,6 +145,20 @@ exports.handler = async (event) => {
     return json(404, { error: "Card not found. Please try a different cert number." });
   }
 
+  const numericGrade = extractNumericGrade(certInfo.grade);
+
+  // Best-effort estimate fetch — same pattern as psa-lookup.js. Adds
+  // ~1s to the lookup but lets the preview show value. For BGS/SGC
+  // cards this typically returns null because fetchEstimateForCert
+  // requests a "PSA <grade>" label from CardHedger (see gradeLabel in
+  // pricing.js — same limitation as fetchValuation). Preview gracefully
+  // hides the value block when null.
+  const estimate = await fetchEstimateForCert({
+    certNumber: String(certNumber).trim(),
+    grader,
+    grade:      numericGrade,
+  }).catch(() => null);
+
   // Card record present → use catalog data verbatim.
   if (card) {
     return json(200, {
@@ -153,7 +168,7 @@ exports.handler = async (event) => {
       sport:               card.category ?? null,
       playerName:          card.player ?? null,
       cardNumber:          card.number ?? null,
-      grade:               extractNumericGrade(certInfo.grade),
+      grade:               numericGrade,
       gradeDescription:    null,
       variety:             card.variant ?? null,
       psaPopulation:       null,
@@ -163,6 +178,11 @@ exports.handler = async (event) => {
       grader,
       cardhedgerId:        card.card_id ?? null,
       parsedFromDescription: false,
+      estimatePrice:       estimate?.price      ?? null,
+      estimatePriceLow:    estimate?.priceLow   ?? null,
+      estimatePriceHigh:   estimate?.priceHigh  ?? null,
+      estimateConfidence:  estimate?.confidence ?? null,
+      estimateMethod:      estimate?.method     ?? null,
     });
   }
 
@@ -177,7 +197,7 @@ exports.handler = async (event) => {
     sport:               null,
     playerName:          parsed.playerName ?? null,
     cardNumber:          parsed.cardNumber ?? null,
-    grade:               extractNumericGrade(certInfo.grade),
+    grade:               numericGrade,
     gradeDescription:    null,
     variety:             null,
     psaPopulation:       null,
@@ -187,5 +207,10 @@ exports.handler = async (event) => {
     grader,
     cardhedgerId:        null,
     parsedFromDescription: true,
+    estimatePrice:       estimate?.price      ?? null,
+    estimatePriceLow:    estimate?.priceLow   ?? null,
+    estimatePriceHigh:   estimate?.priceHigh  ?? null,
+    estimateConfidence:  estimate?.confidence ?? null,
+    estimateMethod:      estimate?.method     ?? null,
   });
 };
