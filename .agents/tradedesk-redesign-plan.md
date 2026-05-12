@@ -156,6 +156,10 @@ analysis: {                                        // **NEW grouped shape — re
   result:  AnalysisResult | null;
   error:   string | null;
   showResultModal: boolean;
+  cancelledByExecute: boolean;                     // OQ-4: true when an in-flight analysis was
+                                                   // cancelled by Execute. Drives a muted note in
+                                                   // InlineAllocationPanel during pending phase only;
+                                                   // cleared on phase === "executed".
 };
 ```
 
@@ -217,6 +221,8 @@ PastTradesSection                              REUSE — existing TradeHistory +
 
 **Reused verbatim:** `computeTradeCostBasis()` from `utils/trade.js`, `isSold`/`isTraded` from `utils/portfolio.js`, `isTradableCard()` filter from current TradeTab.
 
+**InlineAllocationPanel additional behavior (OQ-4).** When `analysis.cancelledByExecute === true`, the panel renders a muted single-line note at the very top, above `AllocationTotalsBar`: *"Analysis was cancelled when the trade executed."* This note is scoped to `phase === "pending"` only — it disappears at `phase === "executed"` and never persists into trade history.
+
 ---
 
 ## 5. Interaction Flows
@@ -229,7 +235,7 @@ PastTradesSection                              REUSE — existing TradeHistory +
 4. User clicks PSA cert input on right, types cert, hits Enter. `PsaCertInput` fires `lookupPsaCert(cert)`; on success the returned PSA payload is appended to `receivedCards`; the chip materializes into *Their Side* via the same arrival animation. Pricing fetch fires in the background; tile shows shimmering value placeholder until pricing resolves, then tweens to the final value.
 5. User adds cash on either side via `CashRow`. Side total + Net Delta chip tween.
 6. User optionally clicks **Analyze with Claude AI** → `ClaudeAnalysisModal` opens with progress, displays verdict on completion. Result is cached in `analysis.result`. Modifying either side invalidates the cached analysis (button label reverts to "Analyze Trade"). Same invalidation rule as today.
-7. User clicks **Execute Trade** → phase flips to `"executing"` (button shows spinner). `executeTrade(payload)` lands. On success, phase flips to `"pending"`, server-issued `tradeId` + `persistedReceived` populate state, allocations seed to `{mode:"auto", value: <even-split>}` for every received cert. Canvas dims to read-only (no remove buttons; cash inputs disabled). InlineAllocationPanel slides up beneath.
+7. User clicks **Execute Trade** → phase flips to `"executing"` (button shows spinner). `executeTrade(payload)` lands. On success, phase flips to `"pending"`, server-issued `tradeId` + `persistedReceived` populate state, allocations seed to `{mode:"auto", value: <even-split>}` for every received cert. Canvas dims to read-only (no remove buttons; cash inputs disabled). InlineAllocationPanel slides up beneath. **OQ-4 edge case:** if `analysis.status === "loading"` at Execute time, the analysis modal closes silently, the in-flight request's result is discarded, and `analysis.cancelledByExecute` flips to `true` — the InlineAllocationPanel surfaces a muted *"Analysis was cancelled when the trade executed."* note above `AllocationTotalsBar` after slide-up. Pending phase only; cleared on `phase === "executed"`.
 8. User reviews even-split allocation, optionally overrides a row (see Flow D). Hits **Confirm Trade** → ConfirmModal opens with summary; user clicks "Confirm" inside the modal. Phase → `"confirming"`. `confirmTradeCost()` lands. On success, post-pricing `refreshPortfolio({cardIds: newCardIds})` runs (best-effort; failures swallowed). `onTradeComplete(newCardIds)` navigates to `/portfolio?tab=collection&pulse=<ids>`.
 
 ### Flow B — Pure acquisition (no given cards, cash given, receive a card)
@@ -300,6 +306,8 @@ PastTradesSection                              REUSE — existing TradeHistory +
 ## 7. Design System Application
 
 All tokens pulled directly from `MASTER.md`. **`utils/theme.js` is intentionally bypassed** — it still carries the legacy `#f59e0b` gold and the gold-panel gradients, neither of which match Editorial Dark. Inlining MASTER.md tokens directly keeps the redesign clean of the drift; theme.js will be reconciled separately (see §9 OQ-6).
+
+**Post-prerequisite update.** Once the OQ-6 theme.js reconciliation lands on master and this branch rebases, redesign components MAY consume the reconciled `theme.js` tokens (`colors.gold` will be antique `#d4af37`, `gradients.goldPanel` will reflect Editorial Dark) instead of inlining MASTER.md tokens. Until that rebase, MASTER.md tokens stay inlined per the table below.
 
 | Surface / element | Token | Hex |
 |---|---|---|
@@ -396,18 +404,20 @@ All three trade Lambdas keep their wire format. The redesign is pure UI; no Lamb
 
 ---
 
-## 9. Open Questions for Human
+## 9. Resolved Decisions
 
-| # | Question | Why it matters | Recommendation |
-|---|---|---|---|
-| **OQ-1** | **Gold placement on Net Delta chip — confirm.** Plan proposes gold border + gold-tint background when the trade is in the user's favor (positive delta). When neutral or negative, the chip drops gold and uses surface-2 (neutral) or loss-bg (negative). Acceptable, or should gold attach to the chip *frame* permanently and only the inner color shifts? | This is the single gold consumer on the page — getting it wrong means the whole "this trade is good for you" signal lands wrong. | Permanent gold border, *internal fill* shifts (gold-tint / loss-bg / neutral). Reads more "this is the score" and less "the score lit up the chrome." |
-| **OQ-2** | **Pure-acquisition Execute button — relax the validator?** Current TradeTab requires both sides to have at least one card (`canExecute = ... && givenCards.length > 0 && receivedCards.length > 0`). Backend already accepts `cardsGiven: []`. Confirm we want to relax the frontend rule to "at least one item (card or cash) on the giving side, at least one card on the receiving side." | Pure-acquisition is a confirmed first-class flow per the brief. The frontend gate is the only thing blocking it today. | Yes, relax. Helper text "Pure-acquisition trade" surfaces beneath the Execute button when `givenCards.length === 0`. |
-| **OQ-3** | **Manual entry for Their Side cards without a PSA cert.** A card show counterparty might offer a raw / SGC / BGS card whose cert isn't a PSA number. The brief mentions PSA lookup *or* manual entry; current TradeTab is PSA-only. Should manual entry be in scope for phase 2, or deferred? | If manual entry is in, the whole `cardsReceived` payload shape needs a "manual" flag (no PSA payload to snapshot) and the schema's `cert_number` needs nullable handling — which it already is for `trade_cards` but is NOT NULL on the `cards` table (`UNIQUE (user_id, cert_number)`). This is a real backend touch. | Defer manual entry to a follow-up phase. Phase 2 ships PSA-only, with the `[+ Add manually]` button stubbed and disabled with a "Coming soon" tooltip. |
-| **OQ-4** | **What happens if the user clicks Execute while a Claude analysis request is in flight?** Current TradeTab allows it (independent buttons). Should Execute disable while `analysis.status === "loading"`, or just race? | If the analysis lands after Execute submits, the cached result is now meaningless — the trade is committed against an analysis the user didn't see. Confusing UX. | Execute does *not* disable; analysis modal closes itself silently if Execute is clicked mid-flight. The `analysis.result` is then discarded. Same behavior as today; just document it. |
-| **OQ-5** | **Empty-state copy for both panels and the Net Delta chip.** Brief says "Don't invent answers." Three slots need copy I'm not going to write blindly: (a) Your Side empty: "Tap cards from your portfolio to add them here." (current) (b) Their Side empty: "Look up PSA certs above to add cards." (current) (c) Net Delta chip empty: currently "—". | Copy carries voice. The current copy is functional; ask if the redesign wants something more editorial ("Lay your first card to begin", etc.). | Keep current functional copy for v1; iterate after a real user touches it. |
-| **OQ-6** | **`utils/theme.js` carries legacy `#f59e0b` gold and gold-panel gradients that don't match Editorial Dark.** Plan inlines MASTER.md tokens directly inside the redesign to bypass theme.js. Should phase 2 also reconcile theme.js (rename gold tokens to antique gold, rewrite gradients) — or is that a separate cleanup? | The whole codebase imports from theme.js. If we don't reconcile, the design-system drift persists and other pages keep diverging. If we do reconcile in phase 2, scope blows up. | Reconcile theme.js in a *separate* commit on this same branch *before* the TradeDesk implementation lands. Atomic, revertable, doesn't drag TradeDesk's own scope. |
-| **OQ-7** | **Allocation auto-rebalancing behavior — what if the user manually overrides every row?** With every row in `manual` mode, there are no auto rows to absorb the remainder. Currently this state is just "the user manages it." Should the UI show "auto rows exhausted — Confirm enabled only when sum equals total" (same as today) or auto-flip the last manual row back to auto? | The latter is "smart" but takes control from the user. The former is what TradeTab does today (just relies on the Remaining $0.00 gate). | Match today's behavior — keep it dumb. Confirm enables when `Math.abs(remaining) < 0.01`, regardless of mode mix. |
-| **OQ-8** | **Should the InlineAllocationPanel also show the central Net Delta chip's value as context?** The pending state hides the canvas (dimmed); the user sees Total Cost Basis but not "the trade was ▲ +$340 in your favor". | If yes, helps the user remember why they're allocating *this much*. If no, keeps the allocation panel focused on the math. | Yes — surface a small "Net Delta: ▲ +$340" line above the AllocationTotalsBar, at `text-muted` weight. Read-only context, not a re-anchor. |
+All 8 open questions resolved on **2026-05-11**. Each row records the call and the reasoning so future sessions don't re-litigate.
+
+| # | Decision | Reasoning |
+|---|---|---|
+| **OQ-1** ✓ RESOLVED 2026-05-11 | **Net Delta chip — permanent gold border; internal fill shifts.** Border stays `gold-primary` at 30% alpha at all times. Fill shifts: `gold-tint` for positive delta, `loss-bg` for negative, `surface-2` for parity. ▲/▼ icon swaps on sign change as previously specified. | Reads as "this is the score" — the chrome anchors the chip's role on the screen, the inner fill carries the news. |
+| **OQ-2** ✓ RESOLVED 2026-05-11 | **Relax pure-acquisition Execute validator.** Frontend `canExecute` becomes "at least one item (card OR cash) on the giving side AND at least one card on the receiving side." Helper text "Pure-acquisition trade — Your Side has no cards, only cash." surfaces beneath Execute when `givenCards.length === 0`. | Backend already accepts `cardsGiven: []` (per `execute-trade.js:44-46`). The brief confirms pure-acquisition is a first-class flow; the frontend gate was the only blocker. |
+| **OQ-3** ✓ RESOLVED 2026-05-11 | **Manual entry: button visible but disabled, with tooltip.** `[+ Add manually]` renders in *Their Side* under the PSA cert input, disabled, with a tooltip reading "Coming soon — phase 2 is PSA-cert only." | Telegraphs the future capability without taking on the backend complexity (cert_number nullability, payload-shape divergence) yet. Disabled-with-affordance beats hidden-and-surprising. |
+| **OQ-4** ✓ RESOLVED 2026-05-11 | **Execute mid-analysis: silently close the analysis modal, surface a scoped acknowledgment.** The in-flight Claude request is cancelled (modal closes, `analysis.result` discarded), and `analysis.cancelledByExecute` flips to `true`. The InlineAllocationPanel renders a muted single-line note above `AllocationTotalsBar`: *"Analysis was cancelled when the trade executed."* The note is scoped to `phase === "pending"` only — it disappears at `phase === "executed"` and never persists into trade history. State touched: §3 (added `cancelledByExecute` to `analysis` shape), §4 (InlineAllocationPanel behavior bullet), §5 Flow A.7 (edge-case append). | Telling the user *why* the modal vanished respects their attention. Re-running analysis post-trade is meaningless (the trade is committed), so the note deliberately doesn't suggest it. Scoping to pending phase keeps the note from polluting trade history. |
+| **OQ-5** ✓ RESOLVED 2026-05-11 | **Empty-state copy: keep current.** Your Side empty: *"Tap cards from your portfolio to add them here."* Their Side empty: *"Look up PSA certs above to add cards."* Net Delta chip empty: `—`. | Functional copy ships first; iterate after a real user touches it. Inventing voice in a vacuum produces hollow lines. |
+| **OQ-6** ✓ RESOLVED 2026-05-11 | **`utils/theme.js` reconciliation lands on MASTER, not on this branch. Then this branch rebases onto master.** Reconciliation is a prerequisite to the TradeDesk implementation, tracked in a separate session. After rebase, redesign components MAY consume the new tokens; until then, MASTER.md tokens stay inlined per §7. §10 implementation sequence renumbered to drop the in-branch reconciliation step and add a prereq line to the preamble. | Master is the right home for design-system token changes — the theme.js diff touches 7+ pages outside TradeDesk and shouldn't ride a feature branch. Rebase keeps the redesign-branch history linear once it lands. |
+| **OQ-7** ✓ RESOLVED 2026-05-11 | **Match current allocation behavior.** Confirm Trade enables when `Math.abs(remaining) < 0.01`, regardless of mode mix. No auto-flip-back if every row goes manual — the user manages it. | The Remaining $0.00 gate is a sufficient signal. "Smart" auto-flip behavior takes control from the user and is harder to reason about than predictable math. |
+| **OQ-8** ✓ RESOLVED 2026-05-11 | **Surface Net Delta as muted context inside the allocation panel.** A small `Net Delta: ▲ +$340` line appears above the AllocationTotalsBar at `text-muted` weight. Read-only. | The pending-phase canvas is dimmed; this preserves "why am I allocating *this much*?" without re-anchoring focus on a number that's no longer actionable. |
 
 ---
 
@@ -415,28 +425,29 @@ All three trade Lambdas keep their wire format. The redesign is pure UI; no Lamb
 
 Each step is independently shippable. ⏵ marks parallel-safe; ⏸ marks sequence-locked on a prior step.
 
+**Prerequisite (lands on master before this branch resumes):** `utils/theme.js` reconciliation per OQ-6. Tracked in a separate session on master; the redesign branch rebases onto master once it lands. Not part of the table below.
+
 | # | Step | Size | Depends on |
 |---|---|---|---|
-| 1 | **Reconcile `utils/theme.js`** to MASTER.md tokens (antique gold; remove gold-panel gradients; introduce Editorial-Dark token exports). Search-and-replace across the codebase. Visual diff every page that imports it. | Medium | — |
-| 2 | ⏵ **Extract `PreFlightConfirmModal`, `ClaudeAnalysisModal`, `PastTradesSection`** from current TradeTab.jsx into their own files. Pure refactor — current TradeTab keeps working. | Small | — |
-| 3 | ⏵ **Add `tradedesk-redesign-plan.md`** (this file). | Small (done) | — |
-| 4 | ⏸ **Build `TradeCanvas` skeleton** — phase state machine, header, empty `TradeFloor` with two empty `TradePanel`s and a `NetDeltaChip` placeholder. Mounts at a feature-flag-gated `/tradedesk-v2` route so the existing `/tradedesk` keeps working. | Medium | 1 |
-| 5 | ⏸ **Build `PortfolioPicker`** — search + filtered list using `isTradableCard`, tap-to-toggle. Plug into `selectedIds`. No animation yet. | Medium | 4 |
-| 6 | ⏸ **Build `PsaCertInput`** — extracted from current handleLookup logic. Plug into `receivedCards` + `pricingByCert`. | Small | 4 |
-| 7 | ⏸ **Build `TradedCardChip`** — symmetric chip with grade badge + value + remove button. Used on both sides. | Medium | 4 |
-| 8 | ⏸ **Build `CashRow` + `PanelTotal`** — extract + restyle. Wire `cashGiven` / `cashReceived` + side totals. | Small | 7 |
-| 9 | ⏸ **Build `NetDeltaChip`** — gold-bordered chip with ▲/▼ + value tween. Reactive on side totals + `pricingByCert` resolution. | Medium | 8 |
-| 10 | ⏸ **Build `TradeActionBar`** — Analyze + Execute buttons. Wire to existing `handleAnalyze` + `handleExecute` (with the relaxed `canExecute` validator per OQ-2). | Small | 9 |
-| 11 | ⏵ **Add card-arrival animation** — Your Side (transit from picker tile) + Their Side (materialize on lookup). Includes side-total + Net Delta tween. | Large | 9 |
-| 12 | ⏸ **Build `InlineAllocationPanel`** — total/allocated/remaining bar, allocation rows with auto/manual mode + reset, Cancel & Confirm buttons. Wire to existing `confirmTradeCost` + `cancelTrade`. New `allocations: {mode, value}` state shape with rebalancing. | Large | 10 |
-| 13 | ⏸ **Build phase-transition animations** — building → pending slide-up, pending → building slide-down, pending → executed fade-out. Wire `phase` enum into transitions. | Medium | 12 |
-| 14 | ⏵ **Restyle `PreFlightConfirmModal` + `ClaudeAnalysisModal` + `PastTradesSection`** to MASTER.md tokens. Pure visual; no logic. | Medium | 2, 1 |
-| 15 | ⏸ **Wire `TradeDeskPage` to new `TradeCanvas`** — switch the import; remove the v1 TradeTab. Update `TradeDeskPage` eyebrow + dot to MASTER tokens. | Small | 4–14 |
-| 16 | ⏸ **Delete legacy `TradeTab.jsx`** + the legacy `step` machine + the `TradeAnimationOverlay` overlay component + the `AnimThumbnail` component + their style block. Verify no other imports. | Small | 15 |
-| 17 | ⏵ **Add unit tests** for `computeTradeCostBasis` edge cases the redesign exercises (pure acquisition, manual override rebalancing). | Small | 12 |
-| 18 | ⏸ **Manual QA pass** in browser: build a standard trade, build pure-acquisition, cancel a pending, override allocation manually, hit allocation over-budget, watch every animation in slow-mo, then Cmd+R mid-pending and verify the recovery story. Document recovery story explicitly if not handled (probably the trade stays pending in DB and requires an admin nudge — flag it). | Medium | 16 |
+| 1 | ⏵ **Extract `PreFlightConfirmModal`, `ClaudeAnalysisModal`, `PastTradesSection`** from current TradeTab.jsx into their own files. Pure refactor — current TradeTab keeps working. | Small | — |
+| 2 | ⏵ **Add `tradedesk-redesign-plan.md`** (this file). | Small (done) | — |
+| 3 | ⏸ **Build `TradeCanvas` skeleton** — phase state machine, header, empty `TradeFloor` with two empty `TradePanel`s and a `NetDeltaChip` placeholder. Mounts at a feature-flag-gated `/tradedesk-v2` route so the existing `/tradedesk` keeps working. | Medium | prereq (theme.js on master + rebase) |
+| 4 | ⏸ **Build `PortfolioPicker`** — search + filtered list using `isTradableCard`, tap-to-toggle. Plug into `selectedIds`. No animation yet. | Medium | 3 |
+| 5 | ⏸ **Build `PsaCertInput`** — extracted from current handleLookup logic. Plug into `receivedCards` + `pricingByCert`. | Small | 3 |
+| 6 | ⏸ **Build `TradedCardChip`** — symmetric chip with grade badge + value + remove button. Used on both sides. | Medium | 3 |
+| 7 | ⏸ **Build `CashRow` + `PanelTotal`** — extract + restyle. Wire `cashGiven` / `cashReceived` + side totals. | Small | 6 |
+| 8 | ⏸ **Build `NetDeltaChip`** — gold-bordered chip with ▲/▼ + value tween. Reactive on side totals + `pricingByCert` resolution. Permanent gold border per OQ-1; internal fill shifts gold-tint / loss-bg / surface-2 by sign. | Medium | 7 |
+| 9 | ⏸ **Build `TradeActionBar`** — Analyze + Execute buttons. Wire to existing `handleAnalyze` + `handleExecute` (with the relaxed `canExecute` validator per OQ-2). Implements OQ-4 silent-cancel: setting `analysis.cancelledByExecute = true` if Execute fires while `analysis.status === "loading"`. | Small | 8 |
+| 10 | ⏵ **Add card-arrival animation** — Your Side (transit from picker tile) + Their Side (materialize on lookup). Includes side-total + Net Delta tween. | Large | 8 |
+| 11 | ⏸ **Build `InlineAllocationPanel`** — total/allocated/remaining bar, allocation rows with auto/manual mode + reset, Cancel & Confirm buttons. Wire to existing `confirmTradeCost` + `cancelTrade`. New `allocations: {mode, value}` state shape with rebalancing. Surfaces the OQ-4 cancellation note (scoped to pending phase) and the OQ-8 muted Net Delta context line. | Large | 9 |
+| 12 | ⏸ **Build phase-transition animations** — building → pending slide-up, pending → building slide-down, pending → executed fade-out. Wire `phase` enum into transitions. | Medium | 11 |
+| 13 | ⏵ **Restyle `PreFlightConfirmModal` + `ClaudeAnalysisModal` + `PastTradesSection`** to MASTER.md tokens (or to the reconciled `theme.js` tokens after the prereq lands). Pure visual; no logic. | Medium | 1, prereq |
+| 14 | ⏸ **Wire `TradeDeskPage` to new `TradeCanvas`** — switch the import; remove the v1 TradeTab. Update `TradeDeskPage` eyebrow + dot to MASTER tokens. | Small | 3–13 |
+| 15 | ⏸ **Delete legacy `TradeTab.jsx`** + the legacy `step` machine + the `TradeAnimationOverlay` overlay component + the `AnimThumbnail` component + their style block. Verify no other imports. | Small | 14 |
+| 16 | ⏵ **Add unit tests** for `computeTradeCostBasis` edge cases the redesign exercises (pure acquisition, manual override rebalancing). | Small | 11 |
+| 17 | ⏸ **Manual QA pass** in browser: build a standard trade, build pure-acquisition, cancel a pending, override allocation manually, hit allocation over-budget, watch every animation in slow-mo, then Cmd+R mid-pending and verify the recovery story. Document recovery story explicitly if not handled (probably the trade stays pending in DB and requires an admin nudge — flag it). | Medium | 15 |
 
-**Estimated total scope:** ~3–5 working days for the full implementation if the scope above holds. Steps 4–13 are the meat (~70% of effort); steps 1–3 and 14–17 are mechanical.
+**Estimated total scope:** ~3–5 working days for the full implementation if the scope above holds. Steps 3–12 are the meat (~70% of effort); steps 1–2 and 13–17 are mechanical.
 
 ---
 
