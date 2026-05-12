@@ -102,6 +102,48 @@ Pair every gain/loss color with an icon (▲/▼). Never rely on color alone.
 | `info` | `#60a5fa` | Links, info chips |
 | `grade-elite` | `#a78bfa` | PSA 10 / BGS 10 Pristine — distinct from gold so two tiers read |
 
+### 1.5 Valuation confidence + method
+
+Cards now carry a `price-estimate`-derived headline value (`estimate_price`)
+alongside the comps-derived `estimated_value`. The estimate ships with two
+metadata fields that drive UI behavior.
+
+**Confidence tiers** — the only confidence-derived UI signal. Three tiers
+mapped from the raw 0.0–1.0 `estimate_confidence` value:
+
+| Tier | Threshold | Color token | Example use |
+|---|---|---|---|
+| Low | confidence < 0.5 | `text-muted` (#94a3b8) | Card has limited recent comps; estimate is interpolated |
+| Medium | 0.5 ≤ confidence < 0.75 | `text-secondary` (#cbd5e1) | Some recent direct sales; estimate is reasonable |
+| High | confidence ≥ 0.75 | `gain` (#34d399) | Multiple recent direct sales; estimate is trusted |
+
+Render the tier as the literal word ("Low" / "Medium" / "High") in a small
+slate-toned chip with the color from the table above, **never the raw
+0.4017-style number**. The number isn't useful UX; the tier word answers
+"how much should I trust this?".
+
+**Method values** — stored on the card payload, **not displayed** in v1.
+Three observed values from CardHedger:
+
+| Method | Meaning |
+|---|---|
+| `direct` | At least one direct PSA-grade sale in the recent window. Most reliable. |
+| `card_interpolation` | Estimate derived from prices at adjacent grades (e.g. PSA 9 + Raw used to infer PSA 10). Less reliable; usually correlates with low confidence. |
+| `correlated` | Hypothetical — not yet observed, listed for completeness. Likely uses sales of similar (non-same) cards. |
+
+**`estimate_freshness_days`** — also stored, also not displayed in v1.
+Indicates the age of the most recent comp the estimate is anchored on.
+Useful as a future signal ("data is N months stale") but not surfaced
+until we see a concrete UX need.
+
+**Variant** — when `card.variant` is present, the card title renders the
+variant string inline after the brand/set name, separated by ` · `:
+> "2017 Panini Prizm Football · Blue Wave"
+
+When `variant` is null (cards added pre-migration that haven't been
+backfilled, or cards CardHedger doesn't tag with a variant), the suffix is
+omitted entirely. Don't render "·" separator without a value.
+
 ---
 
 ## 2. Typography
