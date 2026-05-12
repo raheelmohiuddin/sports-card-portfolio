@@ -5,6 +5,7 @@ import {
   effectiveValue,
   cardPnl,
   summarizePortfolio,
+  confidenceLabel,
 } from "../portfolio.js";
 
 const heldCard = (overrides = {}) => ({
@@ -56,6 +57,52 @@ describe("effectiveValue", () => {
   test("returns null when neither is available", () => {
     expect(effectiveValue({ myCost: 100 })).toBeNull();
     expect(effectiveValue(null)).toBeNull();
+  });
+
+  // Valuation rebuild precedence (per MASTER §1.5 + OQ-4):
+  //   manualPrice ?? estimatePrice ?? estimatedValue ?? null
+  test("prefers estimatePrice over estimatedValue for held cards", () => {
+    expect(effectiveValue(heldCard({ estimatePrice: 175, estimatedValue: 150 }))).toBe(175);
+  });
+
+  test("prefers manualPrice over estimatePrice for held cards (OQ-4)", () => {
+    expect(effectiveValue(heldCard({ manualPrice: 200, estimatePrice: 175, estimatedValue: 150 }))).toBe(200);
+  });
+
+  test("falls back to estimatedValue when estimatePrice is null", () => {
+    expect(effectiveValue(heldCard({ estimatePrice: null, estimatedValue: 150 }))).toBe(150);
+  });
+
+  // Un-backfilled card — every value field absent. UI must render gracefully
+  // (no exception, returns null so callers can render placeholder).
+  test("all-null held card returns null without throwing", () => {
+    const allNull = {
+      id: "h-empty", myCost: null, manualPrice: null,
+      estimatePrice: null, estimatedValue: null, avgSalePrice: null,
+    };
+    expect(() => effectiveValue(allNull)).not.toThrow();
+    expect(effectiveValue(allNull)).toBeNull();
+    expect(() => cardPnl(allNull)).not.toThrow();
+    expect(cardPnl(allNull)).toBeNull();
+  });
+});
+
+describe("confidenceLabel", () => {
+  test("maps to Low / Medium / High per MASTER §1.5 thresholds", () => {
+    expect(confidenceLabel(0)).toBe("Low");
+    expect(confidenceLabel(0.4017)).toBe("Low");        // observed Mahomes Blue Wave value
+    expect(confidenceLabel(0.499)).toBe("Low");
+    expect(confidenceLabel(0.5)).toBe("Medium");
+    expect(confidenceLabel(0.666)).toBe("Medium");      // observed Ohtani value
+    expect(confidenceLabel(0.749)).toBe("Medium");
+    expect(confidenceLabel(0.75)).toBe("High");
+    expect(confidenceLabel(0.9)).toBe("High");
+    expect(confidenceLabel(1)).toBe("High");
+  });
+
+  test("returns null when confidence is missing", () => {
+    expect(confidenceLabel(null)).toBeNull();
+    expect(confidenceLabel(undefined)).toBeNull();
   });
 });
 
@@ -129,5 +176,28 @@ describe("summarizePortfolio", () => {
     const s = summarizePortfolio([heldCard({ myCost: null, estimatedValue: 100 })]);
     expect(s.hasHeldCost).toBe(false);
     expect(s.hasSoldCost).toBe(false);
+  });
+
+  // Valuation rebuild: unrealized roll-up uses the same precedence as
+  // effectiveValue (manualPrice ?? estimatePrice ?? estimatedValue).
+  test("unrealized roll-up prefers estimatePrice over estimatedValue", () => {
+    const s = summarizePortfolio([
+      heldCard({ myCost: 100, estimatePrice: 175, estimatedValue: 150 }), // +75
+    ]);
+    expect(s.unrealizedValue).toBe(175);
+    expect(s.unrealizedPnl).toBe(75);
+  });
+
+  test("all-null cards roll up to zero without throwing", () => {
+    const allNull = {
+      id: "h-empty", myCost: null, manualPrice: null,
+      estimatePrice: null, estimatedValue: null,
+    };
+    expect(() => summarizePortfolio([allNull])).not.toThrow();
+    const s = summarizePortfolio([allNull]);
+    expect(s.heldCount).toBe(1);
+    expect(s.unrealizedValue).toBe(0);
+    expect(s.unrealizedPnl).toBe(0);
+    expect(s.totalPnl).toBe(0);
   });
 });

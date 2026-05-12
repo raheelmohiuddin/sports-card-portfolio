@@ -5,6 +5,7 @@ import {
   getCardSales as defaultGetCardSales,
 } from "../services/api.js";
 import { getRarityTier, TIER_LABELS } from "../utils/rarity.js";
+import { confidenceLabel } from "../utils/portfolio.js";
 import GhostIcon from "./GhostIcon.jsx";
 import CardPop from "./CardPop.jsx";
 import SalesHistory from "./SalesHistory.jsx";
@@ -159,9 +160,12 @@ export default function CardModal({
       card.consignmentStatus === "sold" && card.consignmentSoldPrice != null;
     return {
       sold: isSoldCard,
+      // Held-card precedence per OQ-4: manual override wins, then the new
+      // estimate_price column (price-estimate), then the legacy estimated_value
+      // / avgSalePrice (comps) fallbacks for un-backfilled cards.
       displayValue: isSoldCard
         ? (card.sellersNet ?? card.consignmentSoldPrice)
-        : (card.estimatedValue ?? card.avgSalePrice),
+        : (card.manualPrice ?? card.estimatePrice ?? card.estimatedValue ?? card.avgSalePrice),
     };
   }, [card]);
 
@@ -193,7 +197,7 @@ export default function CardModal({
           {/* ── Player + subtitle ── */}
           <h2 style={st.playerName}>{card.playerName ?? "Unknown Player"}</h2>
           <p style={st.subLine}>
-            {[card.year, card.brand, card.sport].filter(Boolean).join(" · ") || "—"}
+            {[card.year, card.brand, card.variant, card.sport].filter(Boolean).join(" · ") || "—"}
           </p>
 
           {/* ── Grade + tier badges ── */}
@@ -269,6 +273,25 @@ export default function CardModal({
                 <div style={st.mainPrice}>
                   {fmt(displayValue)}
                 </div>
+                {/* Estimate range — only when both bounds present, per OQ-5
+                    null-safety. Cards refreshed before the valuation rebuild
+                    and cards CardHedger has no estimate for show no range. */}
+                {card.estimatePriceLow != null && card.estimatePriceHigh != null && (
+                  <div style={st.estimateRange}>
+                    {fmt(card.estimatePriceLow)} – {fmt(card.estimatePriceHigh)}
+                  </div>
+                )}
+                {/* Confidence chip — Low / Medium / High word per MASTER §1.5.
+                    Color tier: slate / slate / green. Hidden when confidence
+                    is null (un-backfilled cards). */}
+                {card.estimateConfidence != null && (() => {
+                  const tier = confidenceLabel(card.estimateConfidence);
+                  return (
+                    <span style={{ ...st.confidenceChipBase, ...st.confidenceChip[tier.toLowerCase()] }}>
+                      {tier} confidence
+                    </span>
+                  );
+                })()}
                 <div style={st.priceDetails}>
                   {card.avgSalePrice  && <span>Avg {fmt(card.avgSalePrice)}</span>}
                   {card.lastSalePrice && <><span style={st.dot}>·</span><span>Last {fmt(card.lastSalePrice)}</span></>}
@@ -890,6 +913,31 @@ const st = {
   mainPriceSold: {
     color: "#10b981",
     textShadow: "0 0 32px rgba(16,185,129,0.22)",
+  },
+  // Estimate range under the headline value — text-subtle slate.
+  // Tabular nums so the dash + bounds align cleanly.
+  estimateRange: {
+    fontSize: "0.78rem",
+    color: "#64748b",
+    fontVariantNumeric: "tabular-nums",
+    marginTop: "0.2rem",
+  },
+  // Confidence chip base — shared padding/font/radius across all tiers.
+  // Per-tier color comes from confidenceChip[tier] below.
+  confidenceChipBase: {
+    display: "inline-block",
+    marginTop: "0.4rem",
+    fontSize: "0.62rem", fontWeight: 700,
+    letterSpacing: "0.08em", textTransform: "uppercase",
+    padding: "0.18rem 0.5rem", borderRadius: 3,
+  },
+  // Confidence-tier colors per MASTER §1.5. Slate for Low/Medium (quiet
+  // signal — data is less certain), green for High (positive). No red on
+  // Low — low confidence is "less certain", not "wrong".
+  confidenceChip: {
+    low:    { color: "#94a3b8", background: "rgba(148,163,184,0.10)", border: "1px solid rgba(148,163,184,0.30)" },
+    medium: { color: "#cbd5e1", background: "rgba(203,213,225,0.10)", border: "1px solid rgba(203,213,225,0.30)" },
+    high:   { color: "#34d399", background: "rgba(52,211,153,0.10)",  border: "1px solid rgba(52,211,153,0.30)" },
   },
   priceDetails: {
     display: "flex", alignItems: "center", flexWrap: "wrap", gap: "0.3rem",

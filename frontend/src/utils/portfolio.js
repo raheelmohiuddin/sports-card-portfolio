@@ -22,12 +22,28 @@ export function isTraded(card) {
 //                              exit for P&L purposes)
 //   sold (legacy / no fee)  → consignmentSoldPrice (gross; used pre-fee schema
 //                              and when admin hasn't entered a fee yet)
-//   anything else           → estimatedValue (manual override or auto market)
-// Falls back to null when neither is available.
+//   held                    → manualPrice ?? estimatePrice ?? estimatedValue
+//                              per OQ-4: manual override wins over auto.
+//                              estimatePrice is the new price-estimate column
+//                              from the valuation rebuild (see MASTER §1.5);
+//                              estimatedValue is the legacy comps fallback for
+//                              cards not yet refreshed under the new flow.
+// Falls back to null when nothing is available.
 export function effectiveValue(card) {
   if (!card) return null;
   if (isSold(card)) return card.sellersNet ?? card.consignmentSoldPrice;
-  return card.estimatedValue ?? null;
+  return card.manualPrice ?? card.estimatePrice ?? card.estimatedValue ?? null;
+}
+
+// Maps CardHedger price-estimate confidence (0.0-1.0) to a UI tier label.
+// Thresholds locked in MASTER §1.5: Low <0.5 / Medium 0.5–0.75 / High ≥0.75.
+// Returns null when confidence is missing so callers can render-or-skip with
+// `if (label)`.
+export function confidenceLabel(confidence) {
+  if (confidence == null) return null;
+  if (confidence < 0.5)  return "Low";
+  if (confidence < 0.75) return "Medium";
+  return "High";
 }
 
 // Per-card P&L vs cost. null when myCost or value is missing.
@@ -72,7 +88,9 @@ export function summarizePortfolio(cards) {
       }
     } else {
       out.heldCount += 1;
-      const v = c.estimatedValue ?? null;
+      // Same precedence as effectiveValue: manual override wins, then the
+      // new estimate_price column, then the legacy estimated_value fallback.
+      const v = c.manualPrice ?? c.estimatePrice ?? c.estimatedValue ?? null;
       if (v != null) out.unrealizedValue += v;
       if (cost != null && v != null) {
         out.investedHeld  += cost;
