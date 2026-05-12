@@ -1,7 +1,7 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import {
-  PieChart, Pie, Cell, Tooltip, ResponsiveContainer,
+  PieChart, Pie, Cell, Tooltip,
   LineChart, Line, XAxis, YAxis, CartesianGrid,
 } from "recharts";
 import {
@@ -16,20 +16,21 @@ import {
   isSold, isTraded, effectiveValue, cardPnl, summarizePortfolio,
 } from "../utils/portfolio.js";
 
-// Slice palette — design-system tokens. Gold-primary leads (largest slice
-// gets the brand colour), then cool/jewel accents for variety. Loss red is
-// deliberately absent here so a "down" P&L colour can't accidentally match a
-// donut slice. Slate trails as the safe overflow neutral.
+// Slice palette — design-system tokens. Brand gold leads (largest slice),
+// then cool/jewel accents. heroGold is intentionally OFF this list per
+// MASTER §3.2 scarcity — hero gold appears once in the section, on the
+// donut centre's Total value, not on slices. Loss red is also absent so a
+// "down" P&L colour can't accidentally match a slice. Five colours total;
+// any 6th+ category gets folded into a single neutral "Other" slice by
+// aggregateLongTail below, coloured with OTHER_COLOR.
 const PALETTE = [
-  colors.heroGold, // gold-primary  (largest slice, brand)
-  "#60a5fa", // info blue
-  "#a78bfa", // grade-elite purple
-  "#34d399", // gain green
-  "#06b6d4", // cyan
-  "#e6c463", // gold-bright (gold-tone variant)
-  "#f472b6", // pink (variety)
-  "#94a3b8", // slate (overflow)
+  colors.gold, // brand gold (largest slice)
+  "#60a5fa",   // info blue
+  "#a78bfa",   // grade-elite purple
+  "#06b6d4",   // cyan
+  "#34d399",   // gain green
 ];
+const OTHER_COLOR = "#94a3b8"; // slate — used for the long-tail "Other (N)" slice
 
 // ─── Helpers ────────────────────────────────────────────────────────────
 const fmtUsd = (n, opts = {}) =>
@@ -595,78 +596,173 @@ function computeAllocation(cards) {
     .sort((a, b) => b.value - a.value);
 }
 
-function AnalyticsPanel({ cards, totalValue }) {
-  const data = useMemo(() => computeAllocation(cards), [cards]);
-  const [activeIdx, setActiveIdx] = useState(null);
+// Sums slices beyond maxSlices into a single neutral "Other (N)" bucket so
+// the donut stays readable. Per UX rules, pie/donut charts get cluttered
+// past ~5 slices; folding the long tail keeps the visual honest while
+// preserving the total. The `isOther` flag tells the slice renderer to use
+// OTHER_COLOR instead of the next palette entry.
+function aggregateLongTail(data, maxSlices = 5) {
+  if (data.length <= maxSlices) return data;
+  const visible     = data.slice(0, maxSlices);
+  const tail        = data.slice(maxSlices);
+  const tailValue   = tail.reduce((sum, x) => sum + x.value, 0);
+  const tailPercent = tail.reduce((sum, x) => sum + x.percent, 0);
+  return [
+    ...visible,
+    { name: `Other (${tail.length})`, value: tailValue, percent: tailPercent, isOther: true },
+  ];
+}
 
-  if (data.length === 0) return null;
-
+// Wraps each branch with the panel chrome (title + ◆ accent). The accent
+// uses brand gold (allocAccent) so hero gold scarcity stays intact per
+// MASTER §3.2 — the dashboard's page-level hero stat remains the single
+// hero-gold consumer; this section's only hero-gold use is the donut
+// centre's Total value (a portfolio-value display).
+function AllocationFrame({ children, sub }) {
   return (
-    <section style={st.analytics}>
+    <section style={st.analytics} aria-label="Portfolio allocation by category">
       <div style={st.analyticsHeader}>
         <div>
           <h2 style={st.insightsTitle}>Portfolio Allocation</h2>
-          <p style={st.analyticsSub}>
-            Distribution by category · {data.length} categor{data.length === 1 ? "y" : "ies"}
-          </p>
+          {sub && <p style={st.analyticsSub}>{sub}</p>}
         </div>
-        <span style={st.analyticsAccent}>◆</span>
+        <span style={st.allocAccent}>◆</span>
       </div>
+      {children}
+    </section>
+  );
+}
 
+function AllocationEmptyState() {
+  return (
+    <AllocationFrame>
+      <p style={st.allocEmpty}>
+        Allocation appears once your cards have values. Add a card or wait for the next refresh.
+      </p>
+    </AllocationFrame>
+  );
+}
+
+// 1-category state. A donut with one 360° slice reads as a featureless
+// ring — it can't communicate proportion when there's only one bucket. A
+// labeled full-width bar tells the truth and the caption nudges toward
+// diversification rather than treating concentration as an insight.
+function AllocationSingleBar({ slice }) {
+  return (
+    <AllocationFrame>
+      <div style={st.singleBarRow}>
+        <span style={{ ...st.singleBarDot, background: PALETTE[0] }} aria-hidden />
+        <span style={st.singleBarName}>{slice.name}</span>
+        <span style={st.singleBarValue}>{fmtUsd(slice.value)}</span>
+        <span style={st.singleBarPct}>{slice.percent.toFixed(1)}%</span>
+      </div>
+      <div style={st.singleBarTrack} aria-hidden>
+        <div style={{ ...st.singleBarFill, background: PALETTE[0] }} />
+      </div>
+      <p style={st.singleBarCaption}>
+        Add cards in other categories to see your allocation breakdown.
+      </p>
+    </AllocationFrame>
+  );
+}
+
+// 2+ category state. Donut with hover-mirror legend, screen-reader summary,
+// and prefers-reduced-motion-aware entrance animation. Click-to-lock was
+// dropped from v1 — chart is viewport-only so hover suffices.
+function AllocationDonut({ data, totalCategories, totalValue }) {
+  const [activeIdx, setActiveIdx] = useState(null);
+  // Read once at mount — chart doesn't need to react to the user toggling
+  // their OS setting mid-session. Snapshot is sufficient for entrance anim.
+  const reducedMotion = useMemo(
+    () => typeof window !== "undefined"
+      && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches,
+    []
+  );
+
+  // Visually-hidden summary precedes the chart so screen-reader users get
+  // the headline ("Football accounts for 69% at $6,155") before tabbing
+  // through individual legend buttons.
+  const summary = `Portfolio allocated across ${totalCategories} ${
+    totalCategories === 1 ? "category" : "categories"
+  }. ${data.map((d) => `${d.name} ${d.percent.toFixed(1)} percent at ${fmtUsd(d.value)}`).join(", ")}.`;
+
+  const sliceColor = (item, i) => item.isOther ? OTHER_COLOR : PALETTE[i % PALETTE.length];
+
+  return (
+    <AllocationFrame
+      sub={`Distribution by category · ${totalCategories} categor${totalCategories === 1 ? "y" : "ies"}`}
+    >
+      <p style={st.srOnly}>{summary}</p>
       <div style={st.analyticsBody}>
-        {/* ── Donut chart ── */}
+        {/* ── Donut chart ──
+            Fixed-size PieChart (280×260), no ResponsiveContainer. See
+            PriceHistoryChart's comment (~line 2003) for the prior incident:
+            ResponsiveContainer's parent-measurement returns width(-1) on
+            initial render inside the dashboard's flex layout, producing an
+            empty <svg>. The 280×260 box matches chartWrap's flex-basis so
+            nothing visible changes; we just guarantee the chart renders.
+            cx/cy are explicit pixels (half of the dimensions) since recharts
+            percentages only work under ResponsiveContainer. */}
         <div style={st.chartWrap}>
-          <ResponsiveContainer width="100%" height={260}>
-            <PieChart>
-              <Pie
-                data={data}
-                dataKey="value"
-                nameKey="name"
-                cx="50%"
-                cy="50%"
-                innerRadius={72}
-                outerRadius={110}
-                paddingAngle={1.5}
-                stroke="#070a14"
-                strokeWidth={2}
-                onMouseEnter={(_, i) => setActiveIdx(i)}
-                onMouseLeave={() => setActiveIdx(null)}
-                isAnimationActive={false}
-              >
-                {data.map((_, i) => (
-                  <Cell
-                    key={i}
-                    fill={PALETTE[i % PALETTE.length]}
-                    style={{
-                      transition: "opacity 0.2s",
-                      opacity: activeIdx === null || activeIdx === i ? 1 : 0.3,
-                      cursor: "pointer",
-                      filter: activeIdx === i ? "drop-shadow(0 0 12px currentColor)" : "none",
-                    }}
-                  />
-                ))}
-              </Pie>
-              <Tooltip content={<ChartTooltip />} cursor={false} />
-            </PieChart>
-          </ResponsiveContainer>
+          <PieChart width={280} height={260}>
+            <Pie
+              data={data}
+              dataKey="value"
+              nameKey="name"
+              cx={140}
+              cy={130}
+              innerRadius={80}
+              outerRadius={120}
+              paddingAngle={2.5}
+              stroke="#070a14"
+              strokeWidth={2}
+              onMouseEnter={(_, i) => setActiveIdx(i)}
+              onMouseLeave={() => setActiveIdx(null)}
+              isAnimationActive={!reducedMotion}
+              animationDuration={500}
+              animationEasing="ease-out"
+            >
+              {data.map((item, i) => (
+                <Cell
+                  key={item.name}
+                  fill={sliceColor(item, i)}
+                  style={{
+                    transition: "opacity 0.2s",
+                    opacity: activeIdx === null || activeIdx === i ? 1 : 0.3,
+                    cursor: "pointer",
+                    filter: activeIdx === i ? "drop-shadow(0 0 12px currentColor)" : "none",
+                  }}
+                />
+              ))}
+            </Pie>
+            <Tooltip content={<ChartTooltip />} cursor={false} />
+          </PieChart>
 
-          {/* Centre badge inside the donut */}
+          {/* Centre badge inside the donut. donutCenterValue keeps heroGold
+              — this IS a portfolio-value display and MASTER §3.2 permits the
+              section's centerpiece moment to consume hero gold once. */}
           <div style={st.donutCenter}>
             <div style={st.donutCenterLabel}>Total</div>
             <div style={st.donutCenterValue}>
               {totalValue != null ? fmtUsd(totalValue) : "—"}
             </div>
+            <div style={st.donutCenterCount}>
+              {totalCategories} categor{totalCategories === 1 ? "y" : "ies"}
+            </div>
           </div>
         </div>
 
-        {/* ── Legend ── */}
+        {/* ── Legend ── buttons (not divs) for keyboard a11y. The activeIdx
+            state drives both hover and focus highlights so the visual
+            indicator unifies the two interactions. */}
         <div style={st.legend}>
           {data.map((item, i) => {
             const active = activeIdx === i;
             const dim    = activeIdx !== null && !active;
             return (
-              <div
+              <button
                 key={item.name}
+                type="button"
                 style={{
                   ...st.legendRow,
                   ...(active ? st.legendRowActive : {}),
@@ -674,25 +770,45 @@ function AnalyticsPanel({ cards, totalValue }) {
                 }}
                 onMouseEnter={() => setActiveIdx(i)}
                 onMouseLeave={() => setActiveIdx(null)}
+                onFocus={() => setActiveIdx(i)}
+                onBlur={() => setActiveIdx(null)}
+                aria-label={`${item.name}, ${fmtUsd(item.value)}, ${item.percent.toFixed(1)} percent`}
               >
-                <span style={{ ...st.legendDot, background: PALETTE[i % PALETTE.length] }} />
+                <span
+                  style={{ ...st.legendDot, background: sliceColor(item, i) }}
+                  aria-hidden
+                />
                 <span style={st.legendName}>{item.name}</span>
                 <span style={st.legendValue}>{fmtUsd(item.value)}</span>
                 <span style={st.legendPct}>{item.percent.toFixed(1)}%</span>
-              </div>
+              </button>
             );
           })}
         </div>
       </div>
-    </section>
+    </AllocationFrame>
   );
 }
 
+// Routes between empty / single-bar / donut branches based on data shape.
+// Long-tail aggregation only applies to the donut branch.
+function AnalyticsPanel({ cards, totalValue }) {
+  const data    = useMemo(() => computeAllocation(cards), [cards]);
+  const display = useMemo(() => aggregateLongTail(data, 5), [data]);
+
+  if (data.length === 0) return <AllocationEmptyState />;
+  if (data.length === 1) return <AllocationSingleBar slice={data[0]} />;
+  return <AllocationDonut data={display} totalCategories={data.length} totalValue={totalValue} />;
+}
+
+// Allocation-specific tooltip. Uses allocTooltip (hairline border) rather
+// than the shared st.tooltip (gold-rgba border) to tighten hero-gold
+// scarcity in this section. HistoryTooltip elsewhere keeps st.tooltip.
 function ChartTooltip({ active, payload }) {
   if (!active || !payload?.length) return null;
   const item = payload[0].payload;
   return (
-    <div style={st.tooltip}>
+    <div style={st.allocTooltip}>
       <div style={st.tooltipName}>{item.name}</div>
       <div style={st.tooltipValue}>{fmtUsd(item.value)}</div>
       <div style={st.tooltipPct}>{item.percent.toFixed(1)}% of portfolio</div>
@@ -2617,6 +2733,80 @@ const st = {
     margin: "0.4rem 0 0", letterSpacing: "0.02em",
   },
   analyticsAccent: { color: colors.heroGold, fontSize: "1rem", opacity: 0.7 },
+  // Allocation panel uses a brand-gold accent so the heroGold-scarcity rule
+  // (one hero-gold consumer per page centerpiece) isn't broken by the ◆.
+  // Other panels still use analyticsAccent above and keep their heroGold.
+  allocAccent: { color: colors.gold, fontSize: "1rem", opacity: 0.75 },
+
+  // Allocation empty state — neutral copy in the panel body.
+  allocEmpty: {
+    fontSize: "0.85rem", color: "#94a3b8",
+    margin: "1.25rem 0 0", lineHeight: 1.55,
+    letterSpacing: "0.01em",
+  },
+
+  // ── Allocation: 1-category bar (replaces a degenerate single-slice donut) ──
+  singleBarRow: {
+    display: "flex", alignItems: "center", gap: "0.85rem",
+    marginTop: "1.25rem", marginBottom: "0.7rem",
+    fontVariantNumeric: "tabular-nums",
+  },
+  singleBarDot: {
+    width: 10, height: 10, borderRadius: "50%",
+    boxShadow: "0 0 0 3px rgba(0,0,0,0.3)",
+    flexShrink: 0,
+  },
+  singleBarName: {
+    flex: 1,
+    fontSize: "0.95rem", color: "#e2e8f0", fontWeight: 600,
+    overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+    letterSpacing: "-0.01em",
+  },
+  singleBarValue: {
+    fontSize: "0.95rem", color: "#f1f5f9", fontWeight: 700,
+    fontVariantNumeric: "tabular-nums",
+    letterSpacing: "-0.01em",
+  },
+  singleBarPct: {
+    fontSize: "0.78rem", color: "#94a3b8", fontWeight: 600,
+    fontVariantNumeric: "tabular-nums",
+    minWidth: 56, textAlign: "right",
+  },
+  singleBarTrack: {
+    height: 8, borderRadius: 4,
+    background: "rgba(255,255,255,0.04)",
+    overflow: "hidden",
+  },
+  singleBarFill: {
+    height: "100%",
+    width: "100%",
+    borderRadius: 4,
+  },
+  singleBarCaption: {
+    fontSize: "0.78rem", color: "#64748b",
+    margin: "0.9rem 0 0", letterSpacing: "0.01em",
+  },
+
+  // Allocation tooltip — hairline border, no gold tint. Allocation-only;
+  // HistoryTooltip elsewhere keeps the gold-bordered st.tooltip below.
+  allocTooltip: {
+    background: "rgba(15,23,42,0.96)",
+    border: "1px solid rgba(255,255,255,0.06)",
+    borderRadius: 8,
+    padding: "0.7rem 0.95rem",
+    boxShadow: "0 8px 24px rgba(0,0,0,0.5)",
+    backdropFilter: "blur(8px)",
+  },
+
+  // Visually hidden — used for screen-reader summary that precedes the chart.
+  // Standard `.sr-only` recipe rendered inline so we don't need a global CSS.
+  srOnly: {
+    position: "absolute",
+    width: 1, height: 1,
+    padding: 0, margin: -1,
+    overflow: "hidden", clip: "rect(0,0,0,0)",
+    whiteSpace: "nowrap", border: 0,
+  },
 
   analyticsBody: {
     display: "flex", flexWrap: "wrap",
@@ -2653,6 +2843,15 @@ const st = {
     fontVariantNumeric: "tabular-nums",
     letterSpacing: "-0.025em",
   },
+  // Caption beneath the centre Total — replaces the old header subline
+  // ("Distribution by category · N categories"). Keeping it inside the
+  // donut tightens the relationship between value and category count.
+  donutCenterCount: {
+    fontSize: "0.66rem", fontWeight: 600,
+    letterSpacing: "0.04em",
+    color: "#64748b",
+    marginTop: "0.35rem",
+  },
 
   // ── Legend ──
   legend: {
@@ -2660,16 +2859,30 @@ const st = {
     display: "flex", flexDirection: "column",
     gap: "0.25rem",
   },
+  // Legend rows are <button> elements (not <div>) so keyboard users can
+  // tab/focus into each slice. The button reset normalises browser defaults
+  // and the activeIdx-driven legendRowActive serves as the focus indicator
+  // — no need for a separate outline. Min-height honours the 44pt
+  // touch-target rule when the legend renders on mobile/touch devices.
   legendRow: {
     display: "grid",
     gridTemplateColumns: "16px 1fr auto auto",
     alignItems: "center",
     gap: "0.85rem",
     padding: "0.7rem 0.85rem",
+    minHeight: 44,
     borderRadius: 8,
     transition: "background 0.15s, opacity 0.15s",
-    cursor: "default",
+    cursor: "pointer",
     borderBottom: "1px solid rgba(255,255,255,0.04)",
+    // Button reset:
+    background: "none",
+    border: "none",
+    textAlign: "left",
+    width: "100%",
+    color: "inherit",
+    fontFamily: "inherit",
+    outline: "none",
   },
   // Hover/focus highlight — neutral surface lift, not gold. Gold scarcity:
   // the donut legend's active row isn't a brand mark or premium signal.
