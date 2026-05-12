@@ -164,6 +164,9 @@ export default function SalesHistory({ card, loadSales }) {
                   <span style={st.gradePill}>{sale.grade ?? "—"}</span>
                 )}
                 <SourceBadge source={sale.price_source} />
+                {sale.sale_type && (
+                  <span style={st.saleTypePill}>{sale.sale_type}</span>
+                )}
                 <span style={st.price}>{fmt(sale.price)}</span>
               </>
             );
@@ -294,6 +297,21 @@ const st = {
     letterSpacing: "0.04em",
     fontVariantNumeric: "tabular-nums",
     whiteSpace: "nowrap",
+  },
+  // Renders the CardHedger sale_type ("Auction", "Best Offer", any
+  // future variant). Open-ended — whatever the API returns shows here.
+  // Hidden when sale_type is null/missing (see render guard above).
+  // Visually quieter than gradePill / SourceBadge so it reads as
+  // supporting context, not as a primary dimension.
+  saleTypePill: {
+    fontSize: "0.66rem", fontWeight: 600,
+    color: "#94a3b8",
+    background: "rgba(255,255,255,0.04)",
+    border: "1px solid rgba(255,255,255,0.08)",
+    padding: "0.1rem 0.4rem", borderRadius: 3,
+    letterSpacing: "0.04em",
+    whiteSpace: "nowrap",
+    flexShrink: 0,
   },
   link: {
     textDecoration: "none",
