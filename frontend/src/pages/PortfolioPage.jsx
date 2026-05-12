@@ -11,7 +11,7 @@ import {
 import CardModal from "../components/CardModal.jsx";
 import GhostIcon from "../components/GhostIcon.jsx";
 import { getRarityTier, TIER_LABELS, TIER_COLORS } from "../utils/rarity.js";
-import { gradients } from "../utils/theme.js";
+import { colors, gradients } from "../utils/theme.js";
 import {
   isSold, isTraded, effectiveValue, cardPnl, summarizePortfolio,
 } from "../utils/portfolio.js";
@@ -21,7 +21,7 @@ import {
 // deliberately absent here so a "down" P&L colour can't accidentally match a
 // donut slice. Slate trails as the safe overflow neutral.
 const PALETTE = [
-  "#d4af37", // gold-primary  (largest slice, brand)
+  colors.heroGold, // gold-primary  (largest slice, brand)
   "#60a5fa", // info blue
   "#a78bfa", // grade-elite purple
   "#34d399", // gain green
@@ -1943,7 +1943,7 @@ function PriceHistoryChart({ history }) {
         </div>
         <div style={st.historyLegend}>
           <span style={st.historyLegendItem}>
-            <span style={{ ...st.historyLegendSwatch, background: "#d4af37" }} />
+            <span style={{ ...st.historyLegendSwatch, background: colors.heroGold }} />
             Portfolio Value
           </span>
           {hasCostData && (
@@ -2010,7 +2010,7 @@ function PriceHistoryChart({ history }) {
             type="monotone"
             dataKey="value"
             name="Portfolio Value"
-            stroke="#d4af37"
+            stroke={colors.heroGold}
             strokeWidth={2.5}
             dot={false}
             isAnimationActive={false}
@@ -2042,7 +2042,7 @@ function HistoryTooltip({ active, payload }) {
   return (
     <div style={st.tooltip}>
       <div style={st.tooltipName}>{new Date(p.ts).toLocaleString()}</div>
-      <div style={{ ...st.tooltipValue, color: "#d4af37" }}>
+      <div style={{ ...st.tooltipValue, color: colors.heroGold }}>
         Value: {fmtUsd(p.value)}
       </div>
       {p.cost != null && (
@@ -2271,11 +2271,11 @@ const st = {
   togglePillActive: {
     background: "rgba(212,175,55,0.10)",
     border: "1px solid rgba(212,175,55,0.50)",
-    color: "#d4af37",
+    color: colors.heroGold,
   },
   toggleDot: {
     width: 6, height: 6, borderRadius: "50%",
-    background: "#d4af37",
+    background: colors.heroGold,
   },
 
   viewToggle: {
@@ -2297,7 +2297,7 @@ const st = {
   },
   viewBtnActive: {
     background: "rgba(212,175,55,0.15)",
-    color: "#d4af37",
+    color: colors.heroGold,
   },
 
   // ─── No-matches state ───
@@ -2490,7 +2490,7 @@ const st = {
     letterSpacing: "0.16em", textTransform: "uppercase",
     color: "#94a3b8",
   },
-  heroAccent: { color: "#d4af37", fontSize: "1rem", opacity: 0.7 },
+  heroAccent: { color: colors.heroGold, fontSize: "1rem", opacity: 0.7 },
 
   // Headline value — Inter Display, gold-primary, largest type on the page.
   // opsz 32 unlocks Inter's display optical cut (tighter, more authoritative
@@ -2501,7 +2501,7 @@ const st = {
     fontVariationSettings: "'opsz' 32",
     fontSize: "clamp(2.6rem, 6.5vw, 4.4rem)",
     fontWeight: 700,
-    color: "#d4af37",
+    color: colors.heroGold,
     letterSpacing: "-0.03em",
     lineHeight: 1,
     fontVariantNumeric: "tabular-nums",
@@ -2606,7 +2606,7 @@ const st = {
     fontSize: "0.78rem", color: "#64748b",
     margin: "0.4rem 0 0", letterSpacing: "0.02em",
   },
-  analyticsAccent: { color: "#d4af37", fontSize: "1rem", opacity: 0.7 },
+  analyticsAccent: { color: colors.heroGold, fontSize: "1rem", opacity: 0.7 },
 
   analyticsBody: {
     display: "flex", flexWrap: "wrap",
@@ -2639,7 +2639,7 @@ const st = {
     fontFamily: "'Inter', sans-serif",
     fontVariationSettings: "'opsz' 32",
     fontSize: "1.2rem", fontWeight: 700,
-    color: "#d4af37", marginTop: "0.3rem",
+    color: colors.heroGold, marginTop: "0.3rem",
     fontVariantNumeric: "tabular-nums",
     letterSpacing: "-0.025em",
   },
@@ -2701,7 +2701,7 @@ const st = {
   },
   tooltipValue: {
     fontSize: "1.1rem", fontWeight: 700,
-    color: "#d4af37",
+    color: colors.heroGold,
     fontVariantNumeric: "tabular-nums",
     letterSpacing: "-0.01em",
   },
@@ -3046,7 +3046,7 @@ const st = {
   },
   // Ultra Rare — gold, the second tier of premium
   tierPillUltraRare: {
-    color: "#d4af37",
+    color: colors.heroGold,
     borderColor: "rgba(212,175,55,0.5)",
   },
 
@@ -3096,7 +3096,7 @@ const st = {
   priceBtn: {
     background: "none", border: "none", padding: 0,
     fontSize: "1.1rem", fontWeight: 700,
-    color: "#d4af37", cursor: "pointer",
+    color: colors.heroGold, cursor: "pointer",
     fontVariantNumeric: "tabular-nums",
     letterSpacing: "-0.01em",
     transition: "opacity 0.15s",
@@ -3178,7 +3178,7 @@ const st = {
     borderRadius: 16,
   },
   emptyIcon: {
-    fontSize: "3rem", color: "#d4af37", opacity: 0.7,
+    fontSize: "3rem", color: colors.heroGold, opacity: 0.7,
     marginBottom: "1.5rem", lineHeight: 1,
   },
   emptyTitle: {

@@ -1,4 +1,5 @@
 import { Link } from "react-router-dom";
+import { colors } from "../utils/theme.js";
 
 const PILLARS = [
   {
@@ -106,7 +107,7 @@ const st = {
   },
   heroInner: { maxWidth: 720 },
   eyebrow: {
-    color: "#d4af37", fontSize: "0.78rem", fontWeight: 700,
+    color: colors.heroGold, fontSize: "0.78rem", fontWeight: 700,
     letterSpacing: "0.16em", textTransform: "uppercase",
     marginBottom: "1.5rem",
   },

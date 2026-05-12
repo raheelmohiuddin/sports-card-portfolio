@@ -10,6 +10,15 @@ export const colors = {
   goldLight: "#fbbf24",
   goldDark:  "#d97706",
 
+  // Premium hero accent — used ONLY on hero surfaces (Dashboard hero
+  // stat, AboutPage headline, HomePage spotlight). Reserved gold per
+  // MASTER §1.3. Do not use for general brand accents — use `gold` above.
+  //
+  // Convention: rgba decompositions of (212,175,55) at various alphas
+  // are intentionally inline (matches the brand-gold pattern). Only the
+  // hex value is tokenized here. See MASTER §1.3 for context.
+  heroGold:  "#d4af37",
+
   // Dark surface / page background
   bg:       "#0f172a",
   bgDarker: "#0a0f1f",

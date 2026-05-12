@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { useAuthenticator } from "@aws-amplify/ui-react";
+import { colors } from "../utils/theme.js";
 
 const FEATURES = [
   {
@@ -112,7 +113,7 @@ export default function HomePage() {
         <footer style={st.footer}>
           <div className="container" style={st.footerInner}>
             <span style={st.footerBrand}>
-              <span style={{ color: "#d4af37" }}>◆</span> Collector's Reserve
+              <span style={{ color: colors.heroGold }}>◆</span> Collector's Reserve
             </span>
             <nav style={st.footerNav}>
               <Link to="/" style={st.footerLink}>Home</Link>
@@ -281,7 +282,7 @@ const st = {
   // Text alignment now lives on .scp-hero-left so it can flip on mobile.
   heroInner: { position: "relative", zIndex: 2 },
   eyebrow: {
-    color: "#d4af37", fontSize: "0.8rem", fontWeight: 700,
+    color: colors.heroGold, fontSize: "0.8rem", fontWeight: 700,
     letterSpacing: "0.12em", textTransform: "uppercase",
     marginBottom: "1.25rem",
   },
@@ -336,7 +337,7 @@ const st = {
   partnerInner: {},
   // Premium-badge accent — "Exclusive Partner" qualifies for gold-primary.
   partnerEyebrow: {
-    color: "#d4af37",
+    color: colors.heroGold,
     fontSize: "0.72rem", fontWeight: 700,
     letterSpacing: "0.18em", textTransform: "uppercase",
     textAlign: "right",
