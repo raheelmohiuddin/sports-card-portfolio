@@ -18,6 +18,13 @@
 //
 // Run from repo root:
 //   node scripts/backfill-valuations.js
+//
+// Flags:
+//   --auto-approve-matches   Cards whose new card_id matches the cached
+//                            cardhedger_id auto-apply with no prompt
+//                            (just populates the new estimate_* + variant
+//                            columns). Cards with a card_id mismatch OR
+//                            with NULL cached cardhedger_id still prompt.
 
 "use strict";
 
@@ -172,6 +179,11 @@ function applyUpdate(cardId, valuation) {
 
 // ── Main ─────────────────────────────────────────────────────────────
 async function main() {
+  const autoApproveMatches = process.argv.includes("--auto-approve-matches");
+  if (autoApproveMatches) {
+    console.log("⚙ --auto-approve-matches: cards with unchanged card_id will apply without prompting.\n");
+  }
+
   console.log("Fetching CardHedger API key…");
   const apiKey = getApiKey();
   console.log(`OK (length=${apiKey.length})\n`);
@@ -226,6 +238,10 @@ async function main() {
     }
 
     const idMismatch = card.cardhedger_id && valuation.cardhedgerId !== card.cardhedger_id;
+    // "Match" = both ids exist AND they're equal. NULL cached id is NOT a
+    // match (it's first-time data) so those still prompt under
+    // --auto-approve-matches.
+    const idMatches  = card.cardhedger_id && valuation.cardhedgerId === card.cardhedger_id;
     const e = valuation.estimate;
     const c = valuation.comps;
 
@@ -254,27 +270,40 @@ async function main() {
     }
     console.log("");
 
-    const answer = await prompt("Apply this update? [y/n/q] ");
+    // Approval gate. --auto-approve-matches skips the prompt for cards
+    // whose card_id is unchanged (the "no review needed" case). Mismatches
+    // and first-time backfills still require an explicit y/n.
+    let answer;
+    let approval;
+    if (autoApproveMatches && idMatches) {
+      answer = "y";
+      approval = "auto";
+      console.log("Apply this update? [auto-approved — id matches]");
+    } else {
+      answer = await prompt("Apply this update? [y/n/q] ");
+      approval = "manual";
+    }
 
     if (answer === "q") {
       console.log("Quitting. Already-applied updates remain.");
-      decisions.push({ cert: card.cert_number, decision: "quit" });
+      decisions.push({ cert: card.cert_number, decision: "quit", approval });
       writeLog();
       break;
     }
     if (answer !== "y") {
       console.log("Skipped.");
-      decisions.push({ cert: card.cert_number, decision: "skipped" });
+      decisions.push({ cert: card.cert_number, decision: "skipped", approval });
       writeLog();
       continue;
     }
 
     try {
       applyUpdate(card.id, valuation);
-      console.log("✓ Applied.");
+      console.log(`✓ Applied${approval === "auto" ? " (auto)" : ""}.`);
       decisions.push({
         cert: card.cert_number,
         decision: "applied",
+        approval,
         idMismatch,
         from: {
           cardhedger_id: card.cardhedger_id,
@@ -291,7 +320,7 @@ async function main() {
       });
     } catch (err) {
       console.log(`✗ UPDATE failed: ${err.message}`);
-      decisions.push({ cert: card.cert_number, decision: "update_failed", error: err.message });
+      decisions.push({ cert: card.cert_number, decision: "update_failed", approval, error: err.message });
     }
     writeLog();
   }
