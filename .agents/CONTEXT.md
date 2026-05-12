@@ -815,6 +815,14 @@ The `0001_consignment_fee.sql` file under `backend/db/migrations/` is the only m
 - ✅ Debug `console.log` calls in update-consignment Lambda + CardModal removed
 - ✅ RDS Data API enabled on the cluster (so Query Editor works)
 - ✅ Co-Authored-By trailers stripped from commits 4535c8a/685ca6d/ed42bc8 (rebased to ba8d175/2864654/ed42bc8)
+- ✅ **Valuation rebuild + backfill (2026-05-12).** Migration `0002_valuation_rebuild.sql` adds `estimate_price`, `estimate_price_low`, `estimate_price_high`, `estimate_confidence`, `estimate_method`, `estimate_freshness_days`, `estimate_last_updated`, and `variant` to `cards`. New `fetchValuation` orchestrator in `pricing.js` runs prices-by-cert → card-details → comps → price-estimate; consumed by `refresh-portfolio.js` and `add-card.js`. CardModal surfaces variant inline, range, and Low/Medium/High confidence chip per MASTER §1.5. Backfill via `scripts/backfill-valuations.js --auto-approve-matches`:
+  - **29 cards processed**, log at `scripts/backfill-logs/2026-05-12T06-46-17-584Z.json`.
+  - **20 with new estimate_* fields populated** (18 auto-applied as id-matches + 2 applied via follow-up targeted Lambda invokes).
+  - **2 card_id corrections applied** — Rodriguez Titanium (cert 158313469) and Mahomes Blue Wave second-user row (cert 42291668). The Mahomes first-user row was fixed via direct invoke on 2026-05-11 ahead of the script run.
+  - **8 cards skipped** — 2 with `manual_price` overrides (Daniels cert 111268274 = $3,000; Pikachu cert 101154849 = $1,000; refresh respects the override per OQ-4) + 6 not indexed by CardHedger (`prices-by-cert` returns no card: Mihawk 155434781, Dragonite-Holo 28502022, Lamine Yamal 150582399, Luffy 121731112, Roronoa Zoro 116835000, Zoro-Juurou 146725674 — mostly TCG promos).
+  - **1 card held for manual review** — Messi Mundicromo (cert 21364651): DB had $37,220, new flow proposed $950.55 (different `card_id`). Direction unclear without a manual cert lookup; deferred.
+  - **Snapshot table** `cards_pre_backfill` (29 rows) still in DB for emergency restore. Drop in ~1 week of stable runtime: `DROP TABLE cards_pre_backfill;`
+  - Plan + design history: `.agents/valuation-rebuild-plan.md`. Commits: `686bcbd` (migration) → `621de29` (pricing additive) → `6ece025` (refresh+add-card+get-cards) → `176e374` (get-card mirror) → `d024169` (frontend) → `ef26af0` (MASTER §1.5) → `ccdbd22` + `9f67cf7` (backfill script + flag).
 
 ### Still stubbed / missing
 
