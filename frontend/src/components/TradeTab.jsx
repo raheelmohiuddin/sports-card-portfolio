@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { lookupPsaCert, previewPricing, executeTrade, confirmTradeCost, cancelTrade, refreshPortfolio, analyzeTrade } from "../services/api.js";
-import { isSold, isTraded } from "../utils/portfolio.js";
+import { isSold, isTraded, effectiveValue, cardPnl } from "../utils/portfolio.js";
 import { computeTradeCostBasis } from "../utils/trade.js";
 import { gradients } from "../utils/theme.js";
 
@@ -192,7 +192,7 @@ export default function TradeTab({ cards, onTradeComplete, pastTrades, historyLo
   // bar surfaces that fallback honestly via the fetching/unavailable
   // chips on each tile so the totals aren't misleading.
   const givenValueSum = givenCards.reduce(
-    (sum, c) => sum + (c.estimatedValue != null ? parseFloat(c.estimatedValue) : 0),
+    (sum, c) => sum + (effectiveValue(c) ?? 0),
     0
   );
   const receivedValueSum = receivedCards.reduce((sum, r) => {
@@ -1275,9 +1275,9 @@ function TradeGivenScroller({ cards, selectedIds, onToggle }) {
       >
         {cards.map((c) => {
           const selected = selectedIds.has(c.id);
-          const myCost   = c.myCost         != null ? parseFloat(c.myCost)         : null;
-          const estValue = c.estimatedValue != null ? parseFloat(c.estimatedValue) : null;
-          const pnl      = (myCost != null && estValue != null) ? estValue - myCost : null;
+          const myCost   = c.myCost != null ? parseFloat(c.myCost) : null;
+          const estValue = effectiveValue(c);
+          const pnl      = cardPnl(c);
           const pnlColor = pnl == null ? "#94a3b8" : (pnl >= 0 ? "#10b981" : "#f87171");
           return (
             <button

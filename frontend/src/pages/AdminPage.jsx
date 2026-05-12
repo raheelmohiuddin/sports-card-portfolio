@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { getAdminStats, getAdminCards } from "../services/api.js";
 import { colors, adminColors, gradients } from "../utils/theme.js";
+import { effectiveValue } from "../utils/portfolio.js";
 
 // ─── Admin Dashboard ─────────────────────────────────────────────────
 // Top-level /admin landing page. Four stat tiles + a full all-cards table
@@ -76,7 +77,7 @@ export default function AdminPage() {
                       <td style={st.tdStrong}>{cardLabel}</td>
                       <td style={{ ...st.td, ...st.tdRight }}>{c.grade ?? "—"}</td>
                       <td style={st.tdMono}>{c.certNumber ?? "—"}</td>
-                      <td style={{ ...st.td, ...st.tdRight, ...st.tdValue }}>{fmt(c.estimatedValue)}</td>
+                      <td style={{ ...st.td, ...st.tdRight, ...st.tdValue }}>{fmt(effectiveValue(c))}</td>
                       <td style={st.td}>{fmtDate(c.addedAt)}</td>
                     </tr>
                   );

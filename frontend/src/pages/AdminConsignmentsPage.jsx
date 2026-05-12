@@ -4,6 +4,7 @@ import {
   getAdminCard, getAdminCardSales,
 } from "../services/api.js";
 import { colors, adminColors, gradients } from "../utils/theme.js";
+import { effectiveValue } from "../utils/portfolio.js";
 import { AdminTopNav, fmt, fmtDate } from "./AdminPage.jsx";
 import CardModal from "../components/CardModal.jsx";
 
@@ -31,7 +32,7 @@ const COLUMNS = [
   { key: "lastName",   label: "Last",           get: (r) => (r.user.familyName ?? "").toLowerCase() },
   { key: "card",       label: "Card",           get: (r) => (`${r.card.year ?? ""} ${r.card.brand ?? ""} ${r.card.playerName ?? ""}`).trim().toLowerCase() },
   { key: "grade",      label: "Grade",          get: (r) => parseFloat(r.card.grade) || 0 },
-  { key: "estimated",  label: "Estimated",      get: (r) => r.card.estimatedValue ?? 0 },
+  { key: "estimated",  label: "Estimated",      get: (r) => effectiveValue(r.card) ?? 0 },
   { key: "asking",     label: "Asking",         get: (r) => r.askingPrice ?? 0 },
   { key: "soldPrice",  label: "Sold Price",     get: (r) => r.soldPrice   ?? 0 },
   { key: "feePct",     label: "Consignment Fee %", get: (r) => r.consignmentFeePct ?? 0 },
@@ -290,7 +291,7 @@ function ConsignmentRow({ row, onPatch, onOpen }) {
         {row.notes && <div style={st.subnote}>{row.notes}</div>}
       </td>
       <td style={st.td}>{row.card.grade ?? "—"}</td>
-      <td style={st.td}>{fmt(row.card.estimatedValue)}</td>
+      <td style={st.td}>{fmt(effectiveValue(row.card))}</td>
       <td style={{ ...st.td, ...st.tdValue }}>{fmt(row.askingPrice)}</td>
       <td style={st.td}>
         <EditableSoldPrice

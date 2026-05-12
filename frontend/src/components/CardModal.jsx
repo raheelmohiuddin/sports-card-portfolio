@@ -5,7 +5,7 @@ import {
   getCardSales as defaultGetCardSales,
 } from "../services/api.js";
 import { getRarityTier, TIER_LABELS } from "../utils/rarity.js";
-import { confidenceLabel } from "../utils/portfolio.js";
+import { effectiveValue, confidenceLabel } from "../utils/portfolio.js";
 import GhostIcon from "./GhostIcon.jsx";
 import CardPop from "./CardPop.jsx";
 import SalesHistory from "./SalesHistory.jsx";
@@ -160,12 +160,14 @@ export default function CardModal({
       card.consignmentStatus === "sold" && card.consignmentSoldPrice != null;
     return {
       sold: isSoldCard,
-      // Held-card precedence per OQ-4: manual override wins, then the new
-      // estimate_price column (price-estimate), then the legacy estimated_value
-      // / avgSalePrice (comps) fallbacks for un-backfilled cards.
+      // Held-card precedence per OQ-4 routed through effectiveValue helper:
+      // manualPrice ?? estimatePrice ?? estimatedValue. The legacy
+      // avgSalePrice tertiary fallback was dropped — refresh-portfolio.js
+      // writes estimated_value and avg_sale_price from the same source, so
+      // the two are identical on every refreshed card post-rebuild.
       displayValue: isSoldCard
         ? (card.sellersNet ?? card.consignmentSoldPrice)
-        : (card.manualPrice ?? card.estimatePrice ?? card.estimatedValue ?? card.avgSalePrice),
+        : effectiveValue(card),
     };
   }, [card]);
 

@@ -28,6 +28,9 @@ export function isTraded(card) {
 //                              from the valuation rebuild (see MASTER §1.5);
 //                              estimatedValue is the legacy comps fallback for
 //                              cards not yet refreshed under the new flow.
+// avg_sale_price is intentionally NOT in the chain — refresh-portfolio.js
+// writes estimated_value and avg_sale_price from the same source, so the
+// two columns track identically on every refreshed card post-rebuild.
 // Falls back to null when nothing is available.
 export function effectiveValue(card) {
   if (!card) return null;

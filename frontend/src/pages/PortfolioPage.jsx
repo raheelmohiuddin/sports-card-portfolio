@@ -119,7 +119,9 @@ export default function PortfolioPage() {
     await deleteCard(id);
     setCards((prev) => {
       const next = prev.filter((c) => c.id !== id);
-      const newTotal = next.reduce((sum, c) => sum + (c.estimatedValue ?? 0), 0);
+      // Match handleCardUpdate's effectiveValue precedence so post-delete
+      // and post-update totals stay consistent.
+      const newTotal = next.reduce((sum, c) => sum + (effectiveValue(c) ?? 0), 0);
       setTotalValue(Math.round(newTotal * 100) / 100);
       return next;
     });
@@ -577,7 +579,7 @@ function Stat({ label, value }) {
 function computeAllocation(cards) {
   const buckets = new Map();
   cards.forEach((card) => {
-    const value = card.estimatedValue ?? 0;
+    const value = effectiveValue(card) ?? 0;
     if (!value || value <= 0) return;
     const key = card.sport || "Uncategorized";
     buckets.set(key, (buckets.get(key) ?? 0) + value);
@@ -1075,8 +1077,9 @@ function EditCostModal({ card, onClose, onSave }) {
     try {
       const updated = await updateCard(card.id, { myCost: cost, targetPrice: target });
       // Recompute targetReached locally so the tile updates immediately.
-      const reached = updated.targetPrice != null && card.estimatedValue != null
-        && card.estimatedValue >= updated.targetPrice;
+      const liveValue = effectiveValue(card);
+      const reached = updated.targetPrice != null && liveValue != null
+        && liveValue >= updated.targetPrice;
       onSave({ myCost: updated.myCost, targetPrice: updated.targetPrice, targetReached: reached });
     } catch (err) {
       setError(err.message);
@@ -1091,7 +1094,7 @@ function EditCostModal({ card, onClose, onSave }) {
   // Live profit/loss preview as the user types
   const pendingCost = val.trim() === "" ? null : parseFloat(val.trim());
   const validPending = pendingCost !== null && !isNaN(pendingCost) && pendingCost >= 0;
-  const liveValue   = card.estimatedValue;
+  const liveValue   = effectiveValue(card);
   const livePnl     = validPending && liveValue != null ? liveValue - pendingCost : null;
   const livePositive = livePnl != null && livePnl >= 0;
 
@@ -1656,7 +1659,9 @@ function PricingValue({ card, onCardUpdate }) {
 
   function startEdit(e) {
     e.stopPropagation();
-    const cur = card.manualPrice ?? card.estimatedValue ?? "";
+    // effectiveValue gives manualPrice ?? estimatePrice ?? estimatedValue —
+    // the same number the user sees displayed, so editing starts from there.
+    const cur = effectiveValue(card) ?? "";
     setVal(cur !== "" ? String(parseFloat(cur).toFixed(2)) : "");
     setEditing(true);
     setTimeout(() => inputRef.current?.select(), 0);
@@ -1685,10 +1690,11 @@ function PricingValue({ card, onCardUpdate }) {
   }
 
   // For sold cards, show the realized soldPrice — never editable, never the
-  // stale estimatedValue. For everything else, the existing manual/auto
-  // chain holds.
+  // stale estimatedValue. For everything else, route through effectiveValue
+  // (manualPrice ?? estimatePrice ?? estimatedValue). Legacy avgSalePrice
+  // tertiary dropped — see comment in utils/portfolio.js#effectiveValue.
   const sold = isSold(card);
-  const display = sold ? card.consignmentSoldPrice : (card.estimatedValue ?? card.avgSalePrice);
+  const display = sold ? card.consignmentSoldPrice : effectiveValue(card);
 
   // Sold cards short-circuit the editor: the realized price is fixed.
   if (sold) {
@@ -1769,8 +1775,8 @@ function AlertBanner({ alerts, onJump }) {
 function PerformersPanel({ cards, onSelectCard }) {
   const tracked = useMemo(() => {
     return cards
-      .filter((c) => c.myCost != null && c.estimatedValue != null)
-      .map((c) => ({ ...c, pnl: c.estimatedValue - c.myCost }));
+      .filter((c) => c.myCost != null && effectiveValue(c) != null)
+      .map((c) => ({ ...c, pnl: cardPnl(c) }));
   }, [cards]);
 
   // Partition by sign, sort each side, take 3. Wrapped in useMemo
@@ -1864,7 +1870,7 @@ function PerformerRowImpl({ card, color, onSelectCard }) {
           {card.pnl >= 0 ? "▲" : "▼"} {card.pnl >= 0 ? "+" : "−"}{fmtUsd(Math.abs(card.pnl))}
         </div>
         <div style={st.perfItemBasis}>
-          {fmtUsd(card.myCost)} → {fmtUsd(card.estimatedValue)}
+          {fmtUsd(card.myCost)} → {fmtUsd(effectiveValue(card))}
         </div>
       </div>
     </div>
