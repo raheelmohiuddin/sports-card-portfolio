@@ -29,6 +29,13 @@ exports.handler = async (event) => {
             c.manual_price, c.my_cost, c.target_price,
             c.estimated_value, c.avg_sale_price, c.last_sale_price,
             c.num_sales, c.price_source, c.value_last_updated,
+            c.estimate_price, c.estimate_price_low, c.estimate_price_high,
+            c.estimate_confidence, c.estimate_method,
+            c.estimate_freshness_days, c.estimate_last_updated,
+            c.variant,
+            c.sold_price, c.sold_at, c.sold_venue_type,
+            c.sold_auction_house, c.sold_other_text,
+            cs.id AS sold_show_id, cs.name AS sold_show_name, cs.show_date AS sold_show_date,
             c.status, c.added_at,
             cn.status     AS consignment_status,
             cn.sold_price AS consignment_sold_price,
@@ -44,6 +51,7 @@ exports.handler = async (event) => {
      ) cn ON TRUE
      LEFT JOIN consignment_blocks cb
        ON cb.user_id = c.user_id AND cb.cert_number = c.cert_number
+     LEFT JOIN card_shows cs ON cs.id = c.sold_show_id
      WHERE c.id = $1`,
     [cardId]
   );
@@ -88,6 +96,17 @@ exports.handler = async (event) => {
     numSales:         row.num_sales        ?? null,
     priceSource:      manualPrice !== null ? "manual" : (row.price_source ?? null),
     valueLastUpdated: row.value_last_updated ?? null,
+    // Valuation rebuild fields per .agents/valuation-rebuild-plan.md §3.
+    // Backfilled into admin/get-card.js to bring the response shape back
+    // into sync with cards/get-card.js — see .agents/mark-as-sold-plan.md OQ-4.
+    estimatePrice:         row.estimate_price          ? parseFloat(row.estimate_price)          : null,
+    estimatePriceLow:      row.estimate_price_low      ? parseFloat(row.estimate_price_low)      : null,
+    estimatePriceHigh:     row.estimate_price_high     ? parseFloat(row.estimate_price_high)     : null,
+    estimateConfidence:    row.estimate_confidence    != null ? parseFloat(row.estimate_confidence) : null,
+    estimateMethod:        row.estimate_method        ?? null,
+    estimateFreshnessDays: row.estimate_freshness_days ?? null,
+    estimateLastUpdated:   row.estimate_last_updated   ?? null,
+    variant:               row.variant                 ?? null,
     addedAt:          row.added_at,
     consignmentStatus:    row.consignment_status     ?? null,
     consignmentSoldPrice: row.consignment_sold_price != null ? parseFloat(row.consignment_sold_price) : null,
@@ -95,5 +114,21 @@ exports.handler = async (event) => {
     sellersNet:           row.sellers_net            != null ? parseFloat(row.sellers_net)            : null,
     consignmentBlocked:   !!row.consignment_blocked,
     status:               row.status ?? null,
+    // Self-sold venue per .agents/mark-as-sold-plan.md §3. Populated
+    // only when status='sold'; otherwise all eight fields are null.
+    // sold_show_id / sold_show_name / sold_show_date come from the
+    // LEFT JOIN to card_shows on c.sold_show_id.
+    soldPrice:        row.sold_price ? parseFloat(row.sold_price) : null,
+    soldAt:           row.sold_at instanceof Date
+                        ? row.sold_at.toISOString().slice(0,10)
+                        : (row.sold_at ?? null),
+    soldVenueType:    row.sold_venue_type ?? null,
+    soldShowId:       row.sold_show_id   ?? null,
+    soldShowName:     row.sold_show_name ?? null,
+    soldShowDate:     row.sold_show_date instanceof Date
+                        ? row.sold_show_date.toISOString().slice(0,10)
+                        : (row.sold_show_date ?? null),
+    soldAuctionHouse: row.sold_auction_house ?? null,
+    soldOtherText:    row.sold_other_text    ?? null,
   });
 };

@@ -30,6 +30,9 @@ exports.handler = async (event) => {
             c.estimate_confidence, c.estimate_method,
             c.estimate_freshness_days, c.estimate_last_updated,
             c.variant,
+            c.sold_price, c.sold_at, c.sold_venue_type,
+            c.sold_auction_house, c.sold_other_text,
+            cs.id AS sold_show_id, cs.name AS sold_show_name, cs.show_date AS sold_show_date,
             c.status, c.added_at,
             cn.status     AS consignment_status,
             cn.sold_price AS consignment_sold_price,
@@ -45,6 +48,7 @@ exports.handler = async (event) => {
      ) cn ON TRUE
      LEFT JOIN consignment_blocks cb
        ON cb.user_id = c.user_id AND cb.cert_number = c.cert_number
+     LEFT JOIN card_shows cs ON cs.id = c.sold_show_id
      WHERE c.id = $1 AND c.user_id = $2`,
     [cardId, userId]
   );
@@ -107,5 +111,21 @@ exports.handler = async (event) => {
       sellersNet:            row.sellers_net            != null ? parseFloat(row.sellers_net)            : null,
       consignmentBlocked:    !!row.consignment_blocked,
       status:                row.status ?? null,
+      // Self-sold venue per .agents/mark-as-sold-plan.md §3. Populated
+      // only when status='sold'; otherwise all eight fields are null.
+      // sold_show_id / sold_show_name / sold_show_date come from the
+      // LEFT JOIN to card_shows on c.sold_show_id.
+      soldPrice:        row.sold_price ? parseFloat(row.sold_price) : null,
+      soldAt:           row.sold_at instanceof Date
+                          ? row.sold_at.toISOString().slice(0,10)
+                          : (row.sold_at ?? null),
+      soldVenueType:    row.sold_venue_type ?? null,
+      soldShowId:       row.sold_show_id   ?? null,
+      soldShowName:     row.sold_show_name ?? null,
+      soldShowDate:     row.sold_show_date instanceof Date
+                          ? row.sold_show_date.toISOString().slice(0,10)
+                          : (row.sold_show_date ?? null),
+      soldAuctionHouse: row.sold_auction_house ?? null,
+      soldOtherText:    row.sold_other_text    ?? null,
   });
 };
