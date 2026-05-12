@@ -25,6 +25,6 @@ export const TIER_LABELS = {
 // Primary accent colour per tier — used for borders, glows, text.
 export const TIER_COLORS = {
   ghost:      "#e2e8f0", // silvery white (slate-200)
-  ultra_rare: "#f59e0b", // gold (amber-500)
+  ultra_rare: "#d4af37", // antique gold (MASTER.md gold-primary)
   rare:       "#93c5fd", // icy blue silver (blue-300)
 };
