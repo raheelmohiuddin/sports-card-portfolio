@@ -3122,37 +3122,6 @@ const st = {
     letterSpacing: "-0.01em",
     cursor: "default",
   },
-  // Diagonal SOLD stamp on the card image — bold green pill that reads
-  // "this card has left the portfolio (and made you money)".
-  soldStamp: {
-    position: "absolute",
-    top: 12, right: 12,
-    fontSize: "0.65rem", fontWeight: 900,
-    letterSpacing: "0.18em",
-    color: "#0f172a",
-    background: "linear-gradient(135deg, #34d399, #10b981)",
-    padding: "0.25rem 0.65rem",
-    borderRadius: 4,
-    boxShadow: "0 4px 14px rgba(16,185,129,0.5), 0 0 0 1px rgba(16,185,129,0.85)",
-    transform: "rotate(8deg)",
-    zIndex: 4,
-  },
-  // Sibling of soldStamp — same diagonal placement, blue gradient so the
-  // user can spot traded cards at a glance in the grid view.
-  tradedStamp: {
-    position: "absolute",
-    top: 12, right: 12,
-    fontSize: "0.65rem", fontWeight: 900,
-    letterSpacing: "0.18em",
-    color: "#0f172a",
-    background: "linear-gradient(135deg, #60a5fa, #3b82f6)",
-    padding: "0.25rem 0.65rem",
-    borderRadius: 4,
-    boxShadow: "0 4px 14px rgba(59,130,246,0.5), 0 0 0 1px rgba(59,130,246,0.85)",
-    transform: "rotate(8deg)",
-    zIndex: 4,
-  },
-
   // ── Inline editor ──
   editBlock: {
     display: "flex", alignItems: "center", gap: "0.25rem",
