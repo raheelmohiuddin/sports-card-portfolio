@@ -3,6 +3,7 @@ const { S3Client, PutObjectCommand } = require("@aws-sdk/client-s3");
 const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
 const { json } = require("../_response");
 const { isValidCertNumber, sanitize, isHttpsUrl, isValidCount, isValidPrice } = require("../_validate");
+const { fetchValuation } = require("../portfolio/pricing");
 
 const s3 = new S3Client({});
 
@@ -129,6 +130,60 @@ exports.handler = async (event) => {
     await db.query(
       "UPDATE cards SET s3_image_key = $1, s3_back_image_key = $2 WHERE id = $3",
       [frontKey, backKey, cardId]
+    );
+  }
+
+  // Synchronous valuation per .agents/valuation-rebuild-plan.md §3 — runs
+  // the new 4-endpoint flow so the card lands with an authoritative
+  // cardhedger_id, variant, comps cache, and price-estimate from the
+  // first render. Best-effort: if the fetch fails, the card still
+  // INSERTed successfully and the next scheduled refresh will retry.
+  const valuation = await fetchValuation({
+    certNumber,
+    grader: graderValue,
+    grade,
+  }).catch((err) => {
+    console.warn("[add-card] valuation fetch failed:", err.message);
+    return null;
+  });
+
+  if (valuation) {
+    await db.query(
+      `UPDATE cards SET
+         estimated_value      = COALESCE($1, estimated_value),
+         avg_sale_price       = $1,
+         last_sale_price      = $2,
+         num_sales            = $3,
+         price_source         = 'cardhedger',
+         cardhedger_id        = $4,
+         cardhedger_image_url = COALESCE($5, cardhedger_image_url),
+         raw_comps            = $6,
+         value_last_updated   = NOW(),
+         estimate_price          = $7,
+         estimate_price_low      = $8,
+         estimate_price_high     = $9,
+         estimate_confidence     = $10,
+         estimate_method         = $11,
+         estimate_freshness_days = $12,
+         estimate_last_updated   = NOW(),
+         variant                 = COALESCE($13, variant)
+       WHERE id = $14`,
+      [
+        valuation.comps?.avgSalePrice  ?? null,
+        valuation.comps?.lastSalePrice ?? null,
+        valuation.comps?.numSales      ?? 0,
+        valuation.cardhedgerId         ?? null,
+        valuation.cardhedgerImageUrl   ?? null,
+        JSON.stringify(valuation.comps?.rawComps ?? []),
+        valuation.estimate?.price          ?? null,
+        valuation.estimate?.priceLow       ?? null,
+        valuation.estimate?.priceHigh      ?? null,
+        valuation.estimate?.confidence     ?? null,
+        valuation.estimate?.method         ?? null,
+        valuation.estimate?.freshnessDays  ?? null,
+        valuation.variant                  ?? null,
+        cardId,
+      ]
     );
   }
 

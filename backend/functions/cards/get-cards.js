@@ -26,6 +26,10 @@ exports.handler = async (event) => {
             c.manual_price, c.my_cost, c.target_price,
             c.estimated_value, c.avg_sale_price, c.last_sale_price,
             c.num_sales, c.price_source, c.value_last_updated,
+            c.estimate_price, c.estimate_price_low, c.estimate_price_high,
+            c.estimate_confidence, c.estimate_method,
+            c.estimate_freshness_days, c.estimate_last_updated,
+            c.variant,
             c.status, c.added_at,
             cn.status     AS consignment_status,
             cn.sold_price AS consignment_sold_price,
@@ -85,6 +89,17 @@ exports.handler = async (event) => {
         numSales:         row.num_sales        ?? null,
         priceSource:      manualPrice !== null ? "manual" : (row.price_source ?? null),
         valueLastUpdated: row.value_last_updated ?? null,
+        // Valuation rebuild fields per .agents/valuation-rebuild-plan.md §3.
+        // Frontend reads estimatePrice as the new headline value; estimatedValue
+        // remains populated as a fallback during the staggered transition.
+        estimatePrice:         row.estimate_price          ? parseFloat(row.estimate_price)          : null,
+        estimatePriceLow:      row.estimate_price_low      ? parseFloat(row.estimate_price_low)      : null,
+        estimatePriceHigh:     row.estimate_price_high     ? parseFloat(row.estimate_price_high)     : null,
+        estimateConfidence:    row.estimate_confidence    != null ? parseFloat(row.estimate_confidence) : null,
+        estimateMethod:        row.estimate_method        ?? null,
+        estimateFreshnessDays: row.estimate_freshness_days ?? null,
+        estimateLastUpdated:   row.estimate_last_updated   ?? null,
+        variant:               row.variant                 ?? null,
         addedAt:          row.added_at,
         consignmentStatus:     row.consignment_status     ?? null,
         consignmentSoldPrice:  row.consignment_sold_price != null ? parseFloat(row.consignment_sold_price) : null,

@@ -1,5 +1,5 @@
 const { getPool, ensureUser } = require("../_db");
-const { fetchMarketValue } = require("./pricing");
+const { fetchMarketValue, fetchValuation } = require("./pricing");
 const { json } = require("../_response");
 const { isValidId } = require("../_validate");
 
@@ -46,13 +46,13 @@ exports.handler = async (event) => {
   const result = cardIds
     ? await db.query(
         `SELECT id, cert_number, player_name, year, brand, card_number, grade, sport,
-                manual_price, cardhedger_id, value_last_updated
+                grader, manual_price, cardhedger_id, value_last_updated
          FROM cards WHERE user_id = $1 AND id = ANY($2::uuid[])`,
         [userId, cardIds]
       )
     : await db.query(
         `SELECT id, cert_number, player_name, year, brand, card_number, grade, sport,
-                manual_price, cardhedger_id, value_last_updated
+                grader, manual_price, cardhedger_id, value_last_updated
          FROM cards WHERE user_id = $1`,
         [userId]
       );
@@ -83,44 +83,105 @@ exports.handler = async (event) => {
         return;
       }
 
-      let pricing;
+      // New flow per .agents/valuation-rebuild-plan.md §3: cert path uses
+      // fetchValuation (4-endpoint orchestrator) for authoritative card_id
+      // resolution + variant + price-estimate. Cert-less cards (legacy
+      // fuzzy-match adds; defensive fallback for PSA) use fetchMarketValue.
+      let v = null;
+      let p = null;
       try {
-        pricing = await fetchMarketValue({
-          certNumber:   row.cert_number,
-          playerName:   row.player_name,
-          year:         row.year,
-          brand:        row.brand,
-          cardNumber:   row.card_number,
-          grade:        row.grade,
-          sport:        row.sport,
-          cardhedgerId: row.cardhedger_id,
-        });
+        if (row.cert_number) {
+          v = await fetchValuation({
+            certNumber: row.cert_number,
+            grader:     row.grader || "PSA",
+            grade:      row.grade,
+          });
+        } else {
+          p = await fetchMarketValue({
+            certNumber:   row.cert_number,
+            playerName:   row.player_name,
+            year:         row.year,
+            brand:        row.brand,
+            cardNumber:   row.card_number,
+            grade:        row.grade,
+            sport:        row.sport,
+            cardhedgerId: row.cardhedger_id,
+          });
+        }
       } catch (err) {
         console.warn("CardHedger pricing failed:", err.message);
         failed += 1;
         return;
       }
 
-      if (!pricing) {
+      if (!v && !p) {
         skipped += 1;
         return;
       }
 
+      // Detect cardhedger_id mismatch — the cert path may now resolve to a
+      // different card_id than what was cached (e.g. variant fix per the
+      // valuation-rebuild plan). Logged only here; the UPDATE overwrites
+      // cardhedger_id to the authoritative value either way.
+      if (v?.cardhedgerId && row.cardhedger_id && v.cardhedgerId !== row.cardhedger_id) {
+        console.log(`[refresh] cardhedger_id mismatch for cert ${row.cert_number}: ${row.cardhedger_id} -> ${v.cardhedgerId}`);
+      }
+
+      // Normalize fields from either path into one shape so the UPDATE is
+      // single-statement. Estimate fields are null for the fuzzy-match
+      // fallback (no price-estimate data).
+      const fields = {
+        avgSalePrice:          v?.comps?.avgSalePrice    ?? p?.avgSalePrice       ?? null,
+        lastSalePrice:         v?.comps?.lastSalePrice   ?? p?.lastSalePrice      ?? null,
+        numSales:              v?.comps?.numSales        ?? p?.numSales           ?? 0,
+        cardhedgerId:          v?.cardhedgerId           ?? p?.cardhedgerId       ?? row.cardhedger_id,
+        cardhedgerImageUrl:    v?.cardhedgerImageUrl     ?? p?.cardhedgerImageUrl ?? null,
+        rawComps:              v?.comps?.rawComps        ?? p?.rawComps           ?? [],
+        variant:               v?.variant                ?? null,
+        estimatePrice:         v?.estimate?.price        ?? null,
+        estimatePriceLow:      v?.estimate?.priceLow     ?? null,
+        estimatePriceHigh:     v?.estimate?.priceHigh    ?? null,
+        estimateConfidence:    v?.estimate?.confidence   ?? null,
+        estimateMethod:        v?.estimate?.method       ?? null,
+        estimateFreshnessDays: v?.estimate?.freshnessDays ?? null,
+      };
+
       await db.query(
-        `UPDATE cards
-         SET estimated_value      = $1,
-             avg_sale_price       = $2,
-             last_sale_price      = $3,
-             num_sales            = $4,
-             price_source         = $5,
-             cardhedger_id        = $6,
-             cardhedger_image_url = COALESCE($7, cardhedger_image_url),
-             raw_comps            = $8,
-             value_last_updated   = NOW()
-         WHERE id = $9`,
-        [pricing.avgSalePrice, pricing.avgSalePrice, pricing.lastSalePrice,
-         pricing.numSales, pricing.source, pricing.cardhedgerId,
-         pricing.cardhedgerImageUrl, JSON.stringify(pricing.rawComps), row.id]
+        `UPDATE cards SET
+           estimated_value      = COALESCE($1, estimated_value),
+           avg_sale_price       = $1,
+           last_sale_price      = $2,
+           num_sales            = $3,
+           price_source         = 'cardhedger',
+           cardhedger_id        = $4,
+           cardhedger_image_url = COALESCE($5, cardhedger_image_url),
+           raw_comps            = $6,
+           value_last_updated   = NOW(),
+           estimate_price          = $7,
+           estimate_price_low      = $8,
+           estimate_price_high     = $9,
+           estimate_confidence     = $10,
+           estimate_method         = $11,
+           estimate_freshness_days = $12,
+           estimate_last_updated   = NOW(),
+           variant                 = COALESCE($13, variant)
+         WHERE id = $14`,
+        [
+          fields.avgSalePrice,
+          fields.lastSalePrice,
+          fields.numSales,
+          fields.cardhedgerId,
+          fields.cardhedgerImageUrl,
+          JSON.stringify(fields.rawComps),
+          fields.estimatePrice,
+          fields.estimatePriceLow,
+          fields.estimatePriceHigh,
+          fields.estimateConfidence,
+          fields.estimateMethod,
+          fields.estimateFreshnessDays,
+          fields.variant,
+          row.id,
+        ]
       );
       refreshed += 1;
     })
