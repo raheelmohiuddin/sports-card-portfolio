@@ -27,7 +27,7 @@ exports.handler = async (event) => {
   }
 
   const {
-    certNumber, year, brand, sport, playerName, cardNumber,
+    certNumber, year, brand, sport, category, playerName, cardNumber,
     grade, gradeDescription, frontImageUrl, backImageUrl,
     psaPopulation, psaPopulationHigher, psaData,
     myCost, targetPrice,
@@ -73,8 +73,8 @@ exports.handler = async (event) => {
        (user_id, cert_number, year, brand, sport, player_name, card_number,
         grade, grade_description, image_url, back_image_url,
         psa_population, psa_population_higher, psa_data, my_cost, target_price,
-        grader)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
+        grader, category)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
      ON CONFLICT (user_id, cert_number) DO NOTHING
      RETURNING id`,
     [
@@ -95,6 +95,10 @@ exports.handler = async (event) => {
       myCostValue,
       targetPriceValue,
       graderValue,
+      // Client may send category from the lookup-preview response; the
+      // authoritative CardHedger value is written by the valuation
+      // UPDATE below using COALESCE so this stays as a fallback.
+      sanitize(category, 100),
     ]
   );
 
@@ -166,8 +170,9 @@ exports.handler = async (event) => {
          estimate_method         = $11,
          estimate_freshness_days = $12,
          estimate_last_updated   = NOW(),
-         variant                 = COALESCE($13, variant)
-       WHERE id = $14`,
+         variant                 = COALESCE($13, variant),
+         category                = COALESCE($14, category)
+       WHERE id = $15`,
       [
         valuation.comps?.avgSalePrice  ?? null,
         valuation.comps?.lastSalePrice ?? null,
@@ -182,6 +187,7 @@ exports.handler = async (event) => {
         valuation.estimate?.method         ?? null,
         valuation.estimate?.freshnessDays  ?? null,
         valuation.variant                  ?? null,
+        valuation.category                 ?? null,
         cardId,
       ]
     );

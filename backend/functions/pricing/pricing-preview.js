@@ -40,7 +40,9 @@ exports.handler = async (event) => {
       brand:      sanitize(body.brand, 200),
       cardNumber: sanitize(body.cardNumber, 100),
       grade:      sanitize(body.grade, 10),
-      sport:      sanitize(body.sport, 100),
+      // Accept either body.category (new) or body.sport (legacy) — both
+      // feed pricing.js's deriveCategory keyword matcher equivalently.
+      sport:      sanitize(body.category ?? body.sport, 100),
       // No cardhedgerId — preview always runs the full match path.
     });
   } catch (err) {

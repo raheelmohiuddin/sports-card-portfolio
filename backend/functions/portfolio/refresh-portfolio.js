@@ -45,13 +45,13 @@ exports.handler = async (event) => {
 
   const result = cardIds
     ? await db.query(
-        `SELECT id, cert_number, player_name, year, brand, card_number, grade, sport,
+        `SELECT id, cert_number, player_name, year, brand, card_number, grade, sport, category,
                 grader, manual_price, cardhedger_id, value_last_updated
          FROM cards WHERE user_id = $1 AND id = ANY($2::uuid[])`,
         [userId, cardIds]
       )
     : await db.query(
-        `SELECT id, cert_number, player_name, year, brand, card_number, grade, sport,
+        `SELECT id, cert_number, player_name, year, brand, card_number, grade, sport, category,
                 grader, manual_price, cardhedger_id, value_last_updated
          FROM cards WHERE user_id = $1`,
         [userId]
@@ -104,7 +104,11 @@ exports.handler = async (event) => {
             brand:        row.brand,
             cardNumber:   row.card_number,
             grade:        row.grade,
-            sport:        row.sport,
+            // Prefer category (CardHedger-native, "Football") over the
+            // legacy sport ("FOOTBALL CARDS") when both are populated —
+            // deriveCategory's keyword match works on either but
+            // category is cleaner.
+            sport:        row.category ?? row.sport,
             cardhedgerId: row.cardhedger_id,
           });
         }
@@ -138,6 +142,10 @@ exports.handler = async (event) => {
         cardhedgerImageUrl:    v?.cardhedgerImageUrl     ?? p?.cardhedgerImageUrl ?? null,
         rawComps:              v?.comps?.rawComps        ?? p?.rawComps           ?? [],
         variant:               v?.variant                ?? null,
+        // Only fetchValuation (cert path) returns category. The
+        // fuzzy-match fallback has no category signal — leaves the
+        // existing column value alone via COALESCE in the UPDATE.
+        category:              v?.category               ?? null,
         estimatePrice:         v?.estimate?.price        ?? null,
         estimatePriceLow:      v?.estimate?.priceLow     ?? null,
         estimatePriceHigh:     v?.estimate?.priceHigh    ?? null,
@@ -164,8 +172,9 @@ exports.handler = async (event) => {
            estimate_method         = $11,
            estimate_freshness_days = $12,
            estimate_last_updated   = NOW(),
-           variant                 = COALESCE($13, variant)
-         WHERE id = $14`,
+           variant                 = COALESCE($13, variant),
+           category                = COALESCE($14, category)
+         WHERE id = $15`,
         [
           fields.avgSalePrice,
           fields.lastSalePrice,
@@ -180,6 +189,7 @@ exports.handler = async (event) => {
           fields.estimateMethod,
           fields.estimateFreshnessDays,
           fields.variant,
+          fields.category,
           row.id,
         ]
       );

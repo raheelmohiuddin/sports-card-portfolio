@@ -183,6 +183,10 @@ exports.handler = async (event) => {
       estimatePriceHigh:   estimate?.priceHigh  ?? null,
       estimateConfidence:  estimate?.confidence ?? null,
       estimateMethod:      estimate?.method     ?? null,
+      // CardHedger-sourced category. The legacy sport field above
+      // already maps card.category to sport for backward compat during
+      // the rolling deploy; both fields carry the same value.
+      category:            estimate?.category   ?? card.category ?? null,
     });
   }
 
@@ -212,5 +216,10 @@ exports.handler = async (event) => {
     estimatePriceHigh:   estimate?.priceHigh  ?? null,
     estimateConfidence:  estimate?.confidence ?? null,
     estimateMethod:      estimate?.method     ?? null,
+    // No catalog match here so card.category is unavailable; rely on
+    // estimate?.category which fetchEstimateForCert sources from
+    // prices-by-cert. Often null on this branch — frontend hides
+    // the category row when null.
+    category:            estimate?.category   ?? null,
   });
 };

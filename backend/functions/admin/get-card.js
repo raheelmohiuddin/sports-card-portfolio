@@ -21,7 +21,7 @@ exports.handler = async (event) => {
   if (!isValidId(cardId)) return json(400, { error: "Invalid card id" });
 
   const result = await db.query(
-    `SELECT c.id, c.cert_number, c.year, c.brand, c.sport, c.player_name, c.card_number,
+    `SELECT c.id, c.cert_number, c.year, c.brand, c.sport, c.category, c.player_name, c.card_number,
             c.grade, c.grade_description, c.grader,
             c.s3_image_key, c.cardhedger_image_url,
             c.s3_back_image_key, c.back_image_url,
@@ -68,6 +68,7 @@ exports.handler = async (event) => {
     year:             row.year,
     brand:            row.brand,
     sport:            row.sport,
+    category:         row.category ?? null,
     playerName:       row.player_name,
     cardNumber:       row.card_number,
     grade:            row.grade,

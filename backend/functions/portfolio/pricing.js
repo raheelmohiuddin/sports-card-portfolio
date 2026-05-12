@@ -298,7 +298,13 @@ async function fetchEstimateForCert({ certNumber, grader, grade }) {
       console.warn("fetchEstimateForCert: price-estimate returned null", { certNumber, grader, grade });
       return null;
     }
-    return { ...estimate, cardhedgerId: certRes.card.card_id };
+    return {
+      ...estimate,
+      cardhedgerId: certRes.card.card_id,
+      // CardHedger's authoritative category (e.g. "Football", "Pokemon").
+      // Replaces the legacy PSA-sourced sport on the new write path.
+      category:     certRes.card.category ?? null,
+    };
   } catch (err) {
     console.error("fetchEstimateForCert: exception", {
       certNumber, grader, grade,
@@ -339,6 +345,10 @@ async function fetchValuation({ certNumber, grader, grade }) {
     cardhedgerId:       cardId,
     cardhedgerImageUrl: safeImageUrl(certRes.card.image ?? details?.image),
     variant:            details?.variant ?? null,
+    // CardHedger's authoritative category. Prefer the prices-by-cert
+    // payload (already loaded above); fall back to card-details for the
+    // rare case where prices-by-cert omits it.
+    category:           certRes.card.category ?? details?.category ?? null,
     comps: comps ? {
       avgSalePrice:  comps.comp_price != null ? round2(parseFloat(comps.comp_price)) : null,
       lastSalePrice: comps.raw_prices?.[0]?.price != null ? round2(parseFloat(comps.raw_prices[0].price)) : null,

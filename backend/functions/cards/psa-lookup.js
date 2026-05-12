@@ -82,5 +82,8 @@ exports.handler = async (event) => {
     estimatePriceHigh:   estimate?.priceHigh  ?? null,
     estimateConfidence:  estimate?.confidence ?? null,
     estimateMethod:      estimate?.method     ?? null,
+    // CardHedger-sourced category (e.g. "Football"). Frontend reads
+    // this in place of the legacy PSA-sourced sport once commit 3 lands.
+    category:            estimate?.category   ?? null,
   });
 };

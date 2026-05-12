@@ -101,8 +101,8 @@ exports.handler = async (event) => {
         `INSERT INTO cards
            (user_id, cert_number, year, brand, sport, player_name, card_number,
             grade, grade_description, image_url, back_image_url,
-            psa_population, psa_population_higher, psa_data, my_cost)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+            psa_population, psa_population_higher, psa_data, my_cost, category)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
          ON CONFLICT (user_id, cert_number) DO NOTHING
          RETURNING id`,
         [
@@ -121,6 +121,10 @@ exports.handler = async (event) => {
           r.psaPopulationHigher != null ? parseInt(r.psaPopulationHigher, 10) : null,
           r.psaData ? JSON.stringify(r.psaData) : null,
           null, // my_cost — allocated by /trades/confirm-cost
+          // Preserve CardHedger category from the source card so the
+          // received card lands with the same allocation bucket the
+          // sender saw. Null on legacy paths until a refresh fills it.
+          sanitize(r.category ?? null, 100),
         ]
       );
       if (ins.rows.length === 0) {
