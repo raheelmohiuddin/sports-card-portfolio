@@ -16,16 +16,18 @@ import {
   isSold, isTraded, effectiveValue, cardPnl, summarizePortfolio,
 } from "../utils/portfolio.js";
 
-// Slice palette — gold-dominant with cool/jewel accents for variety.
-// Order matters: top categories get the gold tones first.
+// Slice palette — design-system tokens. Gold-primary leads (largest slice
+// gets the brand colour), then cool/jewel accents for variety. Loss red is
+// deliberately absent here so a "down" P&L colour can't accidentally match a
+// donut slice. Slate trails as the safe overflow neutral.
 const PALETTE = [
-  "#f59e0b", // gold
+  "#d4af37", // gold-primary  (largest slice, brand)
+  "#60a5fa", // info blue
+  "#a78bfa", // grade-elite purple
+  "#34d399", // gain green
   "#06b6d4", // cyan
-  "#fbbf24", // light gold
-  "#a78bfa", // purple
-  "#10b981", // emerald
-  "#f43f5e", // rose
-  "#d97706", // dark gold
+  "#e6c463", // gold-bright (gold-tone variant)
+  "#f472b6", // pink (variety)
   "#94a3b8", // slate (overflow)
 ];
 
@@ -163,7 +165,6 @@ export default function PortfolioPage() {
   // estimatedValue) — the API's getPortfolioValue total only sums cards
   // table estimatedValue and would miss sold cards' realized exit price.
   const displayTotalValue = cards.length > 0 ? summary.totalValue : totalValue;
-  const avgValue          = cardCount > 0 && displayTotalValue ? displayTotalValue / cardCount : null;
   const alerts        = useMemo(() => cards.filter((c) => c.targetReached), [cards]);
   const achievedMilestones = useMemo(
     () => computeMilestones(totalValue, cardCount, rareCount, ghostCount),
@@ -302,7 +303,6 @@ export default function PortfolioPage() {
                 unrealizedPnl={unrealizedPnl}
                 hasCost={hasCost}
                 cardCount={cardCount}
-                avgValue={avgValue}
                 rareCount={rareCount}
                 tradesExecuted={tradesExecuted}
                 loading={loading}
@@ -475,9 +475,16 @@ export default function PortfolioPage() {
 }
 
 // ─── Hero stats bar ────────────────────────────────────────────────────
-function HeroStats({ totalValue, totalInvested, pnl, pnlPct, realizedPnl, unrealizedPnl, hasCost, cardCount, avgValue, rareCount, tradesExecuted, loading }) {
+// Eye-flow goal: portfolio value headline → P&L → split → small stats.
+// Hierarchy is strict so a collector parses portfolio health in <3 seconds.
+//   1. Total Portfolio Value (Inter Display 700, gold-primary, largest) — what is it worth?
+//   2. Total P&L with ▲/▼ icon + %                                   — am I up or down?
+//   3. Realized + Unrealized chips (only when sold cards exist)       — settled vs paper
+//   4. Quick stats row (Cards / Invested / Rare / Trades)             — collection summary
+function HeroStats({ totalValue, totalInvested, pnl, pnlPct, realizedPnl, unrealizedPnl, hasCost, cardCount, rareCount, tradesExecuted, loading }) {
   const positive = pnl != null && pnl >= 0;
-  const pnlColor = positive ? "#10b981" : "#f87171";
+  const pnlColor = positive ? "#34d399" : "#f87171";
+  const pnlIcon  = positive ? "▲" : "▼";
 
   return (
     <header style={st.hero}>
@@ -489,90 +496,78 @@ function HeroStats({ totalValue, totalInvested, pnl, pnlPct, realizedPnl, unreal
         <div style={st.heroAccent}>◆</div>
       </div>
 
-      {/* When cost is set, P&L gets top billing — biggest typography in the panel,
-          color-coded green/red. Total value drops to a secondary metric below.
-          Without cost data, fall back to the total-value-as-hero layout. */}
-      {hasCost && pnl != null ? (
+      {/* Portfolio Value — biggest, most prominent thing on the page.
+          Inter Display (opsz 32) weight 700 + gold-primary. Eye lands here first. */}
+      <div style={st.heroValue}>
+        {loading ? "—" : (totalValue !== null ? fmtUsd(totalValue) : "—")}
+      </div>
+      <div style={st.heroSubLabel}>Total Portfolio Value</div>
+
+      {/* Secondary headline — P&L with ▲/▼ icon (colorblind-safe pairing).
+          Only renders when cost data exists; without it there's nothing to
+          compare against. */}
+      {hasCost && pnl != null && (
         <>
-          <div style={st.heroPnlBlock}>
-            <div style={{ ...st.heroPnlValue, color: pnlColor }}>
-              {positive ? "+" : "−"}{fmtUsd(Math.abs(pnl))}
-            </div>
-            <div style={st.heroPnlMeta}>
-              <span style={{ ...st.heroPnlPct, color: pnlColor }}>
-                {positive ? "+" : "−"}{Math.abs(pnlPct).toFixed(2)}%
-              </span>
-              <span style={st.heroPnlLabel}>Total Return</span>
-            </div>
+          <div style={st.heroPnlRow}>
+            <span style={{ ...st.heroPnlValue, color: pnlColor }}>
+              {pnlIcon} {positive ? "+" : "−"}{fmtUsd(Math.abs(pnl))}
+            </span>
+            <span style={{ ...st.heroPnlPct, color: pnlColor }}>
+              ({positive ? "+" : "−"}{Math.abs(pnlPct).toFixed(2)}%)
+            </span>
+            <span style={st.heroPnlLabel}>Total Return</span>
           </div>
 
-          {/* Realized + Unrealized split — only renders the rows that have
-              data (e.g. no sold cards → no Realized line). Realized in
-              green/red per direction; Unrealized in blue regardless of
-              direction so it reads as "paper gains" distinct from realized. */}
+          {/* Realized + Unrealized chips — small, color-coded with ▲/▼ icons
+              consistently with the headline P&L (no special "blue =
+              unrealized" — both follow gain/loss semantics). */}
           {(realizedPnl != null || unrealizedPnl != null) && (
             <div style={st.heroSplitRow}>
               {realizedPnl != null && (
-                <div style={st.heroSplitItem}>
-                  <span style={st.heroSplitLabel}>Realized</span>
-                  <span style={{
-                    ...st.heroSplitValue,
-                    color: realizedPnl >= 0 ? "#10b981" : "#f87171",
-                  }}>
-                    {realizedPnl >= 0 ? "+" : "−"}{fmtUsd(Math.abs(realizedPnl))}
-                  </span>
-                </div>
+                <SplitChip label="Realized" amount={realizedPnl} />
               )}
               {unrealizedPnl != null && (
-                <div style={st.heroSplitItem}>
-                  <span style={st.heroSplitLabel}>Unrealized</span>
-                  <span style={{ ...st.heroSplitValue, color: "#60a5fa" }}>
-                    {unrealizedPnl >= 0 ? "+" : "−"}{fmtUsd(Math.abs(unrealizedPnl))}
-                  </span>
-                </div>
+                <SplitChip label="Unrealized" amount={unrealizedPnl} />
               )}
             </div>
           )}
-
-          <div style={st.heroDivider} />
-
-          <div style={st.statsRow4}>
-            <Stat
-              label="Portfolio Value"
-              value={totalValue !== null ? fmtUsd(totalValue) : "—"}
-              accent
-            />
-            <Stat label="Invested" value={fmtUsd(totalInvested)} />
-            <Stat label="Cards" value={cardCount.toLocaleString()} />
-            <Stat label="Rare" value={rareCount} accent={rareCount > 0} />
-            <Stat label="Trades" value={tradesExecuted.toLocaleString()} accent={tradesExecuted > 0} />
-          </div>
-        </>
-      ) : (
-        <>
-          <div style={st.heroValue}>
-            {loading ? "—" : (totalValue !== null ? fmtUsd(totalValue) : "—")}
-          </div>
-          <div style={st.heroSubLabel}>Total Portfolio Value</div>
-
-          <div style={st.heroDivider} />
-
-          <div style={st.statsRow}>
-            <Stat label="Cards" value={loading ? "—" : cardCount.toLocaleString()} />
-            <Stat label="Avg Card Value" value={avgValue != null ? fmtUsd(avgValue) : "—"} />
-            <Stat label="Rare Cards" value={loading ? "—" : rareCount} accent={rareCount > 0} />
-            <Stat label="Trades" value={loading ? "—" : tradesExecuted.toLocaleString()} accent={tradesExecuted > 0} />
-          </div>
         </>
       )}
+
+      <div style={st.heroDivider} />
+
+      {/* Quick stats — small typography, text-primary white (no gold here
+          per scarcity rule — gold belongs to the headline value above).
+          Invested only renders when cost data exists; Avg Card Value
+          dropped (derivative of Value/Cards, no insight gained). */}
+      <div style={st.statsRow}>
+        <Stat label="Cards" value={loading ? "—" : cardCount.toLocaleString()} />
+        {hasCost && <Stat label="Invested" value={fmtUsd(totalInvested)} />}
+        <Stat label="Rare" value={loading ? "—" : rareCount.toLocaleString()} />
+        <Stat label="Trades" value={loading ? "—" : tradesExecuted.toLocaleString()} />
+      </div>
     </header>
   );
 }
 
-function Stat({ label, value, accent }) {
+function SplitChip({ label, amount }) {
+  const positive = amount >= 0;
+  const color = positive ? "#34d399" : "#f87171";
+  const icon  = positive ? "▲" : "▼";
+  return (
+    <div style={st.heroSplitItem}>
+      <span style={st.heroSplitLabel}>{label}</span>
+      <span style={{ ...st.heroSplitValue, color }}>
+        {icon} {positive ? "+" : "−"}{fmtUsd(Math.abs(amount))}
+      </span>
+    </div>
+  );
+}
+
+function Stat({ label, value }) {
   return (
     <div style={st.stat}>
-      <div style={{ ...st.statValue, ...(accent ? st.statValueAccent : {}) }}>{value}</div>
+      <div style={st.statValue}>{value}</div>
       <div style={st.statLabel}>{label}</div>
     </div>
   );
@@ -604,7 +599,7 @@ function AnalyticsPanel({ cards, totalValue }) {
     <section style={st.analytics}>
       <div style={st.analyticsHeader}>
         <div>
-          <p style={st.analyticsEyebrow}>Portfolio Allocation</p>
+          <h2 style={st.insightsTitle}>Portfolio Allocation</h2>
           <p style={st.analyticsSub}>
             Distribution by category · {data.length} categor{data.length === 1 ? "y" : "ies"}
           </p>
@@ -1458,7 +1453,13 @@ function CardTileImpl({ card, index, highlighted, pulse, onOpen, onEdit, onDelet
   const [pulsing, setPulsing] = useState(false);
   const [tradePulsing, setTradePulsing] = useState(false);
   const tileRef = useRef(null);
-  const tier = getRarityTier(card);
+  const tier   = getRarityTier(card);
+  const sold   = isSold(card);
+  const traded = isTraded(card);
+  // Top two tiers earn the prominent corner pill on the image; Rare gets a
+  // small inline tier flag inside the info bar so the gallery stays calm
+  // at the most common "premium" tier.
+  const showTierPill = tier === "ghost" || tier === "ultra_rare";
 
   // Scroll into view + run a temporary gold pulse when this tile is the
   // target of a deep-link highlight (e.g. duplicate-cert detection redirect).
@@ -1496,7 +1497,6 @@ function CardTileImpl({ card, index, highlighted, pulse, onOpen, onEdit, onDelet
       onMouseLeave={() => setHovered(false)}
       onClick={() => onOpen(card)}
     >
-      {/* Image area */}
       <div style={st.imageWrap}>
         {card.imageUrl && !imgErr ? (
           <img
@@ -1514,8 +1514,42 @@ function CardTileImpl({ card, index, highlighted, pulse, onOpen, onEdit, onDelet
           </div>
         )}
 
-        {/* Top-right hover overlay: edit + delete. Collection History passes
-            readOnly so sold/traded cards don't expose mutating actions. */}
+        {/* Top-left tier pill — Ghost (silver) or Ultra Rare (gold). */}
+        {showTierPill && (
+          <span style={{
+            ...st.tierPillCorner,
+            ...(tier === "ultra_rare" ? st.tierPillUltraRare : st.tierPillGhost),
+          }}>
+            {tier === "ghost" ? "GHOST" : "ULTRA RARE"}
+          </span>
+        )}
+
+        {/* Bottom-left grade badge — slab attribution. PSA gets the licensed
+            AVIF; BGS / SGC get a text badge. */}
+        <div style={st.gradeBadge}>
+          {(card.grader ?? "PSA") === "PSA"
+            ? <img src="/psa.avif" alt="PSA" loading="lazy" style={st.gradeBadgeLogo} />
+            : <span style={st.gradeBadgeText}>{card.grader}</span>}
+          <span style={st.gradeBadgeValue}>{card.grade}</span>
+        </div>
+
+        {/* SOLD / TRADED corner ribbon — slanted strip across the top-right
+            corner. overflow:hidden on imageWrap clips the right edge so the
+            visual reads as a true ribbon, not a floating label. */}
+        {sold   && <span style={{ ...st.cornerRibbon, ...st.cornerRibbonSold }}>SOLD</span>}
+        {traded && <span style={{ ...st.cornerRibbon, ...st.cornerRibbonTraded }}>TRADED</span>}
+
+        {/* Target-reached pulsing badge — suppressed for sold or traded
+            cards (both removed from active portfolio rotation). */}
+        {!sold && !traded && card.targetReached && (
+          <div style={st.targetBadge} title={`Target hit · $${card.targetPrice}`}>
+            <span style={st.targetBadgeDot} />
+            TARGET HIT
+          </div>
+        )}
+
+        {/* Edit + delete — appear top-right on hover only. Collection History
+            passes readOnly so sold/traded cards don't expose mutating actions. */}
         {!readOnly && (
           <div style={{ ...st.tileActions, opacity: hovered ? 1 : 0 }}>
             <button
@@ -1533,42 +1567,18 @@ function CardTileImpl({ card, index, highlighted, pulse, onOpen, onEdit, onDelet
           </div>
         )}
 
-        {/* Bottom-left grade badge — grader logo + grade. PSA gets the
-            stickered AVIF; BGS / SGC get a text badge (no licensed
-            assets). Falls back to PSA for legacy rows missing grader. */}
-        <div style={st.gradeBadge}>
-          {(card.grader ?? "PSA") === "PSA"
-            ? <img src="/psa.avif" alt="PSA" loading="lazy" style={st.gradeBadgeLogo} />
-            : <span style={st.gradeBadgeText}>{card.grader}</span>}
-          <span style={st.gradeBadgeValue}>{card.grade}</span>
-        </div>
-
-        {/* Rarity ribbon — Ghost / Ultra Rare / Rare */}
-        {tier && <TierRibbon tier={tier} />}
-
-        {/* SOLD diagonal stamp — takes precedence over target-hit since the
-            card is no longer in active portfolio rotation. */}
-        {isSold(card) && <div style={st.soldStamp}>SOLD</div>}
-        {isTraded(card) && <div style={st.tradedStamp}>TRADED</div>}
-
-        {/* Target-reached pulsing badge — suppressed for sold or traded
-            cards (both removed from active portfolio rotation). */}
-        {!isSold(card) && !isTraded(card) && card.targetReached && (
-          <div style={st.targetBadge} title={`Target hit · $${card.targetPrice}`}>
-            <span style={st.targetBadgeDot} />
-            TARGET HIT
-          </div>
-        )}
-
-        {/* Subtle gradient overlay for image polish */}
+        {/* Subtle bottom gradient — image polish, doesn't block any badges. */}
         <div style={st.imageGradient} />
       </div>
 
-      {/* Slim info bar */}
+      {/* Info bar — full data visible at rest. No hover required to see
+          value, cost basis, P&L, or population. Inline TierFlag for Rare
+          tier (Ghost/Ultra Rare get the corner pill instead). */}
       <div style={st.infoBar}>
         <div style={st.infoTopRow}>
           <div style={st.playerName} title={card.playerName ?? ""}>
-            {card.playerName ?? "Unknown Player"}
+            <span style={st.playerNameText}>{card.playerName ?? "Unknown Player"}</span>
+            {tier === "rare" && <TierFlag tier={tier} />}
           </div>
           <div style={st.metaRight}>
             {[card.year, card.brand].filter(Boolean).join(" · ") || "—"}
@@ -1616,20 +1626,24 @@ function CostLine({ card }) {
 function PopBadge({ card }) {
   if (card.psaPopulation == null && card.psaPopulationHigher == null) return null;
   const higherZero = card.psaPopulationHigher === 0;
+  const popText    = card.psaPopulation != null ? `Pop ${card.psaPopulation.toLocaleString()}` : null;
+  const higherText = card.psaPopulationHigher != null
+    ? (higherZero ? "Highest Graded" : `Higher: ${card.psaPopulationHigher.toLocaleString()}`)
+    : null;
+  // Single inline-block <span> with inline children so text-overflow:ellipsis
+  // applies to the whole text flow. A flex container would prevent ellipsis
+  // from working — "Highest Graded" was overflowing the tile when paired with
+  // a 5-digit pop number.
   return (
-    <div style={st.popBadge} title="PSA population data">
-      {card.psaPopulation != null && (
-        <span>Pop {card.psaPopulation.toLocaleString()}</span>
+    <span style={st.popBadge} title="PSA population data">
+      {popText}
+      {popText && higherText && <span style={st.popBadgeDot}> · </span>}
+      {higherText && (
+        <span style={higherZero ? st.popBadgeHigherZero : undefined}>
+          {higherText}
+        </span>
       )}
-      {card.psaPopulationHigher != null && (
-        <>
-          <span style={st.popBadgeDot}>·</span>
-          <span style={higherZero ? st.popBadgeHigherZero : {}}>
-            {higherZero ? "Highest Graded" : `Higher: ${card.psaPopulationHigher.toLocaleString()}`}
-          </span>
-        </>
-      )}
-    </div>
+    </span>
   );
 }
 
@@ -1782,7 +1796,7 @@ function PerformersPanel({ cards, onSelectCard }) {
   return (
     <div style={st.performersStandalone}>
       <div style={st.insightsHeader}>
-        <p style={st.insightsEyebrow}>Performers</p>
+        <h2 style={st.insightsTitle}>Performers</h2>
         <span style={st.analyticsAccent}>◆</span>
       </div>
       <div style={st.perfGrid}>
@@ -1794,10 +1808,11 @@ function PerformersPanel({ cards, onSelectCard }) {
 }
 
 function PerformerColumnImpl({ title, cards, positive, emptyMessage, onSelectCard }) {
-  const color = positive ? "#10b981" : "#f87171";
+  const color = positive ? "#34d399" : "#f87171";
+  const icon  = positive ? "▲" : "▼";
   return (
     <div>
-      <div style={{ ...st.perfHeading, color }}>{title}</div>
+      <div style={{ ...st.perfHeading, color }}>{icon} {title}</div>
       {cards.length === 0 ? (
         <div style={st.perfEmpty}>{emptyMessage}</div>
       ) : (
@@ -1846,7 +1861,7 @@ function PerformerRowImpl({ card, color, onSelectCard }) {
       </div>
       <div style={st.perfItemNumbers}>
         <div style={{ ...st.perfItemPnl, color }}>
-          {card.pnl >= 0 ? "+" : "−"}{fmtUsd(Math.abs(card.pnl))}
+          {card.pnl >= 0 ? "▲" : "▼"} {card.pnl >= 0 ? "+" : "−"}{fmtUsd(Math.abs(card.pnl))}
         </div>
         <div style={st.perfItemBasis}>
           {fmtUsd(card.myCost)} → {fmtUsd(card.estimatedValue)}
@@ -1875,7 +1890,7 @@ function PriceHistoryChart({ history }) {
     return (
       <section style={st.historyPanel}>
         <div style={st.insightsHeader}>
-          <p style={st.insightsEyebrow}>Portfolio History</p>
+          <h2 style={st.insightsTitle}>Portfolio History</h2>
           <span style={st.analyticsAccent}>◆</span>
         </div>
         <div style={st.historyEmpty}>
@@ -1901,7 +1916,7 @@ function PriceHistoryChart({ history }) {
     const tr      = lastRow?.cost != null ? lastRow.value - lastRow.cost : null;
     const pct     = lastRow?.cost > 0 ? (tr / lastRow.cost) * 100 : null;
     const pos     = tr != null && tr >= 0;
-    const color   = tr == null ? "#94a3b8" : (pos ? "#10b981" : "#f87171");
+    const color   = tr == null ? "#94a3b8" : (pos ? "#34d399" : "#f87171");
     let delta = 0;
     let ts    = null;
     for (let i = 1; i < data.length; i++) {
@@ -1923,17 +1938,17 @@ function PriceHistoryChart({ history }) {
     <section style={st.historyPanel}>
       <div style={st.historyHeader}>
         <div>
-          <p style={st.insightsEyebrow}>Portfolio History</p>
+          <h2 style={st.insightsTitle}>Portfolio History</h2>
           <p style={st.analyticsSub}>{history.length} snapshots tracked</p>
         </div>
         <div style={st.historyLegend}>
           <span style={st.historyLegendItem}>
-            <span style={{ ...st.historyLegendSwatch, background: "#f59e0b" }} />
+            <span style={{ ...st.historyLegendSwatch, background: "#d4af37" }} />
             Portfolio Value
           </span>
           {hasCostData && (
             <span style={st.historyLegendItem}>
-              <span style={{ ...st.historyLegendSwatch, background: "#3b82f6" }} />
+              <span style={{ ...st.historyLegendSwatch, background: "#60a5fa" }} />
               Cost Basis
             </span>
           )}
@@ -1959,8 +1974,8 @@ function PriceHistoryChart({ history }) {
         </div>
         <div style={st.historySummaryItem}>
           <div style={st.historySummaryLabel}>Best Day</div>
-          <div style={{ ...st.historySummaryValue, color: bestDay ? "#10b981" : "#94a3b8" }}>
-            {bestDay ? `+${fmtUsd(bestDay.delta)}` : "—"}
+          <div style={{ ...st.historySummaryValue, color: bestDay ? "#34d399" : "#94a3b8" }}>
+            {bestDay ? `▲ +${fmtUsd(bestDay.delta)}` : "—"}
           </div>
           {bestDay && (
             <div style={st.historySummarySub}>
@@ -1990,12 +2005,12 @@ function PriceHistoryChart({ history }) {
             stroke="rgba(255,255,255,0.08)"
             width={68}
           />
-          <Tooltip content={<HistoryTooltip />} cursor={{ stroke: "rgba(245,158,11,0.4)", strokeWidth: 1 }} />
+          <Tooltip content={<HistoryTooltip />} cursor={{ stroke: "rgba(212,175,55,0.4)", strokeWidth: 1 }} />
           <Line
             type="monotone"
             dataKey="value"
             name="Portfolio Value"
-            stroke="#f59e0b"
+            stroke="#d4af37"
             strokeWidth={2.5}
             dot={false}
             isAnimationActive={false}
@@ -2005,7 +2020,7 @@ function PriceHistoryChart({ history }) {
               type="monotone"
               dataKey="cost"
               name="Cost Basis"
-              stroke="#3b82f6"
+              stroke="#60a5fa"
               strokeWidth={2}
               strokeDasharray="4 3"
               dot={false}
@@ -2027,7 +2042,7 @@ function HistoryTooltip({ active, payload }) {
   return (
     <div style={st.tooltip}>
       <div style={st.tooltipName}>{new Date(p.ts).toLocaleString()}</div>
-      <div style={{ ...st.tooltipValue, color: "#f59e0b" }}>
+      <div style={{ ...st.tooltipValue, color: "#d4af37" }}>
         Value: {fmtUsd(p.value)}
       </div>
       {p.cost != null && (
@@ -2035,8 +2050,8 @@ function HistoryTooltip({ active, payload }) {
           <div style={{ ...st.tooltipValue, color: "#60a5fa", fontSize: "0.95rem" }}>
             Cost: {fmtUsd(p.cost)}
           </div>
-          <div style={{ ...st.tooltipPct, color: positive ? "#10b981" : "#f87171" }}>
-            {positive ? "+" : "−"}{fmtUsd(Math.abs(gap))} unrealized
+          <div style={{ ...st.tooltipPct, color: positive ? "#34d399" : "#f87171" }}>
+            {positive ? "▲ +" : "▼ −"}{fmtUsd(Math.abs(gap))} unrealized
           </div>
         </>
       )}
@@ -2183,17 +2198,18 @@ const st = {
     color: "#64748b", fontSize: "0.85rem",
     margin: "0.4rem 0 0",
   },
+  // White button per gold-scarcity rule (gold = portfolio value, brand
+  // mark, premium tier badges only). Flat surface, no shadow glow.
   cardsAddBtn: {
     display: "inline-flex", alignItems: "center", gap: "0.5rem",
-    background: "linear-gradient(135deg, #f59e0b 0%, #d97706 100%)",
-    color: "#0f172a",
-    fontWeight: 800, fontSize: "0.92rem",
-    padding: "0.75rem 1.5rem",
+    background: "#f8fafc",
+    color: "#0a0e1a",
+    fontWeight: 700, fontSize: "0.92rem",
+    padding: "0.65rem 1.4rem",
     borderRadius: 999,
     textDecoration: "none",
     letterSpacing: "0.01em",
-    boxShadow: "0 6px 20px rgba(245,158,11,0.25), 0 0 0 1px rgba(245,158,11,0.4)",
-    transition: "transform 0.1s",
+    transition: "transform 0.1s, background 0.2s",
   },
   cardsAddMark: { fontSize: "1.1rem", fontWeight: 700 },
 
@@ -2232,9 +2248,9 @@ const st = {
     fontVariantNumeric: "tabular-nums",
   },
   selectFocused: {
-    borderColor: "rgba(245,158,11,0.65)",
+    borderColor: "rgba(212,175,55,0.55)",
     background: "rgba(15,23,42,0.95)",
-    boxShadow: "0 0 0 3px rgba(245,158,11,0.12)",
+    boxShadow: "0 0 0 3px rgba(212,175,55,0.10)",
   },
   // Native <option>s ignore most CSS in most browsers — set bg/color anyway
   // so Firefox renders a sensible dropdown.
@@ -2253,14 +2269,13 @@ const st = {
     transition: "border-color 0.2s, background 0.2s, color 0.2s",
   },
   togglePillActive: {
-    background: "rgba(245,158,11,0.12)",
-    border: "1px solid rgba(245,158,11,0.55)",
-    color: "#fbbf24",
-    boxShadow: "0 0 0 1px rgba(245,158,11,0.15), 0 0 16px rgba(245,158,11,0.12)",
+    background: "rgba(212,175,55,0.10)",
+    border: "1px solid rgba(212,175,55,0.50)",
+    color: "#d4af37",
   },
   toggleDot: {
     width: 6, height: 6, borderRadius: "50%",
-    background: "#f59e0b",
+    background: "#d4af37",
   },
 
   viewToggle: {
@@ -2281,8 +2296,8 @@ const st = {
     transition: "background 0.15s, color 0.15s",
   },
   viewBtnActive: {
-    background: "rgba(245,158,11,0.18)",
-    color: "#f59e0b",
+    background: "rgba(212,175,55,0.15)",
+    color: "#d4af37",
   },
 
   // ─── No-matches state ───
@@ -2452,77 +2467,77 @@ const st = {
   },
 
   // ── Hero stats ──
+  // Hero panel — flat surface-1 (no gradient). Hairline border, generous
+  // padding to let the headline value breathe (3-second-comprehension goal).
   hero: {
-    background: gradients.goldPanel,
+    background: "#0f172a",
     border: "1px solid rgba(255,255,255,0.06)",
     borderRadius: 16,
-    padding: "2rem 2.25rem 1.75rem",
+    padding: "2.25rem 2.5rem 2rem",
     marginBottom: "2.5rem",
     position: "relative",
     overflow: "hidden",
   },
-  heroTopRow: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "1rem" },
+  heroTopRow: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "1.5rem" },
   heroLabel: { display: "flex", alignItems: "center", gap: "0.55rem" },
   heroDot: {
     width: 8, height: 8, borderRadius: "50%",
-    background: "#10b981",
+    background: "#34d399",
     animation: "livePulse 2.4s ease-in-out infinite",
   },
   heroLabelText: {
-    fontSize: "0.7rem", fontWeight: 700,
-    letterSpacing: "0.18em", textTransform: "uppercase",
+    fontSize: "0.7rem", fontWeight: 600,
+    letterSpacing: "0.16em", textTransform: "uppercase",
     color: "#94a3b8",
   },
-  heroAccent: { color: "#f59e0b", fontSize: "1rem", opacity: 0.6 },
+  heroAccent: { color: "#d4af37", fontSize: "1rem", opacity: 0.7 },
 
+  // Headline value — Inter Display, gold-primary, largest type on the page.
+  // opsz 32 unlocks Inter's display optical cut (tighter, more authoritative
+  // than body Inter). Weight 700 + tight -0.03em tracking gives the
+  // financial-terminal density a portfolio total deserves.
   heroValue: {
-    fontSize: "clamp(2.4rem, 6vw, 4.2rem)",
-    fontWeight: 800,
-    color: "#f59e0b",
+    fontFamily: "'Inter', sans-serif",
+    fontVariationSettings: "'opsz' 32",
+    fontSize: "clamp(2.6rem, 6.5vw, 4.4rem)",
+    fontWeight: 700,
+    color: "#d4af37",
     letterSpacing: "-0.03em",
     lineHeight: 1,
     fontVariantNumeric: "tabular-nums",
-    textShadow: "0 0 40px rgba(245,158,11,0.15)",
   },
   heroSubLabel: {
-    fontSize: "0.72rem", fontWeight: 600,
-    letterSpacing: "0.18em", textTransform: "uppercase",
-    color: "#64748b",
-    marginTop: "0.65rem",
-  },
-
-  // ── P&L hero block (the most prominent stat when cost is set) ──
-  heroPnlBlock: { /* container for the P&L value + meta */ },
-  heroPnlValue: {
-    fontSize: "clamp(2.8rem, 7vw, 5rem)",
-    fontWeight: 800,
-    letterSpacing: "-0.03em",
-    lineHeight: 1,
-    fontVariantNumeric: "tabular-nums",
-    // Soft glow that picks up the green/red colour applied inline
-    textShadow: "0 0 40px currentColor",
-    filter: "saturate(0.85)",
-  },
-  heroPnlMeta: {
-    display: "flex", alignItems: "baseline", gap: "0.85rem",
+    fontSize: "0.7rem", fontWeight: 600,
+    letterSpacing: "0.16em", textTransform: "uppercase",
+    color: "#94a3b8",
     marginTop: "0.85rem",
   },
+
+  // P&L row — secondary headline. Inter, weight 700, ~1/3 the headline size.
+  // Single horizontal row: ▲ +$X,XXX  (+X.XX%)  TOTAL RETURN
+  heroPnlRow: {
+    display: "flex", alignItems: "baseline", gap: "0.75rem",
+    flexWrap: "wrap",
+    marginTop: "1.5rem",
+  },
+  heroPnlValue: {
+    fontSize: "clamp(1.4rem, 2.5vw, 1.85rem)",
+    fontWeight: 700,
+    fontVariantNumeric: "tabular-nums",
+    letterSpacing: "-0.01em",
+  },
   heroPnlPct: {
-    fontSize: "1.5rem", fontWeight: 800,
+    fontSize: "1rem", fontWeight: 600,
     fontVariantNumeric: "tabular-nums",
     letterSpacing: "-0.01em",
   },
   heroPnlLabel: {
-    fontSize: "0.72rem", fontWeight: 600,
-    letterSpacing: "0.18em", textTransform: "uppercase",
+    fontSize: "0.65rem", fontWeight: 600,
+    letterSpacing: "0.16em", textTransform: "uppercase",
     color: "#64748b",
   },
-  statsRow4: {
-    display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
-    gap: "1rem",
-  },
-  // ── Realized + unrealized split (under the headline P&L) ──
+
+  // Realized + unrealized chips — small, ▲/▼ icon-paired.
   heroSplitRow: {
     display: "flex", gap: "1.25rem",
     marginTop: "0.85rem",
@@ -2533,19 +2548,24 @@ const st = {
   },
   heroSplitLabel: {
     color: "#64748b",
-    fontSize: "0.62rem", fontWeight: 700,
+    fontSize: "0.62rem", fontWeight: 600,
     letterSpacing: "0.16em", textTransform: "uppercase",
   },
   heroSplitValue: {
-    fontSize: "1rem", fontWeight: 800,
+    fontSize: "0.95rem", fontWeight: 700,
     fontVariantNumeric: "tabular-nums",
     letterSpacing: "-0.01em",
   },
+
+  // Hairline section break — solid 6% white, no gradient (Editorial Dark).
   heroDivider: {
     height: 1,
-    background: "linear-gradient(90deg, transparent, rgba(255,255,255,0.08), transparent)",
-    margin: "1.5rem 0 1.25rem",
+    background: "rgba(255,255,255,0.06)",
+    margin: "1.75rem 0 1.5rem",
   },
+
+  // Quick stats — uniform text-primary, no gold (gold is reserved for the
+  // headline value above per scarcity rule).
   statsRow: {
     display: "grid",
     gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
@@ -2553,21 +2573,20 @@ const st = {
   },
   stat: {},
   statValue: {
-    fontSize: "1.4rem", fontWeight: 700,
-    color: "#f1f5f9", lineHeight: 1.1,
+    fontSize: "1.35rem", fontWeight: 700,
+    color: "#f8fafc", lineHeight: 1.1,
     letterSpacing: "-0.01em",
     fontVariantNumeric: "tabular-nums",
   },
-  statValueAccent: { color: "#f59e0b" },
   statLabel: {
     fontSize: "0.66rem", fontWeight: 600,
     letterSpacing: "0.16em", textTransform: "uppercase",
-    color: "#64748b", marginTop: "0.3rem",
+    color: "#64748b", marginTop: "0.35rem",
   },
 
-  // ── Analytics panel ──
+  // ── Analytics panel ── flat surface-1, hairline border, generous padding.
   analytics: {
-    background: gradients.goldPanel,
+    background: "#0f172a",
     border: "1px solid rgba(255,255,255,0.06)",
     borderRadius: 16,
     padding: "1.75rem 2.25rem 2rem",
@@ -2576,18 +2595,18 @@ const st = {
   analyticsHeader: {
     display: "flex", alignItems: "flex-start",
     justifyContent: "space-between", gap: "1rem",
-    marginBottom: "0.5rem",
+    marginBottom: "0.85rem",
   },
   analyticsEyebrow: {
-    fontSize: "0.7rem", fontWeight: 700,
-    letterSpacing: "0.18em", textTransform: "uppercase",
+    fontSize: "0.7rem", fontWeight: 600,
+    letterSpacing: "0.16em", textTransform: "uppercase",
     color: "#94a3b8", margin: 0,
   },
   analyticsSub: {
     fontSize: "0.78rem", color: "#64748b",
-    margin: "0.25rem 0 0", letterSpacing: "0.02em",
+    margin: "0.4rem 0 0", letterSpacing: "0.02em",
   },
-  analyticsAccent: { color: "#f59e0b", fontSize: "1rem", opacity: 0.6 },
+  analyticsAccent: { color: "#d4af37", fontSize: "1rem", opacity: 0.7 },
 
   analyticsBody: {
     display: "flex", flexWrap: "wrap",
@@ -2612,11 +2631,17 @@ const st = {
     letterSpacing: "0.18em", textTransform: "uppercase",
     color: "#64748b",
   },
+  // Donut center "Total" — this IS a portfolio value display, so gold is
+  // permitted here per the scarcity rule (portfolio total + brand mark + tier
+  // badges). Inter Display weight 700 mirrors the hero portfolio value
+  // treatment, just smaller — same family, same opsz, same gold.
   donutCenterValue: {
-    fontSize: "1.15rem", fontWeight: 800,
-    color: "#f59e0b", marginTop: "0.3rem",
+    fontFamily: "'Inter', sans-serif",
+    fontVariationSettings: "'opsz' 32",
+    fontSize: "1.2rem", fontWeight: 700,
+    color: "#d4af37", marginTop: "0.3rem",
     fontVariantNumeric: "tabular-nums",
-    letterSpacing: "-0.01em",
+    letterSpacing: "-0.025em",
   },
 
   // ── Legend ──
@@ -2636,8 +2661,10 @@ const st = {
     cursor: "default",
     borderBottom: "1px solid rgba(255,255,255,0.04)",
   },
+  // Hover/focus highlight — neutral surface lift, not gold. Gold scarcity:
+  // the donut legend's active row isn't a brand mark or premium signal.
   legendRowActive: {
-    background: "rgba(245,158,11,0.06)",
+    background: "rgba(255,255,255,0.04)",
   },
   legendDot: {
     width: 10, height: 10, borderRadius: "50%",
@@ -2658,23 +2685,23 @@ const st = {
     minWidth: 50, textAlign: "right",
   },
 
-  // ── Tooltip ──
+  // ── Tooltip ── shared by donut + history chart. Antique gold accent.
   tooltip: {
     background: "rgba(15,23,42,0.96)",
-    border: "1px solid rgba(245,158,11,0.4)",
+    border: "1px solid rgba(212,175,55,0.4)",
     borderRadius: 8,
     padding: "0.7rem 0.95rem",
     boxShadow: "0 8px 24px rgba(0,0,0,0.5)",
     backdropFilter: "blur(8px)",
   },
   tooltipName: {
-    fontSize: "0.7rem", fontWeight: 700,
+    fontSize: "0.7rem", fontWeight: 600,
     letterSpacing: "0.12em", textTransform: "uppercase",
     color: "#94a3b8", marginBottom: "0.4rem",
   },
   tooltipValue: {
-    fontSize: "1.1rem", fontWeight: 800,
-    color: "#f59e0b",
+    fontSize: "1.1rem", fontWeight: 700,
+    color: "#d4af37",
     fontVariantNumeric: "tabular-nums",
     letterSpacing: "-0.01em",
   },
@@ -2684,13 +2711,22 @@ const st = {
   },
 
   // ── Grid ──
+  // Tighter, more gallery-like grid. auto-fill (vs auto-fit) keeps empty
+  // tracks so the layout stays consistent as cards are added/removed.
+  // gridAutoRows + alignItems:stretch + fixed infoBar height below guarantees
+  // every tile in a row has the same total height regardless of content.
   grid: {
     display: "grid",
-    gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))",
-    gap: "1.5rem",
+    gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))",
+    gridAutoRows: "min-content",
+    alignItems: "stretch",
+    gap: "1.25rem",
   },
 
   // ── Tile ──
+  // Flex column with overflow:hidden so unusual content can never push the
+  // tile taller than its siblings. Image + fixed-height infoBar = uniform
+  // total height across every tile in a row.
   tile: {
     background: "#0f172a",
     border: "1px solid rgba(255,255,255,0.05)",
@@ -2700,6 +2736,9 @@ const st = {
     transition: "transform 0.25s ease, border-color 0.25s ease, box-shadow 0.25s ease, background 0.25s ease",
     animation: "fadeInUp 0.5s ease-out backwards",
     position: "relative",
+    display: "flex",
+    flexDirection: "column",
+    height: "100%",
   },
 
   // ── Skeleton loading tile ──
@@ -2759,24 +2798,25 @@ const st = {
     backgroundSize: "200% 100%",
     animation: "skeletonShimmer 1.4s ease-in-out infinite",
   },
+  // Antique gold lift on hover (instead of warning amber). Subtle border
+  // glow + slight surface tint — no shadow lift since the gallery feels
+  // more grounded with hover changes that don't move the card.
   tileHovered: {
-    transform: "translateY(-3px)",
-    borderColor: "rgba(245,158,11,0.45)",
+    borderColor: "rgba(212,175,55,0.45)",
     background: "#111c33",
-    boxShadow:
-      "0 0 0 1px rgba(245,158,11,0.15), 0 12px 28px rgba(0,0,0,0.5), 0 0 32px rgba(245,158,11,0.12)",
+    boxShadow: "0 0 0 1px rgba(212,175,55,0.15), 0 12px 28px rgba(0,0,0,0.5)",
   },
   tileHighlight: {
     // Triggered when the tile is the target of a deep-link highlight.
     // Three pulses (1.5s × 3) then style is removed by the timeout in CardTile.
     animation: "fadeInUp 0.5s ease-out backwards, goldPulse 1.5s ease-in-out 3",
-    borderColor: "rgba(245,158,11,0.75)",
+    borderColor: "rgba(212,175,55,0.75)",
   },
   tileTradePulse: {
     // Triggered for cards just received in a trade. Two pulses × 1.5s = 3s,
     // matching the spec. Same gold visual as tileHighlight but no scroll.
     animation: "scp-trade-card-pulse 1.5s ease-in-out 2",
-    borderColor: "rgba(245,158,11,0.75)",
+    borderColor: "rgba(212,175,55,0.75)",
   },
 
   // ── Image ──
@@ -2924,30 +2964,114 @@ const st = {
     border: "1px solid rgba(147,197,253,0.55)",
   },
 
-  // ── Info bar ──
+  // ── Info bar — full data visible at rest ──
+  // Fixed height + overflow:hidden so the tile never grows based on whether
+  // the card has a cost basis, target, or population data. Flex column with
+  // flex-shrink:0 anchors it to a known footprint at the bottom of the tile.
+  // 3-row layout: player + meta, then value + pop, then cost + P&L.
   infoBar: {
+    height: "6.75rem",
+    flexShrink: 0,
     padding: "0.85rem 1rem",
-    borderTop: "1px solid rgba(255,255,255,0.04)",
+    borderTop: "1px solid rgba(255,255,255,0.06)",
     background: "linear-gradient(180deg, transparent, rgba(0,0,0,0.15))",
+    display: "flex",
+    flexDirection: "column",
+    justifyContent: "flex-start",
+    overflow: "hidden",
+    minWidth: 0,
+    boxSizing: "border-box",
   },
   infoTopRow: {
     display: "flex", alignItems: "baseline",
     justifyContent: "space-between", gap: "0.5rem",
     marginBottom: "0.4rem",
+    minWidth: 0,
   },
+  // Flex container so the inline Rare TierFlag sits next to the player
+  // name without breaking truncation; the text span owns the ellipsis.
   playerName: {
-    fontSize: "0.88rem", fontWeight: 600, color: "#f1f5f9",
-    overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-    flex: 1, minWidth: 0,
+    display: "flex", alignItems: "center", gap: "0.4rem",
+    flex: "1 1 0",
+    minWidth: 0,
+    overflow: "hidden",
   },
+  playerNameText: {
+    fontFamily: "'Inter', sans-serif",
+    fontSize: "0.88rem", fontWeight: 600, color: "#f8fafc",
+    overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+    letterSpacing: "-0.005em",
+    minWidth: 0,
+    flex: "1 1 auto",
+  },
+  // Capped width + ellipsis so a long year/brand combo can't squeeze the
+  // player name out of the tile.
   metaRight: {
     fontSize: "0.65rem", color: "#64748b",
     letterSpacing: "0.04em",
     flexShrink: 0,
+    maxWidth: "45%",
+    whiteSpace: "nowrap",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
   },
   infoBottomRow: {
     display: "flex", alignItems: "center",
     justifyContent: "space-between", gap: "0.5rem",
+    minWidth: 0,
+  },
+
+  // ── Tier corner pill (Ghost / Ultra Rare only) ──
+  // Subtle pill, top-left of image. Backdrop-blur so it stays readable on
+  // any card art without a heavy plate covering the player image.
+  tierPillCorner: {
+    position: "absolute",
+    top: 8, left: 8,
+    fontSize: "0.55rem", fontWeight: 700,
+    letterSpacing: "0.14em", textTransform: "uppercase",
+    background: "rgba(15,23,42,0.78)",
+    border: "1px solid rgba(255,255,255,0.10)",
+    padding: "0.22rem 0.5rem",
+    borderRadius: 4,
+    backdropFilter: "blur(6px)",
+    WebkitBackdropFilter: "blur(6px)",
+    zIndex: 3,
+    pointerEvents: "none",
+    lineHeight: 1,
+  },
+  // Ghost tier — silver/white, the "rarest" signal in the portfolio
+  tierPillGhost: {
+    color: "#e2e8f0",
+    borderColor: "rgba(226,232,240,0.4)",
+  },
+  // Ultra Rare — gold, the second tier of premium
+  tierPillUltraRare: {
+    color: "#d4af37",
+    borderColor: "rgba(212,175,55,0.5)",
+  },
+
+  // ── Corner ribbon (SOLD / TRADED) ──
+  // Slanted strip across the top-right corner. The outer overflow:hidden
+  // on imageWrap clips the right edge so the visual reads as a ribbon
+  // wrapping the corner, not a floating label.
+  cornerRibbon: {
+    position: "absolute",
+    top: 14, right: -34,
+    transform: "rotate(45deg)",
+    transformOrigin: "center",
+    color: "#0a0e1a",
+    fontSize: "0.5rem", fontWeight: 800,
+    letterSpacing: "0.18em",
+    padding: "3px 36px",
+    zIndex: 4,
+    pointerEvents: "none",
+    boxShadow: "0 1px 4px rgba(0,0,0,0.35)",
+  },
+  cornerRibbonSold: {
+    background: "linear-gradient(135deg, #34d399, #10b981)",
+  },
+  cornerRibbonTraded: {
+    background: "linear-gradient(135deg, #60a5fa, #3b82f6)",
   },
   costLine: {
     display: "flex", alignItems: "center", gap: "0.5rem",
@@ -2967,20 +3091,27 @@ const st = {
   costLinePnl: { marginLeft: "auto", fontWeight: 700 },
 
   // ── Price button (in-tile) ──
+  // minWidth:0 + overflow defenses so a 7-digit value (e.g. $1,247,580)
+  // can shrink rather than push past the tile boundary.
   priceBtn: {
     background: "none", border: "none", padding: 0,
     fontSize: "1.1rem", fontWeight: 700,
-    color: "#f59e0b", cursor: "pointer",
+    color: "#d4af37", cursor: "pointer",
     fontVariantNumeric: "tabular-nums",
     letterSpacing: "-0.01em",
     transition: "opacity 0.15s",
+    minWidth: 0,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
   },
   priceBtnEmpty: {
-    background: "none", border: "1px dashed rgba(245,158,11,0.4)",
+    background: "none", border: "1px dashed rgba(212,175,55,0.4)",
     padding: "0.2rem 0.55rem", borderRadius: 4,
     fontSize: "0.72rem", fontWeight: 600,
     color: "#94a3b8", cursor: "pointer",
     letterSpacing: "0.04em",
+    flexShrink: 0,
   },
   // Realized sale price — same visual weight as priceBtn, green not gold,
   // and not a button (sold cards aren't editable).
@@ -3050,36 +3181,55 @@ const st = {
   },
 
   // ── Pop badge ──
+  // inline-block so text-overflow:ellipsis can truncate the whole text flow.
+  // flexShrink:1 + minWidth:0 lets it give space to PricingValue when both
+  // are competing for a narrow tile. maxWidth caps it at half the row so
+  // a very long "Higher: 12,345" can't crowd out the value.
   popBadge: {
+    display: "inline-block",
     fontSize: "0.62rem", color: "#64748b",
     letterSpacing: "0.04em",
-    display: "flex", alignItems: "center", gap: "0.3rem",
-    flexShrink: 0,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+    minWidth: 0,
+    flexShrink: 1,
+    maxWidth: "55%",
   },
   popBadgeDot: { color: "#334155" },
-  popBadgeHigherZero: { color: "#10b981", fontWeight: 700 },
+  popBadgeHigherZero: { color: "#34d399", fontWeight: 700 },
 
-  // ── Empty state ──
+  // ── Empty state ── premium + inviting. Surface-1 panel with hairline,
+  // generous padding, a subtle gold ◆ brand mark, and a white CTA (gold
+  // is reserved for portfolio value + brand mark + premium tier badges).
   empty: {
-    textAlign: "center", padding: "5rem 1rem",
-    background: "rgba(255,255,255,0.02)",
-    border: "1px solid rgba(255,255,255,0.05)",
+    textAlign: "center", padding: "6rem 1.5rem",
+    background: "#0f172a",
+    border: "1px solid rgba(255,255,255,0.06)",
     borderRadius: 16,
   },
-  emptyIcon: { fontSize: "2.5rem", color: "#f59e0b", opacity: 0.5, marginBottom: "1rem" },
-  emptyTitle: {
-    fontSize: "1.4rem", fontWeight: 700, color: "#f1f5f9",
-    margin: "0 0 0.5rem", letterSpacing: "-0.02em",
+  emptyIcon: {
+    fontSize: "3rem", color: "#d4af37", opacity: 0.7,
+    marginBottom: "1.5rem", lineHeight: 1,
   },
-  emptySub: { color: "#64748b", fontSize: "0.92rem" },
+  emptyTitle: {
+    fontFamily: "'Inter', sans-serif",
+    fontVariationSettings: "'opsz' 32",
+    fontSize: "1.6rem", fontWeight: 600, color: "#f8fafc",
+    margin: "0 0 0.65rem", letterSpacing: "-0.01em",
+  },
+  emptySub: {
+    color: "#94a3b8", fontSize: "0.95rem",
+    maxWidth: 380, margin: "0 auto", lineHeight: 1.6,
+  },
   emptyCta: {
-    display: "inline-flex", alignItems: "center", gap: "0.45rem",
-    marginTop: "1.5rem",
-    background: "#f59e0b", color: "#0f172a",
-    padding: "0.65rem 1.2rem",
+    display: "inline-flex", alignItems: "center", gap: "0.5rem",
+    marginTop: "2rem",
+    background: "#f8fafc", color: "#0a0e1a",
+    padding: "0.75rem 1.5rem",
     borderRadius: 8,
-    fontSize: "0.9rem", fontWeight: 700,
-    letterSpacing: "0.02em",
+    fontSize: "0.92rem", fontWeight: 700,
+    letterSpacing: "0.01em",
     textDecoration: "none",
     transition: "background 0.2s, transform 0.1s",
   },
@@ -3280,34 +3430,34 @@ const st = {
   eyebrowMark: { marginRight: "0.4rem" },
 
   // ─── Alert banner ───
+  // Flat info-blue notification (not gold — gold is reserved for portfolio
+  // value, brand mark, and premium tier badges per the design system).
   alertBanner: {
-    background: "linear-gradient(135deg, rgba(245,158,11,0.12), rgba(217,119,6,0.06))",
-    border: "1px solid rgba(245,158,11,0.4)",
+    background: "rgba(96,165,250,0.08)",
+    border: "1px solid rgba(96,165,250,0.40)",
     borderRadius: 14,
-    padding: "1.25rem 1.5rem",
+    padding: "1rem 1.5rem",
     marginBottom: "2rem",
-    boxShadow: "0 0 0 1px rgba(245,158,11,0.1), 0 0 32px rgba(245,158,11,0.08)",
   },
   alertHeader: {
     display: "flex", alignItems: "center", gap: "0.6rem",
-    marginBottom: "0.85rem",
   },
   alertDot: {
     width: 10, height: 10, borderRadius: "50%",
-    background: "#f59e0b",
+    background: "#60a5fa",
     animation: "livePulse 1.6s ease-in-out infinite",
   },
   alertEyebrow: {
-    fontSize: "0.72rem", fontWeight: 700,
-    letterSpacing: "0.18em", textTransform: "uppercase",
-    color: "#fbbf24",
+    fontSize: "0.72rem", fontWeight: 600,
+    letterSpacing: "0.16em", textTransform: "uppercase",
+    color: "#93c5fd",
   },
   alertJump: {
     marginLeft: "auto",
     background: "transparent",
-    border: "1px solid rgba(245,158,11,0.4)",
-    color: "#fbbf24",
-    fontSize: "0.78rem", fontWeight: 700,
+    border: "1px solid rgba(96,165,250,0.40)",
+    color: "#93c5fd",
+    fontSize: "0.78rem", fontWeight: 600,
     padding: "0.3rem 0.8rem", borderRadius: 999,
     cursor: "pointer", letterSpacing: "0.01em",
   },
@@ -3337,12 +3487,23 @@ const st = {
   // ─── Performers panel header (used by the standalone PerformersPanel
   // shell — keeps the same visual treatment we removed from InsightsRow).
   insightsHeader: {
-    display: "flex", alignItems: "flex-start",
-    justifyContent: "space-between", marginBottom: "1.25rem",
+    display: "flex", alignItems: "center",
+    justifyContent: "space-between", marginBottom: "1.5rem",
+  },
+  // Inter Display section title (replaces the old uppercase eyebrow). Page
+  // sub-headings live one tier below the hero portfolio value: same opsz 32
+  // optical cut, weight 600, and looser -0.01em tracking than the headline.
+  insightsTitle: {
+    fontFamily: "'Inter', sans-serif",
+    fontVariationSettings: "'opsz' 32",
+    fontSize: "1.4rem", fontWeight: 600,
+    color: "#f8fafc",
+    letterSpacing: "-0.01em",
+    margin: 0,
   },
   insightsEyebrow: {
-    fontSize: "0.7rem", fontWeight: 700,
-    letterSpacing: "0.18em", textTransform: "uppercase",
+    fontSize: "0.7rem", fontWeight: 600,
+    letterSpacing: "0.16em", textTransform: "uppercase",
     color: "#94a3b8", margin: 0,
   },
 
@@ -3367,17 +3528,17 @@ const st = {
   // the old insightsCol shell so the panel keeps the same visual treatment
   // when rendered standalone on the dashboard.
   performersStandalone: {
-    background: gradients.goldPanel,
+    background: "#0f172a",
     border: "1px solid rgba(255,255,255,0.06)",
     borderRadius: 16,
-    padding: "1.5rem 1.75rem",
+    padding: "1.75rem 2rem",
     marginBottom: "2.5rem",
   },
   perfItem: {
     display: "flex", alignItems: "center",
     justifyContent: "space-between", gap: "0.75rem",
-    padding: "0.55rem 0",
-    borderBottom: "1px solid rgba(255,255,255,0.04)",
+    padding: "0.65rem 0",
+    borderBottom: "1px solid rgba(255,255,255,0.06)",
   },
   perfItemClickable: {
     cursor: "pointer",
@@ -3405,7 +3566,7 @@ const st = {
 
   // ─── Price history chart ───
   historyPanel: {
-    background: gradients.goldPanel,
+    background: "#0f172a",
     border: "1px solid rgba(255,255,255,0.06)",
     borderRadius: 16,
     padding: "1.75rem 2rem 1rem",
@@ -3435,8 +3596,8 @@ const st = {
     gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
     gap: "1rem",
     padding: "1rem 1.25rem",
-    background: "rgba(255,255,255,0.025)",
-    border: "1px solid rgba(255,255,255,0.05)",
+    background: "#1a2332",
+    border: "1px solid rgba(255,255,255,0.06)",
     borderRadius: 12,
     marginBottom: "1.25rem",
   },
