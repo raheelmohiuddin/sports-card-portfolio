@@ -447,6 +447,15 @@ export class ApiStack extends Construct {
       environment: { ...sharedEnv, ADMIN_EMAIL, SENDER_EMAIL: ADMIN_EMAIL },
     });
 
+    // Self-sold path — collector records a sale they handled themselves
+    // (show, auction house, private). Lives next to the consignment flow
+    // since both are portfolio-exit lifecycle actions; route is /cards/*.
+    const markSoldFn = new NodejsFunction(this, "MarkSold", {
+      ...sharedNodejsProps,
+      functionName: "scp-mark-sold",
+      entry: path.join(functionsDir, "cards/mark-sold.js"),
+    });
+
     // Admin Lambdas need the user pool ID at runtime so requireAdmin can do
     // a live AdminGetUser fallback when the JWT claim is stale (e.g. user was
     // promoted via Cognito console but their existing JWT is still pre-promotion).
@@ -540,7 +549,7 @@ export class ApiStack extends Construct {
       markAttendingFn,
       unmarkAttendingFn,
     ];
-    for (const fn of [addCardFn, getCardsFn, getCardFn, deleteCardFn, psaLookupFn, portfolioValueFn, portfolioRefreshFn, portfolioHistoryFn, cardSalesFn, executeTradeFn, confirmTradeCostFn, cancelTradeFn, listTradesFn, analyzeTradeFn, updatePriceFn, updateCardFn, avatarUploadUrlFn, avatarViewUrlFn, ...consignmentAndAdminFns]) {
+    for (const fn of [addCardFn, getCardsFn, getCardFn, deleteCardFn, psaLookupFn, portfolioValueFn, portfolioRefreshFn, portfolioHistoryFn, cardSalesFn, executeTradeFn, confirmTradeCostFn, cancelTradeFn, listTradesFn, analyzeTradeFn, updatePriceFn, updateCardFn, markSoldFn, avatarUploadUrlFn, avatarViewUrlFn, ...consignmentAndAdminFns]) {
       props.dbSecret.grantRead(fn);
       props.cardImagesBucket.grantReadWrite(fn);
       fn.addToRolePolicy(
@@ -726,6 +735,13 @@ export class ApiStack extends Construct {
       path: "/cards/{id}/price",
       methods: [apigwv2.HttpMethod.PATCH],
       integration: new apigwv2integrations.HttpLambdaIntegration("UpdatePrice", updatePriceFn),
+      ...authRoute,
+    });
+
+    api.addRoutes({
+      path: "/cards/{id}/mark-sold",
+      methods: [apigwv2.HttpMethod.PATCH],
+      integration: new apigwv2integrations.HttpLambdaIntegration("MarkSold", markSoldFn),
       ...authRoute,
     });
 
