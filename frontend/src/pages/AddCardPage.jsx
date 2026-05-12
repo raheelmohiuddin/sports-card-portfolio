@@ -216,7 +216,7 @@ export default function AddCardPage() {
                 <div style={st.detailHeaderLeft}>
                   <h2 style={st.playerName}>{cardData.playerName ?? "Unknown Player"}</h2>
                   <p style={st.detailMeta}>
-                    {[cardData.year, cardData.brand, cardData.sport].filter(Boolean).join(" · ")}
+                    {[cardData.year, cardData.brand, cardData.category ?? cardData.sport].filter(Boolean).join(" · ")}
                   </p>
                 </div>
                 <div style={st.gradeBadge}>
@@ -277,7 +277,7 @@ export default function AddCardPage() {
                 <DetailRow label="Cert #"   value={cardData.certNumber} />
                 <DetailRow label="Card #"   value={cardData.cardNumber} />
                 <DetailRow label="Variety"  value={cardData.variety} />
-                <DetailRow label="Sport"    value={cardData.sport} />
+                <DetailRow label="Category" value={cardData.category ?? cardData.sport} />
               </div>
 
               {(cardData.psaPopulation != null || cardData.psaPopulationHigher != null) && (

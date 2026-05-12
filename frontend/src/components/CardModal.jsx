@@ -199,7 +199,7 @@ export default function CardModal({
           {/* ── Player + subtitle ── */}
           <h2 style={st.playerName}>{card.playerName ?? "Unknown Player"}</h2>
           <p style={st.subLine}>
-            {[card.year, card.brand, card.variant, card.sport].filter(Boolean).join(" · ") || "—"}
+            {[card.year, card.brand, card.variant, card.category ?? card.sport].filter(Boolean).join(" · ") || "—"}
           </p>
 
           {/* ── Grade + tier badges ── */}

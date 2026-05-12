@@ -189,13 +189,13 @@ export default function PortfolioPage() {
   // ── Sort, filter, view-mode state ──
   const [sortBy, setSortBy] = useState("date-desc");
   const [filters, setFilters] = useState({
-    sport: "", grade: "", cost: "all",
+    category: "", grade: "", cost: "all",
     rare: false, targetHit: false,
   });
   const setFilter = (key, value) => setFilters((prev) => ({ ...prev, [key]: value }));
-  const clearFilters = () => setFilters({ sport: "", grade: "", cost: "all", rare: false, targetHit: false });
+  const clearFilters = () => setFilters({ category: "", grade: "", cost: "all", rare: false, targetHit: false });
   const filtersActive =
-    filters.sport || filters.grade || filters.cost !== "all" || filters.rare || filters.targetHit;
+    filters.category || filters.grade || filters.cost !== "all" || filters.rare || filters.targetHit;
 
   const [viewMode, setViewMode] = useState(() => {
     if (typeof window === "undefined") return "grid";
@@ -205,8 +205,12 @@ export default function PortfolioPage() {
     localStorage.setItem("scp.cardsView", viewMode);
   }, [viewMode]);
 
-  const uniqueSports = useMemo(
-    () => [...new Set(cards.map((c) => c.sport).filter(Boolean))].sort(),
+  // Backend writes CardHedger's category on the new path; older rows
+  // (pre-rollout) only have legacy sport. Source from category first,
+  // fall back to sport so the filter dropdown shows a full picture
+  // across both eras during transition.
+  const uniqueCategories = useMemo(
+    () => [...new Set(cards.map((c) => c.category ?? c.sport).filter(Boolean))].sort(),
     [cards]
   );
   const uniqueGrades = useMemo(
@@ -353,7 +357,7 @@ export default function PortfolioPage() {
               <CardsToolbar
                 sortBy={sortBy} setSortBy={setSortBy}
                 filters={filters} setFilter={setFilter}
-                uniqueSports={uniqueSports} uniqueGrades={uniqueGrades}
+                uniqueCategories={uniqueCategories} uniqueGrades={uniqueGrades}
                 viewMode={viewMode} setViewMode={setViewMode}
                 totalCount={activeCards.length} visibleCount={visibleCards.length}
               />
@@ -414,7 +418,7 @@ export default function PortfolioPage() {
               <CardsToolbar
                 sortBy={sortBy} setSortBy={setSortBy}
                 filters={filters} setFilter={setFilter}
-                uniqueSports={uniqueSports} uniqueGrades={uniqueGrades}
+                uniqueCategories={uniqueCategories} uniqueGrades={uniqueGrades}
                 viewMode={viewMode} setViewMode={setViewMode}
                 totalCount={pastCards.length} visibleCount={visiblePastCards.length}
               />
@@ -581,7 +585,7 @@ function computeAllocation(cards) {
   cards.forEach((card) => {
     const value = effectiveValue(card) ?? 0;
     if (!value || value <= 0) return;
-    const key = card.sport || "Uncategorized";
+    const key = card.category ?? card.sport ?? "Uncategorized";
     buckets.set(key, (buckets.get(key) ?? 0) + value);
   });
   const total = Array.from(buckets.values()).reduce((a, b) => a + b, 0);
@@ -751,7 +755,7 @@ function sortCards(cards, sortBy) {
 // useCallback deps. Same semantics that My Collection has always used.
 function applyToolbarFilters(base, filters, sortBy) {
   let out = base;
-  if (filters.sport)          out = out.filter((c) => c.sport === filters.sport);
+  if (filters.category)       out = out.filter((c) => (c.category ?? c.sport) === filters.category);
   if (filters.grade)          out = out.filter((c) => c.grade === filters.grade);
   if (filters.rare)           out = out.filter(isRare);
   if (filters.targetHit)      out = out.filter((c) => c.targetReached);
@@ -763,7 +767,7 @@ function applyToolbarFilters(base, filters, sortBy) {
 // ─── Cards toolbar (sort + filters + view toggle) ─────────────────────
 function CardsToolbar({
   sortBy, setSortBy, filters, setFilter,
-  uniqueSports, uniqueGrades,
+  uniqueCategories, uniqueGrades,
   viewMode, setViewMode,
   totalCount, visibleCount,
 }) {
@@ -774,8 +778,8 @@ function CardsToolbar({
         options={SORT_OPTIONS}
       />
       <ToolbarSelect
-        value={filters.sport} onChange={(v) => setFilter("sport", v)}
-        options={[{ value: "", label: "All Sports" }, ...uniqueSports.map((s) => ({ value: s, label: s }))]}
+        value={filters.category} onChange={(v) => setFilter("category", v)}
+        options={[{ value: "", label: "All Categories" }, ...uniqueCategories.map((s) => ({ value: s, label: s }))]}
       />
       <ToolbarSelect
         value={filters.grade} onChange={(v) => setFilter("grade", v)}

@@ -111,7 +111,11 @@ export async function previewPricing(card) {
       brand:      card.brand,
       cardNumber: card.cardNumber,
       grade:      card.grade,
+      // Send both: backend prefers category and falls back to sport.
+      // Held during the transition so cards added pre-rollout still
+      // carry their legacy sport value through preview pricing.
       sport:      card.sport,
+      category:   card.category ?? null,
     }),
   });
   if (!res.ok) throw await readError(res);
