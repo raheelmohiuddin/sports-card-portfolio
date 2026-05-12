@@ -277,17 +277,27 @@ async function fetchPriceEstimate(cardId, gradeLabelStr) {
 // endpoint produces no answer.
 async function fetchEstimateForCert({ certNumber, grader, grade }) {
   const label = gradeLabel(grade);
-  if (!label) return null;
+  if (!label) {
+    console.warn("fetchEstimateForCert: no grade label", { certNumber, grader, grade });
+    return null;
+  }
   const certRes = await chPost(
     "/v1/cards/prices-by-cert",
     { cert: String(certNumber), grader: grader || "PSA", days: 90 },
     TIMEOUT_FAST_MS,
     { allow422: true },
   );
-  if (!certRes?.card?.card_id) return null;
+  if (!certRes?.card?.card_id) {
+    console.warn("fetchEstimateForCert: prices-by-cert returned no card", { certNumber, grader, grade });
+    return null;
+  }
   const estimate = await fetchPriceEstimate(certRes.card.card_id, label)
     .catch(() => null);
-  return estimate ? { ...estimate, cardhedgerId: certRes.card.card_id } : null;
+  if (!estimate) {
+    console.warn("fetchEstimateForCert: price-estimate returned null", { certNumber, grader, grade });
+    return null;
+  }
+  return { ...estimate, cardhedgerId: certRes.card.card_id };
 }
 
 // New orchestrator: cert -> {cardhedgerId, variant, comps, estimate}
