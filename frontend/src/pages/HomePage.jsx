@@ -287,10 +287,13 @@ const st = {
   },
   eyebrowMark: { marginRight: "0.4rem" },
   heroTitle: {
-    fontFamily: "'Fraunces', Georgia, serif",
+    // Inter Display — Inter at opsz 32 unlocks the tighter, more authoritative
+    // optical cut for large display text (no separate font file needed).
+    fontFamily: "'Inter', sans-serif",
+    fontVariationSettings: "'opsz' 32",
     color: "#f8fafc", fontSize: "clamp(2.4rem, 5vw, 3.8rem)",
-    fontWeight: 500, lineHeight: 1.15,
-    letterSpacing: "-0.01em", margin: "0 0 1.5rem",
+    fontWeight: 600, lineHeight: 1.15,
+    letterSpacing: "-0.025em", margin: "0 0 1.5rem",
   },
   // Gold scarcity — accent line drops gold; emphasis carried by serif weight + spacing.
   heroAccent: { color: "#f8fafc" },
@@ -359,9 +362,10 @@ const st = {
     marginBottom: "0.6rem",
   },
   sectionTitle: {
-    fontFamily: "'Fraunces', Georgia, serif",
+    fontFamily: "'Inter', sans-serif",
+    fontVariationSettings: "'opsz' 32",
     textAlign: "center", fontSize: "clamp(1.6rem, 3vw, 2.2rem)",
-    fontWeight: 500, color: "#f8fafc",
+    fontWeight: 600, color: "#f8fafc",
     letterSpacing: "-0.01em", margin: "0 0 3rem",
   },
   featureGrid: {

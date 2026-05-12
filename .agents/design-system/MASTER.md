@@ -59,30 +59,46 @@ Pair every gain/loss color with an icon (▲/▼). Never rely on color alone.
 
 ## 2. Typography
 
-All three fonts are free via Google Fonts.
+One family, served from Google Fonts. Inter at `opsz` 32 is "Inter Display" —
+no separate Display family file needed. Mono is a system fallback chain.
 
 | Role | Font | Notes |
 |---|---|---|
-| **Display / hero numbers** | **Fraunces** (variable serif) | Portfolio total, sale prices, section titles. Set OPSZ ~144, weight 500–600. Gives the Sotheby's catalog feel. |
-| **UI / body / tables** | **Inter** | Workhorse. **Required:** `font-feature-settings: "tnum", "cv11"` so digits are tabular and zero is slashed. |
-| **Mono (cert #s, IDs)** | **JetBrains Mono** | PSA cert numbers, image hashes, anything alphanumeric ID-like. Slashed zero by default. |
+| **Display / hero numbers** | **Inter Display** | Inter at the variable-axis upper bound. Set `font-variation-settings: 'opsz' 32` to engage the display optical cut (tighter, more authoritative than body Inter). Weight 700 for portfolio total; weight 600 for section headings. |
+| **UI / body / tables** | **Inter** | Same family, default opsz (auto-selected by browser at small sizes). **Required:** `font-feature-settings: "tnum", "cv11"` so digits are tabular and zero is slashed. |
+| **Mono (cert #s, IDs)** | system mono | `'JetBrains Mono', 'Fira Code', monospace` — uses the user's installed mono if available, otherwise the platform's default monospace. Not loaded from Google to keep the network payload minimal. |
 
 ### 2.1 Type Scale
 
 ```
-display-xl  48 / 56  Fraunces 500    — hero portfolio value
-display-lg  36 / 44  Fraunces 500    — page titles
-title       20 / 28  Inter 600
-body        15 / 22  Inter 400       — table rows, descriptions
-label       13 / 18  Inter 500       — column headers, chips (uppercase, +0.04em tracking)
-caption     12 / 16  Inter 400       — metadata, timestamps
-mono-data   13 / 18  JetBrains Mono  — IDs only
+display-xl  48 / 56  Inter Display 700  opsz 32  -0.03em   — hero portfolio value (financial-terminal density)
+display-lg  36 / 44  Inter Display 600  opsz 32  -0.025em  — hero/page titles
+title       20 / 28  Inter Display 600  opsz 32  -0.01em   — section headings (looser tracking at smaller display sizes)
+body        15 / 22  Inter 400          (auto)             — table rows, descriptions
+label       13 / 18  Inter 500          (auto)   +0.04em   — column headers, chips (uppercase)
+caption     12 / 16  Inter 400          (auto)             — metadata, timestamps
+mono-data   13 / 18  system mono        (fallback)         — IDs only (cert numbers, hashes)
 ```
 
-### 2.2 Alternative Pairing
+**Why Inter at opsz 32 instead of a separate Display font?** Inter v4 has a
+variable optical-size axis. At `opsz 32` the cut is tighter, with shorter
+extenders and less x-height contrast than body Inter — purpose-built for
+display sizes. Same family, same network request, same vertical metrics.
 
-If a fully geometric, fintech-leaning look is wanted (less auction-house, more modern data):
-swap Fraunces → **Instrument Serif** (lighter editorial), or go all-sans with **Geist** + **Geist Mono**.
+### 2.2 Tracking by tier
+
+Tighter at larger sizes (a financial-terminal convention):
+
+- Portfolio total (≥ 2.6rem):  **-0.03em**
+- Hero / page titles (≥ 2rem): **-0.025em**
+- Section headings (~ 1.4rem): **-0.01em**
+- Body / labels:               default (no override)
+
+### 2.3 Alternative Pairings
+
+If the design ever wants a serif display back: **IBM Plex Serif** (free,
+architectural, less literary than Fraunces) is the closest match to the
+Editorial Dark intent. **Playfair Display** for hero-only didone luxury.
 
 ---
 
