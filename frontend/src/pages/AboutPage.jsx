@@ -33,7 +33,7 @@ export default function AboutPage() {
 
       {/* ── Story ── */}
       <section style={st.story}>
-        <div className="container" style={st.storyGrid}>
+        <div className="container scp-about-story-grid">
           <div style={st.storyText}>
             <h2 style={st.storyTitle}>The story</h2>
             <p style={st.storyP}>
@@ -98,62 +98,106 @@ export default function AboutPage() {
 }
 
 const st = {
-  // Hero
+  // Hero — flat bg-base, no gradient. Inter Display (opsz 32) carries the
+  // editorial lead-in; eyebrow is the only gold on the page besides the brand mark.
   hero: {
-    background: "linear-gradient(160deg, #0f172a 0%, #1e293b 60%, #0f172a 100%)",
-    padding: "5rem 0 4rem",
+    background: "#0a0e1a",
+    padding: "6rem 0 5rem",
   },
-  heroInner: { maxWidth: 640 },
+  heroInner: { maxWidth: 720 },
   eyebrow: {
-    color: "#f59e0b", fontSize: "0.75rem", fontWeight: 700,
-    letterSpacing: "0.12em", textTransform: "uppercase", marginBottom: "1rem",
+    color: "#d4af37", fontSize: "0.78rem", fontWeight: 700,
+    letterSpacing: "0.16em", textTransform: "uppercase",
+    marginBottom: "1.5rem",
   },
-  mark: { marginRight: "0.4rem" },
+  mark: { marginRight: "0.45rem" },
   heroTitle: {
-    color: "#fff", fontSize: "clamp(2rem, 4vw, 3rem)",
-    fontWeight: 800, lineHeight: 1.15,
-    letterSpacing: "-0.03em", margin: "0 0 1rem",
+    fontFamily: "'Inter', sans-serif",
+    fontVariationSettings: "'opsz' 32",
+    color: "#f8fafc",
+    fontSize: "clamp(2.2rem, 4.5vw, 3.4rem)",
+    fontWeight: 600, lineHeight: 1.15,
+    letterSpacing: "-0.025em",
+    margin: "0 0 1.5rem",
   },
   heroSub: {
-    color: "#94a3b8", fontSize: "1.05rem",
-    lineHeight: 1.65, margin: 0, maxWidth: 540,
+    color: "#cbd5e1", fontSize: "1.05rem",
+    lineHeight: 1.7, margin: 0, maxWidth: 580,
   },
 
-  // Story
-  story: { background: "#fff", padding: "5rem 0" },
-  storyGrid: {
-    display: "grid",
-    gridTemplateColumns: "1fr auto",
-    gap: "4rem", alignItems: "start",
-    "@media(max-width:640px)": { gridTemplateColumns: "1fr" },
+  // Story — same bg-base; hairline at the top reads as a section break
+  // without alternating bg colors (Editorial Dark = one continuous surface).
+  // Layout (1fr/auto desktop, stacked mobile) lives on .scp-about-story-grid
+  // in index.css since inline styles can't host media queries.
+  story: {
+    background: "#0a0e1a",
+    borderTop: "1px solid rgba(255,255,255,0.06)",
+    padding: "5rem 0",
   },
-  storyText: { maxWidth: 560 },
+  storyText: { maxWidth: 600 },
   storyTitle: {
-    fontSize: "1.6rem", fontWeight: 800,
-    color: "#0f172a", letterSpacing: "-0.02em",
-    margin: "0 0 1.25rem",
+    fontFamily: "'Inter', sans-serif",
+    fontVariationSettings: "'opsz' 32",
+    fontSize: "clamp(1.6rem, 3vw, 2.2rem)",
+    fontWeight: 600, color: "#f8fafc",
+    letterSpacing: "-0.01em",
+    margin: "0 0 1.75rem",
   },
   storyP: {
-    fontSize: "0.95rem", color: "#475569",
-    lineHeight: 1.75, marginBottom: "1rem",
+    fontSize: "1rem",
+    color: "#cbd5e1",
+    lineHeight: 1.8,
+    marginBottom: "1.25rem",
   },
+
+  // Stat block — catalog-style data showcase. Surface-1 cards with hairline
+  // borders, Inter Display values in text-primary (deliberately not gold;
+  // gold scarcity rule keeps gold for the brand mark only on this page),
+  // tabular-nums so digit changes don't jitter the layout.
   statGrid: {
-    display: "grid", gridTemplateColumns: "1fr 1fr",
-    gap: "1.25rem", minWidth: 220,
+    display: "grid",
+    gridTemplateColumns: "1fr 1fr",
+    gap: "1rem",
+    minWidth: 240,
   },
   stat: {
-    background: "#f8fafc", borderRadius: 10,
-    border: "1px solid #e2e8f0",
-    padding: "1.25rem", textAlign: "center",
+    background: "#0f172a",
+    borderRadius: 10,
+    border: "1px solid rgba(255,255,255,0.06)",
+    padding: "1.5rem 1.25rem",
+    textAlign: "center",
   },
-  statVal: { display: "block", fontSize: "1.3rem", fontWeight: 800, color: "#0f172a" },
-  statLabel: { display: "block", fontSize: "0.72rem", color: "#94a3b8", marginTop: "0.25rem" },
+  statVal: {
+    display: "block",
+    fontFamily: "'Inter', sans-serif",
+    fontVariationSettings: "'opsz' 32",
+    fontSize: "1.4rem",
+    fontWeight: 700,
+    color: "#f8fafc",
+    fontVariantNumeric: "tabular-nums",
+    letterSpacing: "-0.025em",
+  },
+  statLabel: {
+    display: "block",
+    fontSize: "0.7rem", fontWeight: 600,
+    color: "#94a3b8",
+    letterSpacing: "0.12em", textTransform: "uppercase",
+    marginTop: "0.55rem",
+  },
 
-  // Pillars
-  pillars: { background: "#f8fafc", borderTop: "1px solid #e2e8f0", padding: "5rem 0" },
+  // Pillars — same continuous bg-base. Hairline section break top.
+  pillars: {
+    background: "#0a0e1a",
+    borderTop: "1px solid rgba(255,255,255,0.06)",
+    padding: "5rem 0",
+  },
   pillarsTitle: {
-    fontSize: "1.6rem", fontWeight: 800, color: "#0f172a",
-    letterSpacing: "-0.02em", margin: "0 0 2.5rem",
+    fontFamily: "'Inter', sans-serif",
+    fontVariationSettings: "'opsz' 32",
+    fontSize: "clamp(1.6rem, 3vw, 2.2rem)",
+    fontWeight: 600, color: "#f8fafc",
+    letterSpacing: "-0.01em",
+    margin: "0 0 3rem",
     textAlign: "center",
   },
   pillarsGrid: {
@@ -162,27 +206,51 @@ const st = {
     gap: "1.5rem",
   },
   pillar: {
-    background: "#fff", borderRadius: 12,
-    border: "1px solid #e2e8f0", padding: "1.75rem",
+    background: "#0f172a",
+    borderRadius: 12,
+    border: "1px solid rgba(255,255,255,0.06)",
+    padding: "1.85rem 1.75rem",
   },
   pillarTitle: {
-    fontSize: "1rem", fontWeight: 700, color: "#0f172a",
+    fontSize: "1.05rem", fontWeight: 600,
+    color: "#f8fafc",
+    margin: "0 0 0.7rem",
+    letterSpacing: "-0.005em",
+  },
+  pillarDesc: {
+    fontSize: "0.9rem",
+    color: "#94a3b8",
+    lineHeight: 1.7,
+    margin: 0,
+  },
+
+  // CTA band — surface-1 lift over the page bg. White button (NOT gold) per
+  // gold-scarcity rule: gold is reserved for brand-mark + premium tiers.
+  cta: {
+    background: "#0f172a",
+    borderTop: "1px solid rgba(255,255,255,0.06)",
+    padding: "5rem 0",
+  },
+  ctaTitle: {
+    fontFamily: "'Inter', sans-serif",
+    fontVariationSettings: "'opsz' 32",
+    color: "#f8fafc",
+    fontSize: "clamp(1.6rem, 3vw, 2.2rem)",
+    fontWeight: 600,
+    letterSpacing: "-0.01em",
     margin: "0 0 0.6rem",
   },
-  pillarDesc: { fontSize: "0.87rem", color: "#64748b", lineHeight: 1.65, margin: 0 },
-
-  // CTA
-  cta: { background: "#0f172a", padding: "5rem 0" },
-  ctaTitle: {
-    color: "#fff", fontSize: "clamp(1.5rem, 3vw, 2rem)",
-    fontWeight: 800, letterSpacing: "-0.02em",
-    margin: "0 0 0.5rem",
+  ctaSub: {
+    color: "#94a3b8",
+    fontSize: "0.92rem",
+    marginBottom: "2.25rem",
   },
-  ctaSub: { color: "#64748b", fontSize: "0.9rem", marginBottom: "2rem" },
   ctaBtn: {
-    background: "#f59e0b", color: "#0f172a",
-    fontWeight: 800, fontSize: "0.95rem",
+    background: "#f8fafc", color: "#0a0e1a",
+    fontWeight: 700, fontSize: "0.95rem",
     padding: "0.75rem 1.75rem", borderRadius: 8,
-    textDecoration: "none", display: "inline-block",
+    textDecoration: "none",
+    letterSpacing: "0.01em",
+    display: "inline-block",
   },
 };

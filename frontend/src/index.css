@@ -247,6 +247,24 @@ a { color: inherit; text-decoration: none; }
   .scp-hero-ctas { justify-content: center; }
 }
 
+/* ─── About page story grid ─────────────────────────────────────── */
+/* Story text + stat block side-by-side on desktop, stacked on mobile.
+   Owns the responsive breakpoint that the previous inline @media in the
+   AboutPage style object couldn't honor (inline styles don't support
+   media queries). */
+.scp-about-story-grid {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 4rem;
+  align-items: start;
+}
+@media (max-width: 768px) {
+  .scp-about-story-grid {
+    grid-template-columns: 1fr;
+    gap: 2.5rem;
+  }
+}
+
 /* Spotlight stage owns the dimensions; cards inside fill via inset:0
    so two cards can overlap during a crossfade. 5:7 aspect → height. */
 .scp-spotlight-stage {
