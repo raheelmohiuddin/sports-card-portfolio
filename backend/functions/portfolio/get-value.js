@@ -19,7 +19,8 @@ exports.handler = async (event) => {
   const [result, tradeCount] = await Promise.all([
     db.query(
       `SELECT c.id, c.manual_price, c.my_cost,
-              c.estimated_value, c.avg_sale_price, c.last_sale_price,
+              c.estimated_value, c.estimate_price,
+              c.avg_sale_price, c.last_sale_price,
               c.num_sales, c.price_source, c.value_last_updated,
               c.status,
               cn.status AS consignment_status
@@ -42,10 +43,17 @@ exports.handler = async (event) => {
   let totalValue = 0;
   let totalCost  = 0;
   const cards = result.rows.map((row) => {
-    const manualPrice  = row.manual_price    ? parseFloat(row.manual_price)    : null;
-    const autoValue    = row.estimated_value ? parseFloat(row.estimated_value) : null;
-    const displayValue = manualPrice ?? autoValue;
-    const cost         = row.my_cost         ? parseFloat(row.my_cost)         : null;
+    const manualPrice    = row.manual_price    ? parseFloat(row.manual_price)    : null;
+    const estimatePrice  = row.estimate_price  ? parseFloat(row.estimate_price)  : null;
+    const estimatedValue = row.estimated_value ? parseFloat(row.estimated_value) : null;
+    // Same precedence as the frontend's effectiveValue helper (portfolio.js):
+    // manual override wins, then the valuation-rebuild estimate_price column,
+    // then the legacy estimated_value fallback. Without this, the API's
+    // totalValue (and the portfolio_snapshots rows it writes) used to anchor
+    // on estimated_value only — which diverges from estimate_price for every
+    // refreshed card and made the /portfolio/history chart undercount.
+    const displayValue = manualPrice ?? estimatePrice ?? estimatedValue;
+    const cost         = row.my_cost           ? parseFloat(row.my_cost)         : null;
     // Held-only filter for dashboard hero totals. Sold cards (either
     // self-sold via cards.status='sold' or consignment-sold via
     // consignments.status='sold') have realized values that belong in a
