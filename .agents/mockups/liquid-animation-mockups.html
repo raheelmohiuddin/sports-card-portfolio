@@ -1,0 +1,442 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Liquid Animation Mockups — Card Tile Variants</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap">
+  <style>
+    /* ─── Editorial Dark base ─────────────────────────────────────── */
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: linear-gradient(180deg, #050810 0%, #0a0f1f 100%);
+      color: #e2e8f0;
+      font-family: 'Inter', system-ui, -apple-system, sans-serif;
+      min-height: 100vh;
+      padding: 3rem 2rem 4rem;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 2.25rem;
+      font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+    }
+
+    .page-header {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 0.5rem;
+      max-width: 56rem;
+      text-align: center;
+    }
+    .page-eyebrow {
+      font-size: 0.62rem;
+      font-weight: 700;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: #64748b;
+    }
+    .page-title {
+      font-size: 1.6rem;
+      font-weight: 800;
+      letter-spacing: -0.02em;
+      color: #f1f5f9;
+    }
+    .page-sub {
+      font-size: 0.92rem;
+      color: #94a3b8;
+      line-height: 1.55;
+    }
+
+    /* ─── Tile row ────────────────────────────────────────────────── */
+    .tiles-row {
+      display: grid;
+      grid-template-columns: repeat(3, 300px);
+      gap: 2rem;
+      margin-top: 1rem;
+    }
+
+    .tile-wrap {
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+    }
+
+    .tile-label {
+      font-size: 0.6rem;
+      font-weight: 700;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: #94a3b8;
+      padding-left: 0.25rem;
+    }
+
+    /* ─── Tile shell (matches real CardTile in PortfolioPage:2956) ── */
+    .tile {
+      background: #0f172a;
+      border: 1px solid rgba(255,255,255,0.05);
+      border-radius: 14px;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      width: 300px;
+    }
+
+    /* ─── Image area (5:7 ratio per real PortfolioPage:3052) ──────── */
+    .image-area {
+      position: relative;
+      width: 100%;
+      aspect-ratio: 5 / 7;
+      background:
+        radial-gradient(circle at 50% 35%, rgba(245,158,11,0.05) 0%, transparent 55%),
+        linear-gradient(180deg, #06090f 0%, #0a0f1f 100%);
+      overflow: hidden;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .image-fallback {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 0.5rem;
+      color: #334155;
+    }
+    .image-fallback-icon { font-size: 2.5rem; opacity: 0.5; }
+    .image-fallback-text {
+      font-size: 0.62rem;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: #475569;
+    }
+    /* Subtle gradient bottom edge — matches real .imageGradient */
+    .image-area::after {
+      content: "";
+      position: absolute; inset: 0;
+      background: linear-gradient(to bottom, transparent 60%, rgba(0,0,0,0.35) 100%);
+      pointer-events: none;
+    }
+
+    /* ─── Liquid animation region ─────────────────────────────────── */
+    /* Sized 110×110, anchored bottom-right with comfortable inset.
+       Sits ABOVE the .image-area::after gradient (z-index 2) so it
+       isn't tinted by the bottom shadow. pointer-events:none means
+       clicks pass through to the underlying tile. */
+    .liquid-region {
+      position: absolute;
+      bottom: 14px;
+      right: 14px;
+      width: 110px;
+      height: 110px;
+      pointer-events: none;
+      z-index: 2;
+      overflow: visible;
+    }
+
+    /* ─── Variant 1 — Subtle Shimmer (pure CSS) ───────────────────── */
+    /* Mercury / still-pond reflection. Two layered radial gradients,
+       both pulsing on a 4s cycle but offset so the highlight drifts.
+       Cool blue-white with low opacity — quiet, ambient. */
+    .variant-1 .liquid-region::before,
+    .variant-1 .liquid-region::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      border-radius: 50%;
+      filter: blur(6px);
+      will-change: transform, opacity;
+    }
+    .variant-1 .liquid-region::before {
+      background: radial-gradient(
+        circle at 50% 50%,
+        rgba(96, 165, 250, 0.55) 0%,
+        rgba(255, 255, 255, 0.15) 35%,
+        transparent 68%
+      );
+      animation: shimmer-primary 4s ease-in-out infinite;
+    }
+    .variant-1 .liquid-region::after {
+      background: radial-gradient(
+        circle at 35% 65%,
+        rgba(255, 255, 255, 0.22) 0%,
+        rgba(96, 165, 250, 0.18) 30%,
+        transparent 55%
+      );
+      animation: shimmer-secondary 4s ease-in-out infinite;
+    }
+    @keyframes shimmer-primary {
+      0%, 100% { transform: scale(0.72) translate(0, 0);    opacity: 0.42; }
+      50%      { transform: scale(1.10) translate(-4px, 5px); opacity: 0.78; }
+    }
+    @keyframes shimmer-secondary {
+      0%, 100% { transform: scale(0.85) translate(2px, -3px); opacity: 0.30; }
+      50%      { transform: scale(1.20) translate(6px, 2px);  opacity: 0.55; }
+    }
+
+    /* ─── Info bar (under image) ──────────────────────────────────── */
+    .info-bar {
+      padding: 0.95rem 0.95rem 1.1rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.4rem;
+      flex: 1;
+    }
+    .player-name {
+      font-size: 0.92rem;
+      font-weight: 800;
+      color: #f1f5f9;
+      letter-spacing: -0.01em;
+      line-height: 1.2;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .sub-line {
+      font-size: 0.72rem;
+      color: #94a3b8;
+      letter-spacing: 0.02em;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .meta-row {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      margin-top: 0.2rem;
+    }
+    .grade-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      background: #fef3c7;
+      color: #92400e;
+      font-weight: 700;
+      font-size: 0.72rem;
+      padding: 2px 0.5rem 2px 0.2rem;
+      border-radius: 999px;
+    }
+    .psa-tag {
+      background: #fff;
+      color: #0f172a;
+      font-size: 0.62rem;
+      font-weight: 900;
+      padding: 1px 5px;
+      border-radius: 3px;
+      letter-spacing: 0.04em;
+    }
+    .value-row {
+      display: flex;
+      flex-direction: column;
+      gap: 0.15rem;
+      margin-top: 0.4rem;
+      padding-top: 0.55rem;
+      border-top: 1px solid rgba(255,255,255,0.04);
+    }
+    .value {
+      font-size: 1.1rem;
+      font-weight: 800;
+      color: #f59e0b;
+      font-variant-numeric: tabular-nums;
+      letter-spacing: -0.01em;
+      line-height: 1;
+      text-shadow: 0 0 24px rgba(245,158,11,0.15);
+    }
+    .pnl-pos {
+      font-size: 0.72rem;
+      font-weight: 700;
+      color: #6ee7b7;
+      font-variant-numeric: tabular-nums;
+      letter-spacing: -0.005em;
+    }
+
+    /* Footer note */
+    .footer-note {
+      margin-top: 1rem;
+      font-size: 0.72rem;
+      color: #475569;
+      max-width: 56rem;
+      text-align: center;
+      line-height: 1.5;
+    }
+  </style>
+</head>
+<body>
+  <header class="page-header">
+    <div class="page-eyebrow">Mock-up</div>
+    <h1 class="page-title">Liquid animation variants for card tiles</h1>
+    <p class="page-sub">
+      Three takes on a slow-moving liquid effect for the bottom-right of
+      each card. Same mock card content across all three so the only
+      visible difference is the animation. Animations loop continuously —
+      give each one ~10 seconds to settle into its rhythm.
+    </p>
+  </header>
+
+  <div class="tiles-row">
+
+    <!-- ─── Variant 1: Subtle Shimmer ───────────────────────────── -->
+    <div class="tile-wrap">
+      <div class="tile-label">Variant 1 — Subtle Shimmer</div>
+      <article class="tile variant-1">
+        <div class="image-area">
+          <div class="image-fallback">
+            <span class="image-fallback-icon">🃏</span>
+            <span class="image-fallback-text">Card image</span>
+          </div>
+          <div class="liquid-region"></div>
+        </div>
+        <div class="info-bar">
+          <div class="player-name">PATRICK MAHOMES II</div>
+          <div class="sub-line">2017 · Panini Prizm · #269</div>
+          <div class="meta-row">
+            <span class="grade-pill"><span class="psa-tag">PSA</span> 10</span>
+          </div>
+          <div class="value-row">
+            <span class="value">$6,155.00</span>
+            <span class="pnl-pos">+$1,655.00 (+36.8%)</span>
+          </div>
+        </div>
+      </article>
+    </div>
+
+    <!-- ─── Variant 2: Flowing Wave (SVG turbulence) ────────────── -->
+    <div class="tile-wrap">
+      <div class="tile-label">Variant 2 — Flowing Wave</div>
+      <article class="tile variant-2">
+        <div class="image-area">
+          <div class="image-fallback">
+            <span class="image-fallback-icon">🃏</span>
+            <span class="image-fallback-text">Card image</span>
+          </div>
+          <div class="liquid-region">
+            <svg viewBox="0 0 110 110" xmlns="http://www.w3.org/2000/svg"
+                 width="110" height="110" preserveAspectRatio="none">
+              <defs>
+                <!--
+                  Liquid distortion: feTurbulence generates a coherent noise
+                  field, feDisplacementMap warps the source by that field's
+                  intensity. Animating baseFrequency over a 6s cycle makes
+                  the noise field "breathe" — the gradient appears to flow.
+                  scale=22 controls the displacement amplitude (higher =
+                  more violent warp).
+                -->
+                <filter id="liquidWave" x="-20%" y="-20%" width="140%" height="140%">
+                  <feTurbulence type="fractalNoise" baseFrequency="0.018 0.030"
+                                numOctaves="2" seed="3" result="noise">
+                    <animate attributeName="baseFrequency" dur="6s"
+                             values="0.018 0.030;0.030 0.018;0.022 0.038;0.018 0.030"
+                             repeatCount="indefinite" />
+                  </feTurbulence>
+                  <feDisplacementMap in="SourceGraphic" in2="noise" scale="22" />
+                </filter>
+                <!-- Blue → cyan gradient, fades to transparent at the edges
+                     so the warped shape blends into the tile background. -->
+                <radialGradient id="waveGrad" cx="0.5" cy="0.5" r="0.5">
+                  <stop offset="0%"   stop-color="#60a5fa" stop-opacity="0.85" />
+                  <stop offset="40%"  stop-color="#3b82f6" stop-opacity="0.65" />
+                  <stop offset="75%"  stop-color="#06b6d4" stop-opacity="0.35" />
+                  <stop offset="100%" stop-color="#06b6d4" stop-opacity="0"    />
+                </radialGradient>
+              </defs>
+              <rect x="0" y="0" width="110" height="110"
+                    fill="url(#waveGrad)" filter="url(#liquidWave)" />
+            </svg>
+          </div>
+        </div>
+        <div class="info-bar">
+          <div class="player-name">PATRICK MAHOMES II</div>
+          <div class="sub-line">2017 · Panini Prizm · #269</div>
+          <div class="meta-row">
+            <span class="grade-pill"><span class="psa-tag">PSA</span> 10</span>
+          </div>
+          <div class="value-row">
+            <span class="value">$6,155.00</span>
+            <span class="pnl-pos">+$1,655.00 (+36.8%)</span>
+          </div>
+        </div>
+      </article>
+    </div>
+
+    <!-- ─── Variant 3: Morphing Gradient Blob ───────────────────── -->
+    <div class="tile-wrap">
+      <div class="tile-label">Variant 3 — Morphing Blob</div>
+      <article class="tile variant-3">
+        <div class="image-area">
+          <div class="image-fallback">
+            <span class="image-fallback-icon">🃏</span>
+            <span class="image-fallback-text">Card image</span>
+          </div>
+          <div class="liquid-region">
+            <svg viewBox="0 0 110 110" xmlns="http://www.w3.org/2000/svg"
+                 width="110" height="110" preserveAspectRatio="none">
+              <defs>
+                <!-- Diagonal gradient with both stops cycling through
+                     blue → cyan → purple over the 8s cycle. The two
+                     stops' value lists are offset so the gradient
+                     direction's color contrast also shifts. -->
+                <linearGradient id="blobGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                  <stop offset="0%" stop-color="#60a5fa" stop-opacity="0.9">
+                    <animate attributeName="stop-color" dur="8s"
+                             values="#60a5fa;#06b6d4;#a855f7;#60a5fa"
+                             repeatCount="indefinite" />
+                  </stop>
+                  <stop offset="100%" stop-color="#06b6d4" stop-opacity="0.7">
+                    <animate attributeName="stop-color" dur="8s"
+                             values="#06b6d4;#a855f7;#60a5fa;#06b6d4"
+                             repeatCount="indefinite" />
+                  </stop>
+                </linearGradient>
+                <!-- Soft Gaussian blur so the blob's edges feather into
+                     the tile background instead of presenting a hard
+                     vector silhouette. -->
+                <filter id="blobBlur" x="-10%" y="-10%" width="120%" height="120%">
+                  <feGaussianBlur stdDeviation="1.8" />
+                </filter>
+              </defs>
+              <!-- Path morphs between four blob shapes over 8s. Each
+                   keyframe is a closed, organic shape with the same
+                   approximate visual mass so the morph reads as
+                   continuous deformation, not a shape swap. The first
+                   and last values are identical so the loop is seamless. -->
+              <path fill="url(#blobGrad)" filter="url(#blobBlur)">
+                <animate attributeName="d" dur="8s" repeatCount="indefinite"
+                  values="
+                    M55,15 C75,18 90,32 90,50 C90,75 65,95 50,90 C25,85 18,65 22,45 C25,28 38,15 55,15 Z;
+                    M50,12 C72,20 88,38 82,58 C76,80 55,92 40,85 C18,76 14,55 22,38 C28,22 38,12 50,12 Z;
+                    M58,18 C82,25 92,45 80,62 C68,82 48,90 38,82 C18,72 12,52 25,35 C32,22 45,18 58,18 Z;
+                    M52,14 C75,20 92,40 86,58 C80,80 58,92 42,86 C20,78 14,58 22,40 C28,22 40,14 52,14 Z;
+                    M55,15 C75,18 90,32 90,50 C90,75 65,95 50,90 C25,85 18,65 22,45 C25,28 38,15 55,15 Z" />
+              </path>
+            </svg>
+          </div>
+        </div>
+        <div class="info-bar">
+          <div class="player-name">PATRICK MAHOMES II</div>
+          <div class="sub-line">2017 · Panini Prizm · #269</div>
+          <div class="meta-row">
+            <span class="grade-pill"><span class="psa-tag">PSA</span> 10</span>
+          </div>
+          <div class="value-row">
+            <span class="value">$6,155.00</span>
+            <span class="pnl-pos">+$1,655.00 (+36.8%)</span>
+          </div>
+        </div>
+      </article>
+    </div>
+
+  </div>
+
+  <p class="footer-note">
+    All three variants use the production tile shell (background <code>#0f172a</code>,
+    hairline border <code>rgba(255,255,255,0.05)</code>, 14px radius, 5:7 image ratio).
+    The animation region is anchored bottom-right with a 14px inset and sized
+    110×110, sitting above the bottom-edge gradient so it isn't tinted by it.
+    SVG variants use <code>pointer-events:none</code> so clicks pass through to
+    the underlying tile.
+  </p>
+</body>
+</html>
