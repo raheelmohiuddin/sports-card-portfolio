@@ -21,6 +21,7 @@
 - **Instagram outbound share (V1)** — Share card image + watermark, default cost/P&L privacy off. Size: M
 - **"Undo mark as sold"** — OQ-3 deferred until first user reports an accidental sale. Size: S
 - **TCDB API migration for My Shows** — Replace current static data with live TCDB API. Size: M
+- **Home page partner section update** — change "Exclusive Partner" to "Our Partners" and add PSA logo alongside Fanatics. Needs official transparent PSA logo asset (or a successful re-attempt at automated checker-pattern removal). Size: S
 
 ## Bug fixes / audits
 
