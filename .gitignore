@@ -12,3 +12,12 @@ frontend/src/aws-exports.js
 .DS_Store
 coverage/
 .claude/
+
+# Defensive: credential file patterns
+*.pem
+*.p12
+*.key
+id_rsa*
+.aws/
+credentials
+credentials.json
