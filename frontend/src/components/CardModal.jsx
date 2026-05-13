@@ -5,11 +5,12 @@ import {
   getCardSales as defaultGetCardSales,
 } from "../services/api.js";
 import { getRarityTier, TIER_LABELS } from "../utils/rarity.js";
-import { effectiveValue, confidenceLabel } from "../utils/portfolio.js";
+import { effectiveValue, confidenceLabel, isSold } from "../utils/portfolio.js";
 import GhostIcon from "./GhostIcon.jsx";
 import CardPop from "./CardPop.jsx";
 import SalesHistory from "./SalesHistory.jsx";
 import ConsignBlock, { SoldBreakdown } from "./ConsignBlock.jsx";
+import MarkSoldBlock from "./MarkSoldBlock.jsx";
 
 const CONSIGNMENT_TYPE_LABEL = { auction: "Auction", private: "Private Sale" };
 const CONSIGNMENT_STATUS_LABEL = {
@@ -150,26 +151,18 @@ export default function CardModal({
 
   // (Sales fetch lives inside SalesHistory now — see component below.)
 
-  // Sold cards display their realized exit as the headline value — prefer
-  // sellers_net (what the collector pocketed after the consignment fee)
-  // and fall back to consignmentSoldPrice for legacy/pre-fee sales.
-  // Memoized as one block so neither value recomputes when state
-  // unrelated to `card` changes (pop toggle, hydration, role fetch).
-  const { sold, displayValue } = useMemo(() => {
-    const isSoldCard =
-      card.consignmentStatus === "sold" && card.consignmentSoldPrice != null;
-    return {
-      sold: isSoldCard,
-      // Held-card precedence per OQ-4 routed through effectiveValue helper:
-      // manualPrice ?? estimatePrice ?? estimatedValue. The legacy
-      // avgSalePrice tertiary fallback was dropped — refresh-portfolio.js
-      // writes estimated_value and avg_sale_price from the same source, so
-      // the two are identical on every refreshed card post-rebuild.
-      displayValue: isSoldCard
-        ? (card.sellersNet ?? card.consignmentSoldPrice)
-        : effectiveValue(card),
-    };
-  }, [card]);
+  // Sold cards display their realized exit as the headline value. Both
+  // sold detection and value resolution route through the unified helpers
+  // in portfolio.js (post mark-as-sold-plan §5):
+  //   isSold       — disjunction: self-sold ∨ consignment-sold
+  //   effectiveValue — sold cards: soldPrice ?? sellersNet ?? consignmentSoldPrice
+  //                    held cards: manualPrice ?? estimatePrice ?? estimatedValue
+  // Memoized so neither value recomputes when state unrelated to `card`
+  // changes (pop toggle, hydration, role fetch).
+  const { sold, displayValue } = useMemo(() => ({
+    sold:         isSold(card),
+    displayValue: effectiveValue(card),
+  }), [card]);
 
   return (
     <>
@@ -311,8 +304,13 @@ export default function CardModal({
           {/* ── Sold cards: surface consignment status (with sold price)
                 immediately, followed by realized P&L. Held cards keep the
                 existing bottom-of-sidebar placement so the consign CTA
-                sits below the market context. */}
-          {sold && hydrated && !adminConsignment && (
+                sits below the market context.
+                Gated to consignment-sold cards only; self-sold (cards.status
+                === 'sold') will get a dedicated SelfSoldBlock in commit 7
+                (mark-as-sold-plan.md §6). Without this guard, ConsignBlock
+                would render the "Consign This Card" CTA for a self-sold
+                card whose consignmentStatus is null. */}
+          {sold && hydrated && !adminConsignment && card.consignmentStatus === "sold" && (
             <ConsignBlock
               cardId={card.id}
               role={role}
@@ -369,6 +367,23 @@ export default function CardModal({
               sellersNet={card.sellersNet ?? null}
               consignmentBlocked={card.consignmentBlocked ?? false}
               onConsigned={(status) => onCardUpdate?.(card.id, { consignmentStatus: status })}
+            />
+          )}
+
+          {/* ── Mark as sold (held cards only) ──
+              Sibling to ConsignBlock — same visibility envelope, slate
+              styling so it sits visually subordinate to the gold consign
+              CTA. Internal visibility gates further restrict to cards
+              with no open consignment (declined or null only). On submit,
+              onMarkedSold patches the card via onCardUpdate which flips
+              cards.status='sold' and unmounts this block on next render. */}
+          {!sold && hydrated && !adminConsignment && (
+            <MarkSoldBlock
+              cardId={card.id}
+              role={role}
+              cardStatus={card.status}
+              consignmentStatus={card.consignmentStatus ?? null}
+              onMarkedSold={(fields) => onCardUpdate?.(card.id, fields)}
             />
           )}
 
@@ -623,18 +638,18 @@ function CostAndPnl({ card, displayValue }) {
   // re-render (pop toggle, role fetch, image load). Cheap individually
   // but multiplied across 8-10 renders per modal-open.
   const { sold, hasValue, pnl, positive, pnlPct, pnlLabel } = useMemo(() => {
-    const isSold   = card.consignmentStatus === "sold" && card.consignmentSoldPrice != null;
-    const has      = displayValue != null;
-    const value    = has ? displayValue - card.myCost : null;
-    const isPos    = value != null && value >= 0;
-    const pct      = has && card.myCost > 0 ? (value / card.myCost) * 100 : null;
+    const isCardSold = isSold(card);
+    const has        = displayValue != null;
+    const value      = has ? displayValue - card.myCost : null;
+    const isPos      = value != null && value >= 0;
+    const pct        = has && card.myCost > 0 ? (value / card.myCost) * 100 : null;
     // Label semantics: "profit/loss" reads as settled (sold cards);
     // "gain/loss" reads as unrealized paper movement.
-    const label    = isSold
+    const label      = isCardSold
       ? (isPos ? "realized profit" : "realized loss")
       : (isPos ? "unrealized gain" : "unrealized loss");
     return {
-      sold:     isSold,
+      sold:     isCardSold,
       hasValue: has,
       pnl:      value,
       positive: isPos,

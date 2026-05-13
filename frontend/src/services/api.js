@@ -308,6 +308,24 @@ export async function createConsignment({ cardId, type, askingPrice, auctionPlat
   return res.json();
 }
 
+// ─── Self-sold (collector marks a card sold themselves) ───────────────
+// PATCH /cards/{id}/mark-sold — distinct from consignments: no platform
+// workflow, no fee, no sellers_net. Payload shape:
+//   { soldPrice, soldAt, venueType: 'show'|'auction'|'other',
+//     showId? (uuid), auctionHouse? (text), otherText? (text) }
+// Exactly one of showId / auctionHouse / otherText is populated, matching
+// venueType. Returns the updated sold-state fields.
+export async function markCardSold(cardId, payload) {
+  const headers = await authHeaders();
+  const res = await fetch(`${API_BASE}/cards/${cardId}/mark-sold`, {
+    method: "PATCH",
+    headers,
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw await readError(res);
+  return res.json();
+}
+
 // ─── Admin endpoints ──────────────────────────────────────────────────
 export async function getAdminStats() {
   const headers = await authHeaders();
