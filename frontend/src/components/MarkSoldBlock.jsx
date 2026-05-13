@@ -52,15 +52,17 @@ export default function MarkSoldBlock({
 
   // Lazy-fetch the user's past attended shows the first time the form
   // opens. Deferred from modal-open so most card opens don't pay the
-  // network cost. Filter is client-side: attending=true AND date <= today,
-  // sorted by date desc (most recent shows first).
+  // network cost. attendedOnly=true puts /shows into history mode
+  // (INNER JOIN user_shows + no date floor) so past attended shows
+  // come back. Client-side filter still narrows to date<=today as
+  // defense-in-depth (server returns past + future attended).
   useEffect(() => {
     if (stage !== "form") return;
     if (userShows !== null) return;
     let cancelled = false;
     setShowsLoading(true);
     setShowsError(null);
-    getShows()
+    getShows({ attendedOnly: true })
       .then((all) => {
         if (cancelled) return;
         const today = new Date().toISOString().slice(0, 10);

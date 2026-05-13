@@ -4,14 +4,21 @@
 // state all read from this response.
 //
 // Query params (all optional):
-//   state   — 2-letter US code, exact match
-//   from    — YYYY-MM-DD, defaults to today
-//   to      — YYYY-MM-DD, no upper bound by default
-//   q       — case-insensitive substring match against name OR city
+//   state         — 2-letter US code, exact match
+//   from          — YYYY-MM-DD, defaults to today
+//   to            — YYYY-MM-DD, no upper bound by default
+//   q             — case-insensitive substring match against name OR city
+//   attendedOnly  — 'true'|'1' switches the endpoint into history mode:
+//                   INNER JOIN to user_shows (only attended) AND drops
+//                   the date floor (returns past + future attended).
+//                   Used by MarkSoldBlock to surface past attended shows
+//                   for the show-venue dropdown — the My Shows page
+//                   continues to use the default forward-looking mode.
 //
 // Hard limit of 1000 rows. With ~5k upcoming shows nationwide that's
 // enough headroom for a default state-filtered query; client can narrow
-// further with state + date range.
+// further with state + date range. In attendedOnly mode the response
+// is bounded by the user's attended-show count (typically <20).
 const { getPool, ensureUser } = require("../_db");
 const { json } = require("../_response");
 
@@ -39,6 +46,10 @@ exports.handler = async (event) => {
   const to    = (qs.to   ?? "").trim() || null;
   const q     = (qs.q    ?? "").trim() || null;
   const qLike = q ? `%${q}%` : null;
+  // attendedOnly switches the endpoint to history-mode for MarkSoldBlock:
+  // INNER JOIN user_shows so only attended shows return, AND drops the
+  // ">= CURRENT_DATE" date floor so past attended shows are included.
+  const attendedOnly = qs.attendedOnly === "true" || qs.attendedOnly === "1";
 
   // Proximity is split into two switches:
   //
@@ -68,6 +79,19 @@ exports.handler = async (event) => {
   // without a type tag, and the planner refuses ("could not determine
   // data type of parameter $N"). The cast tells it once and the
   // expression compiles cleanly.
+  // attendedOnly mode swaps two pieces of the SQL: the JOIN type (so
+  // non-attended shows are excluded server-side) and the date floor
+  // clause (so past attended shows aren't excluded). Everything else
+  // — state filter, q-search, proximity, ORDER BY, LIMIT — is identical
+  // between the two modes, so we template-string the variable parts
+  // rather than maintain two near-duplicate SQL bodies.
+  const attendingJoin = attendedOnly
+    ? "INNER JOIN user_shows us ON us.card_show_id = cs.id AND us.user_id = $1"
+    : "LEFT JOIN user_shows us ON us.card_show_id = cs.id AND us.user_id = $1";
+  const dateFloorClause = attendedOnly
+    ? "TRUE"  // history mode: no date floor, return past + future attended
+    : "COALESCE(cs.end_date, cs.show_date) >= COALESCE($2::date, CURRENT_DATE)";
+
   const sql = `
     SELECT
       cs.id, cs.tcdb_id, cs.name, cs.venue, cs.city, cs.state, cs.country,
@@ -76,9 +100,8 @@ exports.handler = async (event) => {
       (us.id IS NOT NULL) AS attending,
       us.notes            AS attending_notes
     FROM card_shows cs
-    LEFT JOIN user_shows us
-      ON us.card_show_id = cs.id AND us.user_id = $1
-    WHERE COALESCE(cs.end_date, cs.show_date) >= COALESCE($2::date, CURRENT_DATE)
+    ${attendingJoin}
+    WHERE ${dateFloorClause}
       AND ($3::date IS NULL OR cs.show_date <= $3::date)
       AND ($4::text[] IS NULL OR cs.state = ANY($4::text[]))
       AND ($5::text IS NULL OR cs.name ILIKE $5::text OR cs.city ILIKE $5::text)

@@ -352,14 +352,17 @@ export async function getAdminConsignments() {
 // states is an array of 2-letter codes (e.g. ["PA","NY"]). Empty array
 // or missing → no state filter. centerLat + centerLng + radiusMiles
 // activate the proximity (Haversine) filter — all three must be
-// provided together.
-export async function getShows({ states, from, to, q, centerLat, centerLng, radiusMiles } = {}) {
+// provided together. attendedOnly=true switches the endpoint to history
+// mode (INNER JOIN to user_shows + drop date floor) so callers can list
+// the user's past attended shows — see MarkSoldBlock.
+export async function getShows({ states, from, to, q, centerLat, centerLng, radiusMiles, attendedOnly } = {}) {
   const headers = await authHeaders();
   const params = new URLSearchParams();
   if (states && states.length) params.set("state", states.join(","));
   if (from)  params.set("from",  from);
   if (to)    params.set("to",    to);
   if (q)     params.set("q",     q);
+  if (attendedOnly) params.set("attendedOnly", "true");
   // Center coords drive the sort (nearest-first) on the server even
   // when no radius cutoff is set ("Any" option). Radius is only sent
   // when it's a positive number — the absence is the "any" signal.
