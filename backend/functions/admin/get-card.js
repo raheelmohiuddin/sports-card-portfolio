@@ -41,7 +41,16 @@ exports.handler = async (event) => {
             cn.sold_price AS consignment_sold_price,
             cn.consignment_fee_pct,
             cn.sellers_net,
-            (cb.user_id IS NOT NULL) AS consignment_blocked
+            (cb.user_id IS NOT NULL) AS consignment_blocked,
+            -- Liquidity flag — see cards/get-cards.js for the full
+            -- rationale. Mirrored here per the OQ-4 drift-fix pattern
+            -- (admin endpoint stays in sync with the user-side card
+            -- response shape).
+            (SELECT COUNT(DISTINCT COALESCE(comp->>'sale_url', comp->>'price_history_id'))
+             FROM jsonb_array_elements(COALESCE(c.raw_comps, '[]'::jsonb)) comp
+             WHERE comp->>'sale_date' IS NOT NULL
+               AND (comp->>'sale_date')::timestamptz >= NOW() - INTERVAL '30 days'
+            ) >= 5 AS is_liquid
      FROM cards c
      LEFT JOIN LATERAL (
        SELECT status, sold_price, consignment_fee_pct, sellers_net FROM consignments
@@ -94,6 +103,10 @@ exports.handler = async (event) => {
     avgSalePrice:     row.avg_sale_price   ? parseFloat(row.avg_sale_price)   : null,
     lastSalePrice:    row.last_sale_price  ? parseFloat(row.last_sale_price)  : null,
     numSales:         row.num_sales        ?? null,
+    // Server-derived liquidity flag — see cards/get-cards.js for the
+    // rule definition. Kept in sync with the user-side endpoint per
+    // the OQ-4 drift-fix pattern.
+    isLiquid:         row.is_liquid        ?? false,
     priceSource:      manualPrice !== null ? "manual" : (row.price_source ?? null),
     valueLastUpdated: row.value_last_updated ?? null,
     // Valuation rebuild fields per .agents/valuation-rebuild-plan.md §3.

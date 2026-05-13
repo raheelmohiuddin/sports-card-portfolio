@@ -38,7 +38,24 @@ exports.handler = async (event) => {
             cn.sold_price AS consignment_sold_price,
             cn.consignment_fee_pct,
             cn.sellers_net,
-            (cb.user_id IS NOT NULL) AS consignment_blocked
+            (cb.user_id IS NOT NULL) AS consignment_blocked,
+            -- Liquidity flag: 5+ distinct comps in the card's cached
+            -- raw_comps within the last 30 days. raw_comps is grade-
+            -- scoped at write time (refresh-portfolio.js calls
+            -- pricing.js#fetchComps with the card's own grade label,
+            -- and CardHedger filters server-side), so no per-comp
+            -- grade filter is needed here. Dedupe by sale_url first
+            -- (CardHedger occasionally surfaces multiple price_history
+            -- rows for the same Goldin/PWCC sale), falling back to
+            -- price_history_id when sale_url is missing. COALESCE
+            -- against '[]'::jsonb so cards with NULL raw_comps
+            -- (un-refreshed, or no CardHedger match) cleanly return
+            -- false instead of erroring on jsonb_array_elements(NULL).
+            (SELECT COUNT(DISTINCT COALESCE(comp->>'sale_url', comp->>'price_history_id'))
+             FROM jsonb_array_elements(COALESCE(c.raw_comps, '[]'::jsonb)) comp
+             WHERE comp->>'sale_date' IS NOT NULL
+               AND (comp->>'sale_date')::timestamptz >= NOW() - INTERVAL '30 days'
+            ) >= 5 AS is_liquid
      FROM cards c
      LEFT JOIN LATERAL (
        SELECT status, sold_price, consignment_fee_pct, sellers_net
@@ -92,6 +109,11 @@ exports.handler = async (event) => {
         avgSalePrice:     row.avg_sale_price   ? parseFloat(row.avg_sale_price)   : null,
         lastSalePrice:    row.last_sale_price  ? parseFloat(row.last_sale_price)  : null,
         numSales:         row.num_sales        ?? null,
+        // Server-derived liquidity flag — true when 5+ distinct comps
+        // landed in the last 30 days. Drives the bottom-right ripple
+        // animation on the card tile. See SELECT clause above for the
+        // rule definition.
+        isLiquid:         row.is_liquid        ?? false,
         priceSource:      manualPrice !== null ? "manual" : (row.price_source ?? null),
         valueLastUpdated: row.value_last_updated ?? null,
         // Valuation rebuild fields per .agents/valuation-rebuild-plan.md §3.
