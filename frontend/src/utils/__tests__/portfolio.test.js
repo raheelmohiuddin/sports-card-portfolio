@@ -23,6 +23,18 @@ const soldCard = (overrides = {}) => ({
   ...overrides,
 });
 
+// Self-sold fixture per .agents/mark-as-sold-plan.md §5. Distinct from
+// soldCard above (which is consignment-sold) — keys on cards.status
+// + sold_price, not on consignmentStatus. No sellers_net concept since
+// the user handled the sale themselves.
+const selfSoldCard = (overrides = {}) => ({
+  id: "ss1",
+  myCost: 80,
+  status: "sold",
+  soldPrice: 130,
+  ...overrides,
+});
+
 describe("isSold / isTraded", () => {
   test("isSold true only when status='sold' AND price is set", () => {
     expect(isSold(soldCard())).toBe(true);
@@ -33,6 +45,14 @@ describe("isSold / isTraded", () => {
   test("isTraded keys on cards.status='traded'", () => {
     expect(isTraded({ status: "traded" })).toBe(true);
     expect(isTraded({ status: null })).toBe(false);
+  });
+
+  test("isSold also true for self-sold (cards.status='sold' + soldPrice)", () => {
+    expect(isSold(selfSoldCard())).toBe(true);
+    // Status alone isn't enough — price must also be set.
+    expect(isSold({ status: "sold", soldPrice: null })).toBe(false);
+    // Disjunction: self-sold satisfies even with no consignment fields.
+    expect(isSold({ status: "sold", soldPrice: 100 })).toBe(true);
   });
 });
 
@@ -57,6 +77,12 @@ describe("effectiveValue", () => {
   test("returns null when neither is available", () => {
     expect(effectiveValue({ myCost: 100 })).toBeNull();
     expect(effectiveValue(null)).toBeNull();
+  });
+
+  test("self-sold returns soldPrice; sellersNet is irrelevant (no platform fee)", () => {
+    expect(effectiveValue(selfSoldCard())).toBe(130);
+    // Even if a stale sellersNet is present on a self-sold card, soldPrice wins.
+    expect(effectiveValue(selfSoldCard({ sellersNet: 999 }))).toBe(130);
   });
 
   // Valuation rebuild precedence (per MASTER §1.5 + OQ-4):
@@ -152,6 +178,16 @@ describe("summarizePortfolio", () => {
     expect(s.realizedValue).toBe(100); // not 120
     expect(s.realizedPnl).toBe(20);    // not 40
     expect(s.totalValue).toBe(100);
+  });
+
+  test("realized roll-up includes self-sold cards using soldPrice", () => {
+    const s = summarizePortfolio([
+      selfSoldCard({ myCost: 80, soldPrice: 130 }),                              // +50 realized
+      soldCard({ myCost: 80, consignmentSoldPrice: 120, sellersNet: 100 }),      // +20 realized
+    ]);
+    expect(s.realizedValue).toBe(230); // 130 + 100
+    expect(s.realizedPnl).toBe(70);    // 50 + 20
+    expect(s.soldCount).toBe(2);
   });
 
   test("excludes cards without cost from invested totals", () => {

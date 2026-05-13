@@ -4,9 +4,20 @@
 // is treated as a realized exit; everything else (including listed but
 // not yet sold, declined, or never consigned) is unrealized.
 
-// Has the card been actually sold and the admin entered a sold price?
+// Has the card been actually sold? Two paths produce a sold card today:
+//   - consignment-sold: an admin moved a consignments row to status='sold'
+//     and entered a sold price (platform-mediated exit).
+//   - self-sold: the user recorded the sale themselves via Mark as Sold
+//     (cards.status='sold' with sold_price set; see mark-as-sold-plan.md).
+// Either branch satisfies isSold. effectiveValue + summarizePortfolio
+// each check the discriminator (card.status === "sold") to pick the
+// right realized number, since self-sold has no platform fee / no
+// sellers_net concept.
 export function isSold(card) {
-  return card?.consignmentStatus === "sold" && card?.consignmentSoldPrice != null;
+  if (!card) return false;
+  if (card.status === "sold" && card.soldPrice != null) return true;
+  if (card.consignmentStatus === "sold" && card.consignmentSoldPrice != null) return true;
+  return false;
 }
 
 // Card was traded away in a /trades/execute call. Surfaced via the cards
@@ -17,11 +28,15 @@ export function isTraded(card) {
 }
 
 // The "value" we report for a card today.
-//   sold (with sellers_net) → sellersNet (what the collector actually pocketed
-//                              after the consignment fee — the true realized
-//                              exit for P&L purposes)
-//   sold (legacy / no fee)  → consignmentSoldPrice (gross; used pre-fee schema
-//                              and when admin hasn't entered a fee yet)
+//   self-sold              → soldPrice (no platform fee — the user handled
+//                              the sale themselves; what they entered IS the
+//                              realized exit)
+//   consignment-sold (fee) → sellersNet (what the collector pocketed after
+//                              the consignment fee — the true realized exit
+//                              for P&L purposes)
+//   consignment-sold       → consignmentSoldPrice (gross; legacy/pre-fee
+//   (legacy/no fee)            schema and sales where admin hasn't entered
+//                              a fee yet)
 //   held                    → manualPrice ?? estimatePrice ?? estimatedValue
 //                              per OQ-4: manual override wins over auto.
 //                              estimatePrice is the new price-estimate column
@@ -34,7 +49,14 @@ export function isTraded(card) {
 // Falls back to null when nothing is available.
 export function effectiveValue(card) {
   if (!card) return null;
-  if (isSold(card)) return card.sellersNet ?? card.consignmentSoldPrice;
+  if (isSold(card)) {
+    // Self-sold first: the user entered sold_price directly, no platform
+    // fee / sellers_net applies. If a card somehow carries both signals
+    // (cards.status='sold' AND a stale consignment row), self-sold wins
+    // since it's the more recent action by the user.
+    if (card.status === "sold" && card.soldPrice != null) return card.soldPrice;
+    return card.sellersNet ?? card.consignmentSoldPrice;
+  }
   return card.manualPrice ?? card.estimatePrice ?? card.estimatedValue ?? null;
 }
 
@@ -79,10 +101,14 @@ export function summarizePortfolio(cards) {
     const cost = c.myCost ?? null;
     if (isSold(c)) {
       out.soldCount += 1;
-      // Realized cash-out is what the collector received, not the gross sale.
-      // Prefer sellers_net; fall back to soldPrice for legacy rows (consignment
-      // predates the fee schema) or sales where admin hasn't entered a fee yet.
-      const realized = c.sellersNet ?? c.consignmentSoldPrice;
+      // Realized cash-out is what the collector received. Same precedence
+      // as effectiveValue for sold cards:
+      //   self-sold (cards.status='sold')  → soldPrice (no platform fee)
+      //   consignment with sellers_net set → sellersNet (post-fee net)
+      //   consignment legacy / no fee yet  → consignmentSoldPrice (gross)
+      const realized = (c.status === "sold" && c.soldPrice != null)
+        ? c.soldPrice
+        : (c.sellersNet ?? c.consignmentSoldPrice);
       out.realizedValue += realized;
       if (cost != null) {
         out.investedSold += cost;
