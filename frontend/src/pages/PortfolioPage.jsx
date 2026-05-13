@@ -1418,10 +1418,12 @@ function PastCollectionSummary({ pastCards }) {
       if (isSold(c)) {
         soldCount += 1;
         if (c.myCost != null) {
-          // Match the rest of the app: realized P&L is based on what the
-          // collector actually pocketed (sellers_net), falling back to gross
-          // soldPrice for legacy rows whose consignment predates the fee schema.
-          const realized = c.sellersNet ?? c.consignmentSoldPrice;
+          // Match the rest of the app: realized P&L is the realized cash-out.
+          // Precedence mirrors effectiveValue's sold branch (utils/portfolio.js):
+          //   self-sold (cards.status='sold')  → soldPrice (no platform fee)
+          //   consignment with sellers_net set → sellersNet (post-fee net)
+          //   consignment legacy / no fee yet  → consignmentSoldPrice (gross)
+          const realized = c.soldPrice ?? c.sellersNet ?? c.consignmentSoldPrice;
           realizedPnl += realized - c.myCost;
           hasRealizedCost = true;
         }
@@ -1809,12 +1811,13 @@ function PricingValue({ card, onCardUpdate }) {
     }
   }
 
-  // For sold cards, show the realized soldPrice — never editable, never the
-  // stale estimatedValue. For everything else, route through effectiveValue
-  // (manualPrice ?? estimatePrice ?? estimatedValue). Legacy avgSalePrice
-  // tertiary dropped — see comment in utils/portfolio.js#effectiveValue.
+  // For sold cards, show the realized exit — never editable, never the
+  // stale estimatedValue. Precedence mirrors effectiveValue's sold branch:
+  // self-sold soldPrice first (no fee), then consignment-sold price.
+  // For everything else, route through effectiveValue
+  // (manualPrice ?? estimatePrice ?? estimatedValue).
   const sold = isSold(card);
-  const display = sold ? card.consignmentSoldPrice : effectiveValue(card);
+  const display = sold ? (card.soldPrice ?? card.consignmentSoldPrice) : effectiveValue(card);
 
   // Sold cards short-circuit the editor: the realized price is fixed.
   if (sold) {

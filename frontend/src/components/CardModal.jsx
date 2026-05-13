@@ -11,6 +11,7 @@ import CardPop from "./CardPop.jsx";
 import SalesHistory from "./SalesHistory.jsx";
 import ConsignBlock, { SoldBreakdown } from "./ConsignBlock.jsx";
 import MarkSoldBlock from "./MarkSoldBlock.jsx";
+import SelfSoldBlock from "./SelfSoldBlock.jsx";
 
 const CONSIGNMENT_TYPE_LABEL = { auction: "Auction", private: "Private Sale" };
 const CONSIGNMENT_STATUS_LABEL = {
@@ -301,27 +302,39 @@ export default function CardModal({
             </>
           )}
 
-          {/* ── Sold cards: surface consignment status (with sold price)
-                immediately, followed by realized P&L. Held cards keep the
-                existing bottom-of-sidebar placement so the consign CTA
-                sits below the market context.
-                Gated to consignment-sold cards only; self-sold (cards.status
-                === 'sold') will get a dedicated SelfSoldBlock in commit 7
-                (mark-as-sold-plan.md §6). Without this guard, ConsignBlock
-                would render the "Consign This Card" CTA for a self-sold
-                card whose consignmentStatus is null. */}
-          {sold && hydrated && !adminConsignment && card.consignmentStatus === "sold" && (
-            <ConsignBlock
-              cardId={card.id}
-              role={role}
-              cardStatus={card.status}
-              consignmentStatus={card.consignmentStatus ?? null}
-              consignmentSoldPrice={card.consignmentSoldPrice ?? null}
-              consignmentFeePct={card.consignmentFeePct ?? null}
-              sellersNet={card.sellersNet ?? null}
-              consignmentBlocked={card.consignmentBlocked ?? false}
-              onConsigned={(status) => onCardUpdate?.(card.id, { consignmentStatus: status })}
-            />
+          {/* ── Sold cards: surface the realized exit immediately,
+                followed by realized P&L. Held cards keep the existing
+                bottom-of-sidebar placement so the consign CTA sits
+                below the market context.
+                Two sold paths, mutually exclusive in normal operation:
+                  - self-sold (cards.status === 'sold')   → SelfSoldBlock
+                  - consignment-sold (cn.status === 'sold') → ConsignBlock StatusPill
+                Self-sold takes precedence if a card somehow has both
+                signals — matches effectiveValue's precedence order. */}
+          {sold && hydrated && !adminConsignment && (
+            card.status === "sold" ? (
+              <SelfSoldBlock
+                soldPrice={card.soldPrice}
+                soldAt={card.soldAt}
+                venueType={card.soldVenueType}
+                showName={card.soldShowName}
+                showDate={card.soldShowDate}
+                auctionHouse={card.soldAuctionHouse}
+                otherText={card.soldOtherText}
+              />
+            ) : card.consignmentStatus === "sold" ? (
+              <ConsignBlock
+                cardId={card.id}
+                role={role}
+                cardStatus={card.status}
+                consignmentStatus={card.consignmentStatus ?? null}
+                consignmentSoldPrice={card.consignmentSoldPrice ?? null}
+                consignmentFeePct={card.consignmentFeePct ?? null}
+                sellersNet={card.sellersNet ?? null}
+                consignmentBlocked={card.consignmentBlocked ?? false}
+                onConsigned={(status) => onCardUpdate?.(card.id, { consignmentStatus: status })}
+              />
+            ) : null
           )}
 
           {/* ── Cost + P&L (realized for sold, unrealized for held) ── */}
