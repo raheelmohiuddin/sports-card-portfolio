@@ -89,7 +89,7 @@ exports.handler = async (event) => {
     ? "INNER JOIN user_shows us ON us.card_show_id = cs.id AND us.user_id = $1"
     : "LEFT JOIN user_shows us ON us.card_show_id = cs.id AND us.user_id = $1";
   const dateFloorClause = attendedOnly
-    ? "TRUE"  // history mode: no date floor, return past + future attended
+    ? "($2::date IS NULL OR TRUE)"  // type-hint $2, always true — see file header about Parse-phase type inference
     : "COALESCE(cs.end_date, cs.show_date) >= COALESCE($2::date, CURRENT_DATE)";
 
   const sql = `
