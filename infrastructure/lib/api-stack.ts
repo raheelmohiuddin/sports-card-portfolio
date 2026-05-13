@@ -456,6 +456,32 @@ export class ApiStack extends Construct {
       entry: path.join(functionsDir, "cards/mark-sold.js"),
     });
 
+    // ─── Potential Acquisitions Lambdas (per .agents/potential-acquisitions-plan.md §3) ───
+    // The PA bucket tracks cards the user wants to acquire but doesn't yet
+    // own. Mirrors cards' add/list/delete trio plus a transactional move
+    // operation that transfers a PA row to cards (cost basis captured at
+    // acquisition time).
+    const addPaFn = new NodejsFunction(this, "AddPa", {
+      ...sharedNodejsProps,
+      functionName: "scp-add-pa",
+      entry: path.join(functionsDir, "potential-acquisitions/add-pa.js"),
+    });
+    const listPasFn = new NodejsFunction(this, "ListPas", {
+      ...sharedNodejsProps,
+      functionName: "scp-list-pas",
+      entry: path.join(functionsDir, "potential-acquisitions/list-pas.js"),
+    });
+    const deletePaFn = new NodejsFunction(this, "DeletePa", {
+      ...sharedNodejsProps,
+      functionName: "scp-delete-pa",
+      entry: path.join(functionsDir, "potential-acquisitions/delete-pa.js"),
+    });
+    const movePaToCollectionFn = new NodejsFunction(this, "MovePaToCollection", {
+      ...sharedNodejsProps,
+      functionName: "scp-move-pa-to-collection",
+      entry: path.join(functionsDir, "potential-acquisitions/move-to-collection.js"),
+    });
+
     // Admin Lambdas need the user pool ID at runtime so requireAdmin can do
     // a live AdminGetUser fallback when the JWT claim is stale (e.g. user was
     // promoted via Cognito console but their existing JWT is still pre-promotion).
@@ -549,7 +575,7 @@ export class ApiStack extends Construct {
       markAttendingFn,
       unmarkAttendingFn,
     ];
-    for (const fn of [addCardFn, getCardsFn, getCardFn, deleteCardFn, psaLookupFn, portfolioValueFn, portfolioRefreshFn, portfolioHistoryFn, cardSalesFn, executeTradeFn, confirmTradeCostFn, cancelTradeFn, listTradesFn, analyzeTradeFn, updatePriceFn, updateCardFn, markSoldFn, avatarUploadUrlFn, avatarViewUrlFn, ...consignmentAndAdminFns]) {
+    for (const fn of [addCardFn, getCardsFn, getCardFn, deleteCardFn, psaLookupFn, portfolioValueFn, portfolioRefreshFn, portfolioHistoryFn, cardSalesFn, executeTradeFn, confirmTradeCostFn, cancelTradeFn, listTradesFn, analyzeTradeFn, updatePriceFn, updateCardFn, markSoldFn, addPaFn, listPasFn, deletePaFn, movePaToCollectionFn, avatarUploadUrlFn, avatarViewUrlFn, ...consignmentAndAdminFns]) {
       props.dbSecret.grantRead(fn);
       props.cardImagesBucket.grantReadWrite(fn);
       fn.addToRolePolicy(
@@ -742,6 +768,32 @@ export class ApiStack extends Construct {
       path: "/cards/{id}/mark-sold",
       methods: [apigwv2.HttpMethod.PATCH],
       integration: new apigwv2integrations.HttpLambdaIntegration("MarkSold", markSoldFn),
+      ...authRoute,
+    });
+
+    // ─── Potential Acquisitions routes (per .agents/potential-acquisitions-plan.md §3) ───
+    api.addRoutes({
+      path: "/potential-acquisitions",
+      methods: [apigwv2.HttpMethod.GET],
+      integration: new apigwv2integrations.HttpLambdaIntegration("ListPas", listPasFn),
+      ...authRoute,
+    });
+    api.addRoutes({
+      path: "/potential-acquisitions",
+      methods: [apigwv2.HttpMethod.POST],
+      integration: new apigwv2integrations.HttpLambdaIntegration("AddPa", addPaFn),
+      ...authRoute,
+    });
+    api.addRoutes({
+      path: "/potential-acquisitions/{id}",
+      methods: [apigwv2.HttpMethod.DELETE],
+      integration: new apigwv2integrations.HttpLambdaIntegration("DeletePa", deletePaFn),
+      ...authRoute,
+    });
+    api.addRoutes({
+      path: "/potential-acquisitions/{id}/move",
+      methods: [apigwv2.HttpMethod.POST],
+      integration: new apigwv2integrations.HttpLambdaIntegration("MovePaToCollection", movePaToCollectionFn),
       ...authRoute,
     });
 

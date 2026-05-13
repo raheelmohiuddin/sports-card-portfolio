@@ -3,7 +3,8 @@ const { fetchMarketValue, fetchValuation } = require("./pricing");
 const { json } = require("../_response");
 const { isValidId } = require("../_validate");
 
-const STALE_HOURS = 24;
+const STALE_HOURS    = 24;  // cards
+const STALE_HOURS_PA = 72;  // potential_acquisitions — per OQ-5 locked
 
 // Background refresh for stale cards. The frontend calls this AFTER the
 // fast /portfolio/value read returns, so the user sees cached data
@@ -58,14 +59,17 @@ exports.handler = async (event) => {
       );
 
   const now = new Date();
-  let refreshed = 0;
-  let skipped   = 0;
-  let failed    = 0;
+  // Per OQ-5 + Flag 4: return shape is { cards: {...}, pas: {...} }.
+  // Two parallel loops, separate counters per bucket. PA loop uses a
+  // 72h staleness gate vs cards' 24h, and lacks the manual_price skip
+  // (PA has no cost-basis / no manual override column).
+  const cardCounts = { refreshed: 0, skipped: 0, failed: 0 };
+  const paCounts   = { refreshed: 0, skipped: 0, failed: 0 };
 
   await Promise.all(
     result.rows.map(async (row) => {
       if (row.manual_price !== null && row.manual_price !== undefined) {
-        skipped += 1;
+        cardCounts.skipped += 1;
         return;
       }
 
@@ -79,7 +83,7 @@ exports.handler = async (event) => {
         ? true
         : (!lastUpdated || (now.getTime() - lastUpdated.getTime()) / 3600000 > STALE_HOURS);
       if (!stale) {
-        skipped += 1;
+        cardCounts.skipped += 1;
         return;
       }
 
@@ -114,12 +118,12 @@ exports.handler = async (event) => {
         }
       } catch (err) {
         console.warn("CardHedger pricing failed:", err.message);
-        failed += 1;
+        cardCounts.failed += 1;
         return;
       }
 
       if (!v && !p) {
-        skipped += 1;
+        cardCounts.skipped += 1;
         return;
       }
 
@@ -193,9 +197,95 @@ exports.handler = async (event) => {
           row.id,
         ]
       );
-      refreshed += 1;
+      cardCounts.refreshed += 1;
     })
   );
 
-  return json(200, { refreshed, skipped, failed });
+  // ─── PA refresh loop (per OQ-5 locked, 72h staleness gate) ───
+  // PA rows always have cert_number (add-pa.js validation), so we only
+  // walk the cert path — no fetchMarketValue fallback. PA has no
+  // manual_price column, so no manual-override skip check.
+  const pasResult = await db.query(
+    `SELECT id, cert_number, player_name, year, brand, card_number, grade,
+            sport, category, grader, cardhedger_id, value_last_updated
+     FROM potential_acquisitions WHERE user_id = $1`,
+    [userId]
+  );
+
+  await Promise.all(
+    pasResult.rows.map(async (row) => {
+      const lastUpdated = row.value_last_updated ? new Date(row.value_last_updated) : null;
+      const stale = !lastUpdated
+        || (now.getTime() - lastUpdated.getTime()) / 3600000 > STALE_HOURS_PA;
+      if (!stale) {
+        paCounts.skipped += 1;
+        return;
+      }
+
+      let v;
+      try {
+        v = await fetchValuation({
+          certNumber: row.cert_number,
+          grader:     row.grader || "PSA",
+          grade:      row.grade,
+        });
+      } catch (err) {
+        console.warn("CardHedger pricing failed for PA:", err.message);
+        paCounts.failed += 1;
+        return;
+      }
+
+      if (!v) {
+        paCounts.skipped += 1;
+        return;
+      }
+
+      if (v.cardhedgerId && row.cardhedger_id && v.cardhedgerId !== row.cardhedger_id) {
+        console.log(`[refresh-pa] cardhedger_id mismatch for cert ${row.cert_number}: ${row.cardhedger_id} -> ${v.cardhedgerId}`);
+      }
+
+      await db.query(
+        `UPDATE potential_acquisitions SET
+           estimated_value      = COALESCE($1, estimated_value),
+           avg_sale_price       = $1,
+           last_sale_price      = $2,
+           num_sales            = $3,
+           price_source         = 'cardhedger',
+           cardhedger_id        = $4,
+           cardhedger_image_url = COALESCE($5, cardhedger_image_url),
+           raw_comps            = $6,
+           value_last_updated   = NOW(),
+           estimate_price          = $7,
+           estimate_price_low      = $8,
+           estimate_price_high     = $9,
+           estimate_confidence     = $10,
+           estimate_method         = $11,
+           estimate_freshness_days = $12,
+           estimate_last_updated   = NOW(),
+           variant                 = COALESCE($13, variant),
+           category                = COALESCE($14, category)
+         WHERE id = $15`,
+        [
+          v.comps?.avgSalePrice  ?? null,
+          v.comps?.lastSalePrice ?? null,
+          v.comps?.numSales      ?? 0,
+          v.cardhedgerId         ?? null,
+          v.cardhedgerImageUrl   ?? null,
+          JSON.stringify(v.comps?.rawComps ?? []),
+          v.estimate?.price          ?? null,
+          v.estimate?.priceLow       ?? null,
+          v.estimate?.priceHigh      ?? null,
+          v.estimate?.confidence     ?? null,
+          v.estimate?.method         ?? null,
+          v.estimate?.freshnessDays  ?? null,
+          v.variant                  ?? null,
+          v.category                 ?? null,
+          row.id,
+        ]
+      );
+      paCounts.refreshed += 1;
+    })
+  );
+
+  return json(200, { cards: cardCounts, pas: paCounts });
 };

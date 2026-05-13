@@ -66,6 +66,51 @@ exports.handler = async (event) => {
   const db = await getPool();
   const userId = await ensureUser(db, claims.sub, claims.email);
 
+  // Per OQ-6 + OQ-11 of .agents/potential-acquisitions-plan.md: run
+  // fetchValuation BEFORE the INSERT so the resulting cardhedger_id can
+  // power a cross-bucket duplicate-detection query against the user's
+  // potential_acquisitions list. On CardHedger outage the catch returns
+  // null and we fall back to cert-only matching (the $2 IS NULL path of
+  // the OR clause below). The valuation result is cached and reused by
+  // the post-INSERT UPDATE — fetchValuation never runs twice per add.
+  const valuation = await fetchValuation({
+    certNumber,
+    grader: graderValue,
+    grade,
+  }).catch((err) => {
+    console.warn("[add-card] valuation fetch failed:", err.message);
+    return null;
+  });
+
+  // PA-detection match query (per OQ-6 locked). If the user already has
+  // this card in their Potential Acquisitions list, return a special
+  // response shape so the frontend can offer a confirmation modal to
+  // move the PA row to cards instead of creating a fresh cards row.
+  const paMatch = await db.query(
+    `SELECT id, cert_number, year, brand, player_name, grade, added_at
+     FROM potential_acquisitions
+     WHERE user_id = $1
+       AND ( (cardhedger_id IS NOT NULL AND cardhedger_id = $2)
+             OR ((cardhedger_id IS NULL OR $2 IS NULL) AND cert_number = $3) )
+     LIMIT 1`,
+    [userId, valuation?.cardhedgerId ?? null, certNumber.trim()]
+  );
+
+  if (paMatch.rowCount > 0) {
+    const pa = paMatch.rows[0];
+    return json(200, {
+      status:    "pa_match_found",
+      paId:      pa.id,
+      paDetails: {
+        year:       pa.year,
+        brand:      pa.brand,
+        playerName: pa.player_name,
+        grade:      pa.grade,
+        addedAt:    pa.added_at,
+      },
+    });
+  }
+
   // Atomic duplicate check: ON CONFLICT DO NOTHING + RETURNING. If the cert
   // already exists for this user we get 0 rows back and bail with a 409.
   const result = await db.query(
@@ -137,20 +182,8 @@ exports.handler = async (event) => {
     );
   }
 
-  // Synchronous valuation per .agents/valuation-rebuild-plan.md §3 — runs
-  // the new 4-endpoint flow so the card lands with an authoritative
-  // cardhedger_id, variant, comps cache, and price-estimate from the
-  // first render. Best-effort: if the fetch fails, the card still
-  // INSERTed successfully and the next scheduled refresh will retry.
-  const valuation = await fetchValuation({
-    certNumber,
-    grader: graderValue,
-    grade,
-  }).catch((err) => {
-    console.warn("[add-card] valuation fetch failed:", err.message);
-    return null;
-  });
-
+  // Valuation was already fetched pre-INSERT for the OQ-6 PA-detection
+  // branch above; reuse the cached `valuation` here without a second call.
   if (valuation) {
     await db.query(
       `UPDATE cards SET
