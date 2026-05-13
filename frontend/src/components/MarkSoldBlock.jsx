@@ -277,7 +277,7 @@ export default function MarkSoldBlock({
             type="text"
             value={otherText}
             onChange={(e) => setOtherText(e.target.value)}
-            placeholder="e.g. private sale, dealer at flea market, friend"
+            placeholder="e.g. private sale, social media, friend"
             style={st.input}
             required
           />
