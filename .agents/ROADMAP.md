@@ -35,6 +35,18 @@
 - **TradeDesk redesign branch** — Paused before rebase; master has moved significantly. Resume requires rebase + finish phase 2. Size: M
 - **`sport` column deprecation** — Keeping both `sport` and `category` columns indefinitely; revisit if migration friction emerges.
 
+## Documentation
+
+- **End-to-end workflow diagrams** — Visual documentation of how Collector's Reserve works across multiple stakeholder views. Four diagrams to build sequentially based on need:
+  1. **User journey diagram** (signup → portfolio → PA → consignment → transaction). Most valuable near-term — supports external conversations with users, vendors, investors. Build first.
+  2. **System architecture diagram** (CDK + Lambda + Aurora + Amplify + CardHedger + Cognito + S3). Build when onboarding a second engineer.
+  3. **Business process diagram** (manual concierge flow → automated bounty workflow). Build when bounty MVP design starts.
+  4. **Data model diagram** (entity relationships across `cards`, `potential_acquisitions`, `trades`, `consignments`, `users`, `shows`). Build when schema complexity warrants it.
+
+  Trigger for #1: after PA rollout commit 5 ships (PA changes the user journey meaningfully; document the actual post-PA flow, not a stale pre-PA version).
+
+  Size: M (each diagram is ~2–3 hours of design + iteration; full set is ~10–15 hours spread across the right moments).
+
 ## Business / brand
 
 - **Trademark "Collector's Reserve"** — Confirm conflict landscape via TESS, file in software/SaaS classes. ~$250–$3K depending on attorney involvement. Size: S
