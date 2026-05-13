@@ -10,6 +10,7 @@ import {
 } from "../services/api.js";
 import CardModal from "../components/CardModal.jsx";
 import GhostIcon from "../components/GhostIcon.jsx";
+import LiquidityRipple from "../components/LiquidityRipple.jsx";
 import { getRarityTier, TIER_LABELS, TIER_COLORS } from "../utils/rarity.js";
 import { colors, gradients } from "../utils/theme.js";
 import {
@@ -1691,6 +1692,16 @@ function CardTileImpl({ card, index, highlighted, pulse, onOpen, onEdit, onDelet
             >✕</button>
           </div>
         )}
+
+        {/* Liquidity ripple — bottom-right surface ripples animation
+            for cards with 5+ recent distinct sales (see backend
+            cards/get-cards.js#is_liquid). Mutually excluded with
+            ghost-tier cards: ghost wins the bottom-right corner via
+            the GhostIcon decoration when one ever ships there, and
+            ghost-tier cards are typically illiquid anyway. Renders
+            BEFORE imageGradient so the bottom darkening softly
+            tints the ripple's lower edge for visual cohesion. */}
+        {card.isLiquid && tier !== "ghost" && <LiquidityRipple />}
 
         {/* Subtle bottom gradient — image polish, doesn't block any badges. */}
         <div style={st.imageGradient} />
