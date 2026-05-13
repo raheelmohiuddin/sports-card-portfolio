@@ -328,28 +328,39 @@ variant) — already inconsistent. Spec for this rebuild: bring it back
 into sync on the sold_* fields. The estimate_* drift is out of scope
 here, but flag it in OQ-4.
 
-### `backend/functions/portfolio/get-value.js` — realized rollup awareness
+### `backend/functions/portfolio/get-value.js` — totalValue held-only filter
 
-The dashboard fast-path computes `total_value` filtered on
-`c.status IS NULL AND (cn.status IS NULL OR cn.status NOT IN ('sold'))`.
-After mark-as-sold, `c.status = 'sold'` already falls outside this filter
-(NULL test), so held-value is correct.
+**Discovered during commit-4 implementation:** the originally-spec'd
+realized-rollup refactor was based on a wrong mental model of this file.
+`get-value.js` does **not** compute `realized_value`, `invested_sold`,
+or any sold-vs-held breakdown today. It returns a single `totalValue`
+that sums `manual_price ?? estimated_value` across **every** card the
+user owns, with no filtering by sold/traded state. The realized rollup
+lives entirely in the frontend's `summarizePortfolio` (see §5) and is
+already covered by commits 3 + 5 once they land.
 
-But the same endpoint computes realized totals — those need a second
-disjunction: realized = `consignment-sold` ∨ `self-sold`. Spec:
+**Bug uncovered:** because `estimated_value` stays populated after a
+card is sold via consignment, those sold cards' market values are
+double-counting into the dashboard hero `totalValue` today. The
+mark-as-sold flow would have amplified the bug (self-sold cards'
+`estimated_value` similarly persists post-sale).
 
-```sql
-SUM(COALESCE(c.sold_price, cn.sellers_net, cn.sold_price)) FILTER (
-  WHERE c.status = 'sold' OR cn.status = 'sold'
-) AS realized_value,
+**Fix for commit 4 — held-only filter only, no realized math:**
 
-SUM(c.my_cost) FILTER (
-  WHERE c.status = 'sold' OR cn.status = 'sold'
-) AS invested_sold,
-```
+1. Add a `LEFT JOIN LATERAL` to `consignments` for the most-recent
+   row's status, mirroring the pattern in `cards/get-card.js`.
+2. Return `c.status` and `cn.status AS consignment_status` from the
+   SELECT.
+3. Guard the JS-side `totalValue` + `totalCost` accumulators behind
+   `row.status === null && row.consignment_status !== "sold"` — the JS
+   equivalent of `c.status IS NULL AND (cn.status IS NULL OR cn.status <> 'sold')`.
 
-Held filter inverts to: `c.status IS NULL AND (cn.status IS NULL OR cn.status <> 'sold')`.
-The `traded` exclusion (`c.status IS NULL`) already covers itself.
+Realized rollup stays in the frontend. The `cards` array returned by
+this endpoint is unchanged (still contains all cards, sold or held) —
+only the aggregate totals are corrected. `totalCost` is filtered the
+same way as `totalValue` so the `portfolio_snapshots` rows written
+downstream stay internally consistent (held-value paired with
+held-cost).
 
 ### `backend/functions/admin/list-consignments.js` — no required change
 
@@ -703,7 +714,7 @@ if (isSold(c)) {
 | `PortfolioPage` list row | PortfolioPage.jsx:1048 | Already uses `isSold(card)` — no change. |
 | `PortfolioPage` price cell | PortfolioPage.jsx:1817 | Extends the sold-display: `const display = sold ? (card.soldPrice ?? card.consignmentSoldPrice) : effectiveValue(card);` |
 | `PortfolioPage` Collection History stats | PortfolioPage.jsx:1416-1431 | Extend realized = `c.soldPrice ?? c.sellersNet ?? c.consignmentSoldPrice`. |
-| `backend/functions/portfolio/get-value.js` | (no `effectiveValue` in JS — pure SQL) | See §3: extend FILTER predicates to OR `c.status='sold'`. |
+| `backend/functions/portfolio/get-value.js` | held-only filter | Add LATERAL JOIN to consignments + guard the `totalValue`/`totalCost` JS accumulators on `c.status IS NULL AND cn.status <> 'sold'`. No realized math — see §3 for why the originally-spec'd realized rollup didn't fit. |
 | `backend/functions/portfolio/pricing.js` | n/a | **Does NOT export an `effectiveValue` helper** — confirmed via grep. The locked-decision phrasing "Update isSold reads in pricing.js's effectiveValue (if it exists there)" is a no-op for backend. Frontend `portfolio.js` is the only `effectiveValue` site. |
 
 ---
@@ -721,7 +732,7 @@ explicit `cdk deploy`.
 | **2** | `cards: add mark-sold Lambda + register in api-stack` | master | No (needs `cdk deploy`) | `cdk diff` shows MarkSold function + 1 new route. Deploy; test invoke with curl/Postman; expect 200 on a valid payload, appropriate 4xx on each validation branch. |
 | **2a** | `consignments: reject create when card already self-sold` | master | No (needs `cdk deploy`) | POST `/consignments` for a card whose `cards.status='sold'` returns 409 with a clear error. Existing consignment creates on held cards continue to work. See OQ-7. |
 | **3** | `cards: extend get-cards/get-card/admin sold_* fields + join card_shows` | master | No (needs `cdk deploy`) | After deploy, hit `/cards` and confirm response includes the 8 new sold_* fields (all null for non-sold cards). Self-sold card from commit 2 shows populated venue fields. |
-| **4** | `portfolio: extend get-value realized rollup to OR self-sold path` | master | No (needs `cdk deploy`) | After deploy, mark a card sold via the API; hit `/portfolio/value`; confirm realized total includes the new sale. |
+| **4** | `portfolio: fix get-value totalValue double-count for sold cards` | master | No (needs `cdk deploy`) | After deploy, hit `/portfolio/value`; confirm `totalValue` excludes any consignment-sold card's `estimated_value`. **Supplanted from the originally-spec'd realized-rollup refactor** — `get-value.js` had no realized rollup to extend; commit 5's helper unification + frontend `summarizePortfolio` handle realized. Commit 4 instead fixes a pre-existing double-count bug that mark-as-sold would have amplified. See §3. |
 | **5** | `frontend: unify isSold helper + extend effectiveValue + summarizePortfolio` | master | Yes (Amplify) | Open a card that's sold via consignment — SOLD ribbon still renders, realized P&L still correct. Helper changes are pure-additive at the type level (existing cards have `status=null`, `soldPrice=null` — disjunction collapses to the legacy branch). |
 | **6** | `frontend: add MarkSoldBlock component + wire into CardModal` | master | Yes (Amplify) | Open a held card without consignment → see "Mark as Sold" button below "Consign This Card". Submit the form for each of the 3 venue types; confirm card flips to sold state and the SelfSoldBlock renders the venue correctly. Open a card with a pending consignment → MarkSoldBlock is suppressed. |
 | **7** | `frontend: SelfSoldBlock display + PortfolioPage realized rollup extension` | master | Yes (Amplify) | Self-sold card in Collection History grid shows SOLD ribbon, sale venue + price; Collection History summary strip counts the sale; pie chart / dashboard rollup unchanged. |
@@ -736,8 +747,13 @@ explicit `cdk deploy`.
   `consignments/create.js` — a separate, already-deployed endpoint — so
   it's a different concern from commit 2's new endpoint. Splitting it
   off keeps each commit independently revertable.
-- **Reads (3, 4):** populate the response shape the frontend expects.
-  Frontend doesn't read the new fields yet, so this is purely additive.
+- **Read shape (3):** populates the `sold_*` response fields the
+  frontend expects. Frontend doesn't read them yet, so this is purely
+  additive.
+- **Totals fix (4):** held-only filter on `get-value.js` fixes a
+  pre-existing double-count bug independently of the rest of the
+  rollout. Could ship before commit 3, but staying in plan order keeps
+  the backend deploys grouped.
 - **Helper unification (5):** rewrites are pure-additive at runtime —
   no card today has `status='sold'`, so the new branch never fires until
   commit 6's UI lands. This guarantees commit 5 can't break consignment-
@@ -762,7 +778,7 @@ rebuild's backfill); the change is purely forward-looking for new sales.
 | **2 — mark-sold Lambda + route** | `git revert <sha>` + `cdk deploy`. Endpoint returns 404 (route removed). The Lambda + IAM grant go away. | Any in-flight POSTs fail. No data state to clean up — the endpoint hadn't been wired to a UI yet. |
 | **2a — Consignment-create guard** | `git revert <sha>` + `cdk deploy`. The `consignments/create.js` endpoint reverts to accepting creates regardless of `cards.status`. | None — the guard is a precondition check, not a data mutation. Any consignments accepted while the guard was live remain valid (they preceded the user self-selling). |
 | **3 — get-cards/get-card SELECTs** | `git revert <sha>` + `cdk deploy`. Response shape drops the 8 sold_* fields. Frontend reads `card.soldPrice` etc. as undefined — `isSold` falls back to the legacy branch, SelfSoldBlock can't render. | Any card already self-sold becomes invisible-as-sold to the UI (would render as held). Data still safe in DB; restore by re-deploying. |
-| **4 — get-value realized rollup** | `git revert <sha>` + `cdk deploy`. Dashboard total_value/realized_value briefly excludes self-sold cards from realized rollup. | Dashboard totals undercount realized until re-deployed. |
+| **4 — get-value totals filter** | `git revert <sha>` + `cdk deploy`. `totalValue` / `totalCost` revert to summing every card's `estimated_value` / `my_cost`, including sold ones — the pre-existing double-count returns. | Hero `totalValue` on the dashboard inflates by the sum of sold cards' last-known estimates. No data corruption. |
 | **5 — Helper unification** | `git revert <sha>`, push, Amplify deploys in ~3 min. isSold falls back to the consignment-only definition; self-sold cards stop being treated as sold by the UI (would render as held). | Same as commit 3 rollback — data safe, display regresses. |
 | **6 — MarkSoldBlock + CardModal wire** | `git revert <sha>`, push. The "Mark as Sold" button disappears; users can't create new self-sold records, but existing ones still display via commit 7's SelfSoldBlock (if commit 7 is still deployed). | New write path unavailable. Reads continue. |
 | **7 — SelfSoldBlock + PortfolioPage** | `git revert <sha>`, push. Self-sold cards render their SOLD ribbon (via isSold) but the detail view shows nothing for venue/price. | Self-sold cards visually degrade but stay marked sold. |

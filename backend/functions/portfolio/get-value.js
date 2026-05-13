@@ -13,13 +13,24 @@ exports.handler = async (event) => {
   const userId = await ensureUser(db, claims.sub, claims.email);
 
   // Cards + executed-trade count fetched in parallel — same connection pool,
-  // independent queries.
+  // independent queries. LATERAL pulls the most-recent consignment status
+  // per card (same pattern as cards/get-card.js) so the held-only filter
+  // below can exclude consignment-sold cards from the dashboard totals.
   const [result, tradeCount] = await Promise.all([
     db.query(
-      `SELECT id, manual_price, my_cost,
-              estimated_value, avg_sale_price, last_sale_price,
-              num_sales, price_source, value_last_updated
-       FROM cards WHERE user_id = $1`,
+      `SELECT c.id, c.manual_price, c.my_cost,
+              c.estimated_value, c.avg_sale_price, c.last_sale_price,
+              c.num_sales, c.price_source, c.value_last_updated,
+              c.status,
+              cn.status AS consignment_status
+       FROM cards c
+       LEFT JOIN LATERAL (
+         SELECT status FROM consignments
+         WHERE card_id = c.id
+         ORDER BY created_at DESC
+         LIMIT 1
+       ) cn ON TRUE
+       WHERE c.user_id = $1`,
       [userId]
     ),
     db.query(
@@ -35,8 +46,18 @@ exports.handler = async (event) => {
     const autoValue    = row.estimated_value ? parseFloat(row.estimated_value) : null;
     const displayValue = manualPrice ?? autoValue;
     const cost         = row.my_cost         ? parseFloat(row.my_cost)         : null;
-    if (displayValue) totalValue += displayValue;
-    if (cost)         totalCost  += cost;
+    // Held-only filter for dashboard hero totals. Sold cards (either
+    // self-sold via cards.status='sold' or consignment-sold via
+    // consignments.status='sold') have realized values that belong in a
+    // separate rollup — computed frontend-side in summarizePortfolio.
+    // Traded cards (cards.status='traded') are also excluded by the NULL
+    // check. JS equivalent of:
+    //   c.status IS NULL AND (cn.status IS NULL OR cn.status <> 'sold')
+    // The cards array itself stays unfiltered — only the aggregates skip
+    // sold/traded rows. See .agents/mark-as-sold-plan.md §3 + §6 commit 4.
+    const isHeld = row.status === null && row.consignment_status !== "sold";
+    if (isHeld && displayValue) totalValue += displayValue;
+    if (isHeld && cost)         totalCost  += cost;
     return {
       id:            row.id,
       manualPrice,
