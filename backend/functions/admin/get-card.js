@@ -75,9 +75,9 @@ exports.handler = async (event) => {
 
   const manualPrice = row.manual_price ? parseFloat(row.manual_price) : null;
   const myCost      = row.my_cost      ? parseFloat(row.my_cost)      : null;
-  const targetPrice = row.sell_target_price ? parseFloat(row.sell_target_price) : null;
+  const sellTargetPrice = row.sell_target_price ? parseFloat(row.sell_target_price) : null;
   const estValue    = manualPrice ?? (row.estimated_value ? parseFloat(row.estimated_value) : null);
-  const targetReached = targetPrice != null && estValue != null && estValue >= targetPrice;
+  const sellTargetReached = sellTargetPrice != null && estValue != null && estValue >= sellTargetPrice;
 
   return json(200, {
     id:               row.id,
@@ -97,8 +97,8 @@ exports.handler = async (event) => {
     psaPopulationHigher: row.psa_population_higher ?? null,
     manualPrice,
     myCost,
-    targetPrice,
-    targetReached,
+    sellTargetPrice,
+    sellTargetReached,
     estimatedValue:   estValue,
     avgSalePrice:     row.avg_sale_price   ? parseFloat(row.avg_sale_price)   : null,
     lastSalePrice:    row.last_sale_price  ? parseFloat(row.last_sale_price)  : null,

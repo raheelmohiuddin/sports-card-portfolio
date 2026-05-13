@@ -36,15 +36,15 @@ exports.handler = async (event) => {
     setClauses.push(`my_cost = $${values.length}`);
   }
 
-  // targetPrice — null to clear, a non-negative number to set.
-  if ("targetPrice" in body) {
-    const v = body.targetPrice;
+  // sellTargetPrice — null to clear, a non-negative number to set.
+  if ("sellTargetPrice" in body) {
+    const v = body.sellTargetPrice;
     if (v === null) {
       values.push(null);
     } else if (isValidPrice(v)) {
       values.push(parseFloat(v));
     } else {
-      return json(400, { error: "targetPrice must be a non-negative number under 10,000,000 or null" });
+      return json(400, { error: "sellTargetPrice must be a non-negative number under 10,000,000 or null" });
     }
     setClauses.push(`sell_target_price = $${values.length}`);
   }
@@ -76,6 +76,6 @@ exports.handler = async (event) => {
   return json(200, {
     id: row.id,
     myCost:      row.my_cost      != null ? parseFloat(row.my_cost)      : null,
-    targetPrice: row.sell_target_price != null ? parseFloat(row.sell_target_price) : null,
+    sellTargetPrice: row.sell_target_price != null ? parseFloat(row.sell_target_price) : null,
   });
 };

@@ -326,6 +326,55 @@ export async function markCardSold(cardId, payload) {
   return res.json();
 }
 
+// ─── Potential Acquisitions ───────────────────────────────────────────
+// CRUD + move-to-collection for the PA bucket. Per
+// .agents/potential-acquisitions-plan.md §4.
+//
+// Note: addPotentialAcquisition response carries frontUploadUrl /
+// backUploadUrl (same as addCard); the caller uses uploadCardImages
+// to PUT to those pre-signed S3 URLs when the user supplied an image.
+export async function getPotentialAcquisitions() {
+  const headers = await authHeaders();
+  const res = await fetch(`${API_BASE}/potential-acquisitions`, { headers });
+  if (!res.ok) throw await readError(res);
+  return res.json();
+}
+
+export async function addPotentialAcquisition(payload) {
+  const headers = await authHeaders();
+  const res = await fetch(`${API_BASE}/potential-acquisitions`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw await readError(res);
+  return res.json();
+}
+
+export async function deletePotentialAcquisition(id) {
+  const headers = await authHeaders();
+  const res = await fetch(`${API_BASE}/potential-acquisitions/${id}`, {
+    method: "DELETE",
+    headers,
+  });
+  if (!res.ok) throw await readError(res);
+  return res.json();
+}
+
+// Transactional transfer: copies PA row into cards (carrying wanted_since
+// from PA's added_at per OQ-2) and DELETEs the PA. Body fields are
+// optional — collector may not know one or both at acquisition time.
+export async function movePotentialAcquisitionToCollection(id, { myCost, sellTargetPrice } = {}) {
+  const headers = await authHeaders();
+  const res = await fetch(`${API_BASE}/potential-acquisitions/${id}/move`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ myCost, sellTargetPrice }),
+  });
+  if (!res.ok) throw await readError(res);
+  return res.json();
+}
+
 // ─── Admin endpoints ──────────────────────────────────────────────────
 export async function getAdminStats() {
   const headers = await authHeaders();

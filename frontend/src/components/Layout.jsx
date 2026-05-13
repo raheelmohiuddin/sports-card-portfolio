@@ -156,12 +156,13 @@ function useIsMobile(breakpoint = 768) {
   return isMobile;
 }
 
-// My Portfolio with a hover-driven sub-menu exposing the two tabs the
-// page hosts internally (Dashboard, My Collection, Collection History). Hover opens, mouse-leave
-// after a short grace period closes — the grace prevents accidental
-// closes when the cursor crosses the gap between trigger and panel.
-// Clicking the trigger also navigates to /portfolio (default Dashboard
-// tab) so keyboard users have a path through.
+// My Portfolio with a hover-driven sub-menu exposing the four tabs the
+// page hosts internally (Dashboard, My Collection, Collection History,
+// Potential Acquisitions). Hover opens, mouse-leave after a short grace
+// period closes — the grace prevents accidental closes when the cursor
+// crosses the gap between trigger and panel. Clicking the trigger also
+// navigates to /portfolio (default Dashboard tab) so keyboard users
+// have a path through.
 function PortfolioMenu({ pathname }) {
   const [open, setOpen]   = useState(false);
   const [hov, setHov]     = useState(false);
@@ -207,9 +208,10 @@ function PortfolioMenu({ pathname }) {
           pointerEvents: open ? "auto" : "none",
         }}
       >
-        <PortfolioMenuItem label="Dashboard"          onClick={() => go("/portfolio?tab=dashboard")} />
-        <PortfolioMenuItem label="My Collection"      onClick={() => go("/portfolio?tab=collection")} />
-        <PortfolioMenuItem label="Collection History" onClick={() => go("/portfolio?tab=past")} />
+        <PortfolioMenuItem label="Dashboard"             onClick={() => go("/portfolio?tab=dashboard")} />
+        <PortfolioMenuItem label="My Collection"         onClick={() => go("/portfolio?tab=collection")} />
+        <PortfolioMenuItem label="Collection History"    onClick={() => go("/portfolio?tab=past")} />
+        <PortfolioMenuItem label="Potential Acquisitions" onClick={() => go("/portfolio?tab=potential")} />
         <div style={st.portfolioMenuDivider} />
         <PortfolioMenuItem
           label={<><span style={st.portfolioMenuActionIcon}>+</span> Add a Card</>}

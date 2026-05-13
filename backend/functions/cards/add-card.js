@@ -30,7 +30,7 @@ exports.handler = async (event) => {
     certNumber, year, brand, sport, category, playerName, cardNumber,
     grade, gradeDescription, frontImageUrl, backImageUrl,
     psaPopulation, psaPopulationHigher, psaData,
-    myCost, targetPrice,
+    myCost, sellTargetPrice,
     hasFrontImage, hasBackImage,
     grader,
   } = body;
@@ -57,11 +57,11 @@ exports.handler = async (event) => {
   }
   const myCostValue = costProvided ? parseFloat(myCost) : null;
 
-  const targetProvided = targetPrice !== null && targetPrice !== undefined && targetPrice !== "";
-  if (targetProvided && !isValidPrice(targetPrice)) {
-    return json(400, { error: "targetPrice must be a non-negative number under 10,000,000" });
+  const targetProvided = sellTargetPrice !== null && sellTargetPrice !== undefined && sellTargetPrice !== "";
+  if (targetProvided && !isValidPrice(sellTargetPrice)) {
+    return json(400, { error: "sellTargetPrice must be a non-negative number under 10,000,000" });
   }
-  const targetPriceValue = targetProvided ? parseFloat(targetPrice) : null;
+  const sellTargetPriceValue = targetProvided ? parseFloat(sellTargetPrice) : null;
 
   const db = await getPool();
   const userId = await ensureUser(db, claims.sub, claims.email);
@@ -138,7 +138,7 @@ exports.handler = async (event) => {
       psaPopulationHigher  != null ? parseInt(psaPopulationHigher, 10) : null,
       psaData ? JSON.stringify(psaData) : null,
       myCostValue,
-      targetPriceValue,
+      sellTargetPriceValue,
       graderValue,
       // Client may send category from the lookup-preview response; the
       // authoritative CardHedger value is written by the valuation

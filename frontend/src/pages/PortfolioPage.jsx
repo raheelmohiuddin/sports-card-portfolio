@@ -169,7 +169,7 @@ export default function PortfolioPage() {
   // estimatedValue) — the API's getPortfolioValue total only sums cards
   // table estimatedValue and would miss sold cards' realized exit price.
   const displayTotalValue = cards.length > 0 ? summary.totalValue : totalValue;
-  const alerts        = useMemo(() => cards.filter((c) => c.targetReached), [cards]);
+  const alerts        = useMemo(() => cards.filter((c) => c.sellTargetReached), [cards]);
   const achievedMilestones = useMemo(
     () => computeMilestones(totalValue, cardCount, rareCount, ghostCount),
     [totalValue, cardCount, rareCount, ghostCount]
@@ -244,14 +244,17 @@ export default function PortfolioPage() {
   );
 
   // ── Tab routing via URL search params ──
-  // Three tabs now: dashboard | collection | past. Legacy "cards" deep-links
-  // (from old emails / share URLs / pre-rename code paths) silently map to
-  // "collection" so they don't 404 to the dashboard.
+  // Four tabs now: dashboard | collection | past | potential. Legacy
+  // "cards" deep-links (from old emails / share URLs / pre-rename code
+  // paths) silently map to "collection" so they don't 404 to the
+  // dashboard. The "potential" tab is the new Potential Acquisitions
+  // bucket — see .agents/potential-acquisitions-plan.md.
   const [searchParams, setSearchParams] = useSearchParams();
   const tabRaw = searchParams.get("tab");
   const tab =
     tabRaw === "collection" || tabRaw === "cards" ? "collection"
     : tabRaw === "past" ? "past"
+    : tabRaw === "potential" ? "potential"
     : "dashboard";
   const highlightId = searchParams.get("highlight");
 
@@ -293,9 +296,10 @@ export default function PortfolioPage() {
       <div className="container" style={st.inner}>
         {/* ── Tab bar ── */}
         <nav style={st.tabBar}>
-          <TabButton label="Dashboard"          active={tab === "dashboard"}  onClick={() => selectTab("dashboard")} />
-          <TabButton label="My Collection"      active={tab === "collection"} onClick={() => selectTab("collection")} />
-          <TabButton label="Collection History" active={tab === "past"}       onClick={() => selectTab("past")} />
+          <TabButton label="Dashboard"              active={tab === "dashboard"}  onClick={() => selectTab("dashboard")} />
+          <TabButton label="My Collection"          active={tab === "collection"} onClick={() => selectTab("collection")} />
+          <TabButton label="Collection History"     active={tab === "past"}       onClick={() => selectTab("past")} />
+          <TabButton label="Potential Acquisitions" active={tab === "potential"}  onClick={() => selectTab("potential")} />
         </nav>
 
         {/* ── Dashboard ── */}
@@ -455,6 +459,27 @@ export default function PortfolioPage() {
                 readOnly
               />
             )}
+          </>
+        )}
+
+        {/* ── Potential Acquisitions ── (cards the user wants but doesn't yet own) */}
+        {tab === "potential" && (
+          <>
+            <div style={st.cardsBar}>
+              <div>
+                <p style={st.cardsBarLabel}>
+                  <span style={st.heroDot} /> Potential Acquisitions
+                </p>
+                <p style={st.cardsBarSub}>
+                  Cards you're looking to acquire. Set buy targets and move them to your collection when you complete the trade.
+                </p>
+              </div>
+              <Link to="/add-card?bucket=potential" style={st.cardsAddBtn}>
+                <span style={st.cardsAddMark}>+</span> Add to Potential Acquisitions
+              </Link>
+            </div>
+
+            <PotentialAcquisitionsEmptyState />
           </>
         )}
 
@@ -875,7 +900,7 @@ function applyToolbarFilters(base, filters, sortBy) {
   if (filters.category)       out = out.filter((c) => (c.category ?? c.sport) === filters.category);
   if (filters.grade)          out = out.filter((c) => c.grade === filters.grade);
   if (filters.rare)           out = out.filter(isRare);
-  if (filters.targetHit)      out = out.filter((c) => c.targetReached);
+  if (filters.targetHit)      out = out.filter((c) => c.sellTargetReached);
   if (filters.cost === "has") out = out.filter((c) => c.myCost != null);
   if (filters.cost === "no")  out = out.filter((c) => c.myCost == null);
   return sortCards(out, sortBy);
@@ -1084,7 +1109,7 @@ function CardListRowImpl({ card, highlighted, onOpen, onEdit, onDelete, readOnly
           {tier && <TierFlag tier={tier} />}
           {sold && <span style={st.listFlagSold}>SOLD</span>}
           {isTraded(card) && <span style={st.listFlagTraded}>TRADED</span>}
-          {!sold && !isTraded(card) && card.targetReached && <span style={st.listFlagTarget}>TARGET</span>}
+          {!sold && !isTraded(card) && card.sellTargetReached && <span style={st.listFlagTarget}>TARGET</span>}
         </div>
         <div style={st.listNameMeta}>
           {card.cardNumber ? `#${card.cardNumber} · ` : ""}Cert {card.certNumber}
@@ -1168,7 +1193,7 @@ function TabButton({ label, active, onClick, badge }) {
 // ─── Edit cost modal ──────────────────────────────────────────────────
 function EditCostModal({ card, onClose, onSave }) {
   const [val, setVal]                 = useState(card.myCost != null ? String(card.myCost) : "");
-  const [targetVal, setTargetVal]     = useState(card.targetPrice != null ? String(card.targetPrice) : "");
+  const [sellTargetVal, setSellTargetVal]     = useState(card.sellTargetPrice != null ? String(card.sellTargetPrice) : "");
   const [focused, setFocused]         = useState(false);
   const [targetFocused, setTargetFocused] = useState(false);
   const [saving, setSaving]   = useState(false);
@@ -1190,18 +1215,18 @@ function EditCostModal({ card, onClose, onSave }) {
     e.preventDefault();
     setError(null);
     const cost   = parseOptional(val);
-    const target = parseOptional(targetVal);
+    const target = parseOptional(sellTargetVal);
     if (cost   === "INVALID") return setError("Cost must be a non-negative number");
     if (target === "INVALID") return setError("Target price must be a non-negative number");
 
     setSaving(true);
     try {
-      const updated = await updateCard(card.id, { myCost: cost, targetPrice: target });
-      // Recompute targetReached locally so the tile updates immediately.
+      const updated = await updateCard(card.id, { myCost: cost, sellTargetPrice: target });
+      // Recompute sellTargetReached locally so the tile updates immediately.
       const liveValue = effectiveValue(card);
-      const reached = updated.targetPrice != null && liveValue != null
-        && liveValue >= updated.targetPrice;
-      onSave({ myCost: updated.myCost, targetPrice: updated.targetPrice, targetReached: reached });
+      const reached = updated.sellTargetPrice != null && liveValue != null
+        && liveValue >= updated.sellTargetPrice;
+      onSave({ myCost: updated.myCost, sellTargetPrice: updated.sellTargetPrice, sellTargetReached: reached });
     } catch (err) {
       setError(err.message);
       setSaving(false);
@@ -1267,8 +1292,8 @@ function EditCostModal({ card, onClose, onSave }) {
             step="0.01"
             inputMode="decimal"
             placeholder="0.00"
-            value={targetVal}
-            onChange={(e) => setTargetVal(e.target.value)}
+            value={sellTargetVal}
+            onChange={(e) => setSellTargetVal(e.target.value)}
             onFocus={() => setTargetFocused(true)}
             onBlur={() => setTargetFocused(false)}
             disabled={saving}
@@ -1404,6 +1429,28 @@ function NoPastCardsState() {
       <div style={st.emptyIcon}>◆</div>
       <h2 style={st.emptyTitle}>No collection history yet</h2>
       <p style={st.emptySub}>Cards you sell or trade away will appear here as a permanent history.</p>
+    </div>
+  );
+}
+
+// Shown on the Potential Acquisitions tab when the user has no PA rows yet.
+// Per OQ-9 locked (heavy empty state with educational copy): PA is a new
+// concept users won't have intuition for, so first-visit gets a paragraph
+// of explanation plus a prominent CTA. The CTA links to /add-card with the
+// bucket toggle pre-selected to "potential" (commit 4 will wire that toggle
+// up; until then the param is silently ignored and the user lands in the
+// default My Collection bucket).
+function PotentialAcquisitionsEmptyState() {
+  return (
+    <div style={st.empty}>
+      <div style={st.emptyIcon}>◆</div>
+      <h2 style={st.emptyTitle}>Track cards you want to acquire</h2>
+      <p style={st.emptySub}>
+        Set buy targets, watch market prices, and move them to your collection when you complete the trade.
+      </p>
+      <Link to="/add-card?bucket=potential" style={st.emptyCta}>
+        <span style={st.cardsAddMark}>+</span> Add to Potential Acquisitions
+      </Link>
     </div>
   );
 }
@@ -1667,8 +1714,8 @@ function CardTileImpl({ card, index, highlighted, pulse, onOpen, onEdit, onDelet
 
         {/* Target-reached pulsing badge — suppressed for sold or traded
             cards (both removed from active portfolio rotation). */}
-        {!sold && !traded && card.targetReached && (
-          <div style={st.targetBadge} title={`Target hit · $${card.targetPrice}`}>
+        {!sold && !traded && card.sellTargetReached && (
+          <div style={st.targetBadge} title={`Target hit · $${card.sellTargetPrice}`}>
             <span style={st.targetBadgeDot} />
             TARGET HIT
           </div>

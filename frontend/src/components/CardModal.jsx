@@ -341,14 +341,14 @@ export default function CardModal({
           <CostAndPnl card={card} displayValue={displayValue} />
 
           {/* ── Target price (only meaningful while held) ── */}
-          {!sold && card.targetPrice != null && (
+          {!sold && card.sellTargetPrice != null && (
             <>
               <div style={st.sectionHead}>Target Price</div>
               <div style={st.targetBlock}>
-                <span style={st.targetValue}>{fmt(card.targetPrice)}</span>
-                {card.targetReached && (
-                  <span style={st.targetReachedTag}>
-                    <span style={st.targetReachedDot} /> Target Hit
+                <span style={st.targetValue}>{fmt(card.sellTargetPrice)}</span>
+                {card.sellTargetReached && (
+                  <span style={st.sellTargetReachedTag}>
+                    <span style={st.sellTargetReachedDot} /> Target Hit
                   </span>
                 )}
               </div>
@@ -1021,7 +1021,7 @@ const st = {
     fontVariantNumeric: "tabular-nums",
     letterSpacing: "-0.02em",
   },
-  targetReachedTag: {
+  sellTargetReachedTag: {
     display: "inline-flex", alignItems: "center", gap: "0.4rem",
     fontSize: "0.6rem", fontWeight: 800,
     color: "#fbbf24", letterSpacing: "0.16em",
@@ -1029,7 +1029,7 @@ const st = {
     border: "1px solid rgba(245,158,11,0.55)",
     padding: "0.25rem 0.55rem", borderRadius: 999,
   },
-  targetReachedDot: {
+  sellTargetReachedDot: {
     width: 6, height: 6, borderRadius: "50%",
     background: "#f59e0b",
     animation: "livePulse 1.6s ease-in-out infinite",
