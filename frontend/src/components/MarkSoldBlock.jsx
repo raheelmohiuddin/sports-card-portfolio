@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { getShows, markCardSold } from "../services/api.js";
 
 // "Mark as Sold" affordance for cards the user sold themselves (a friend,
@@ -49,6 +49,11 @@ export default function MarkSoldBlock({
   const [userShows,    setUserShows]    = useState(null);
   const [showsLoading, setShowsLoading] = useState(false);
   const [showsError,   setShowsError]   = useState(null);
+  // Show-dropdown defaults to the last 90 days of attended shows so a
+  // user with many historical shows isn't scrolling past dozens of old
+  // entries to find a recent one. The "Show older shows" toggle below
+  // the dropdown lifts the cap to the full attended history.
+  const [showAllPastShows, setShowAllPastShows] = useState(false);
 
   // Lazy-fetch the user's past attended shows the first time the form
   // opens. Deferred from modal-open so most card opens don't pay the
@@ -80,6 +85,34 @@ export default function MarkSoldBlock({
       .finally(() => { if (!cancelled) setShowsLoading(false); });
     return () => { cancelled = true; };
   }, [stage, userShows]);
+
+  // Derive the dropdown's visible subset + whether the toggle is
+  // meaningful (i.e. there are shows older than the 90-day window
+  // hidden from view). Recomputes only when the underlying list,
+  // toggle state, or current selection changes.
+  const { visibleShows, hasOlderShows } = useMemo(() => {
+    if (!userShows || userShows.length === 0) {
+      return { visibleShows: [], hasOlderShows: false };
+    }
+    // 90-day cutoff (inclusive). Date math: today − 90×86400 ms then
+    // sliced to YYYY-MM-DD for lexicographic comparison with s.date.
+    const cutoff = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000)
+      .toISOString().slice(0, 10);
+    const olderExist = userShows.some((s) => s.date < cutoff);
+    if (showAllPastShows) {
+      return { visibleShows: userShows, hasOlderShows: olderExist };
+    }
+    // Recent-only mode: include the currently-selected show even if it
+    // falls outside the 90-day window. Collapsing the toggle shouldn't
+    // silently drop the user's selection from the dropdown options;
+    // they can still see what they picked and choose to keep or change it.
+    const recent = userShows.filter((s) => s.date >= cutoff);
+    if (showId && !recent.some((s) => s.id === showId)) {
+      const sel = userShows.find((s) => s.id === showId);
+      if (sel) return { visibleShows: [sel, ...recent], hasOlderShows: olderExist };
+    }
+    return { visibleShows: recent, hasOlderShows: olderExist };
+  }, [userShows, showAllPastShows, showId]);
 
   // Visibility gates (must come AFTER all hooks per Rules of Hooks).
   if (role === "admin") return null;
@@ -175,28 +208,46 @@ export default function MarkSoldBlock({
         <VenueTab label="Other"   active={isOther}   onClick={() => setVenueType("other")} />
       </div>
 
-      {/* Venue-specific second input. Renders one of three based on venueType. */}
+      {/* Venue-specific second input. Renders one of three based on venueType.
+          Show variant wraps the label + the "Show older" toggle in a div
+          so the toggle sits visually attached to the dropdown (smaller gap
+          than the form's default 0.85rem between fields), without nesting
+          a button inside a <label> (which would violate the labelable-
+          element-count rule of HTML5 form labels). */}
       {isShow && (
-        <label style={st.label}>
-          <span style={st.labelText}>Show</span>
-          {showsLoading ? (
-            <div style={st.note}>Loading your attended shows…</div>
-          ) : userShows && userShows.length === 0 ? (
-            <div style={st.emptyNote}>
-              No past attended shows on your profile. Switch to Auction or Other.
-            </div>
-          ) : (
-            <select value={showId} onChange={handleShowSelect} style={st.input} required>
-              <option value="">— Select a show —</option>
-              {(userShows ?? []).map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.name} · {s.date}
-                </option>
-              ))}
-            </select>
+        <div style={st.showSectionWrap}>
+          <label style={st.label}>
+            <span style={st.labelText}>Show</span>
+            {showsLoading ? (
+              <div style={st.note}>Loading your attended shows…</div>
+            ) : userShows && userShows.length === 0 ? (
+              <div style={st.emptyNote}>
+                No past attended shows on your profile. Switch to Auction or Other.
+              </div>
+            ) : (
+              <select value={showId} onChange={handleShowSelect} style={st.input} required>
+                <option value="">— Select a show —</option>
+                {visibleShows.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name} · {s.date}
+                  </option>
+                ))}
+              </select>
+            )}
+            {showsError && <span style={st.fieldErr}>{showsError}</span>}
+          </label>
+          {/* Toggle only shown when older shows actually exist beyond the
+              90-day window — otherwise the affordance is meaningless. */}
+          {hasOlderShows && (
+            <button
+              type="button"
+              onClick={() => setShowAllPastShows((v) => !v)}
+              style={st.toggleOlder}
+            >
+              {showAllPastShows ? "Show only recent shows" : "Show older shows"}
+            </button>
           )}
-          {showsError && <span style={st.fieldErr}>{showsError}</span>}
-        </label>
+        </div>
       )}
 
       {isAuction && (
@@ -389,6 +440,35 @@ const st = {
     color: "#fca5a5",
     fontSize: "0.72rem",
     marginTop: "0.2rem",
+  },
+
+  // ─── Show-section wrapper + "Show older shows" toggle ──────────────
+  // The wrapper exists so the toggle button can sit as a sibling of
+  // the label (HTML5 forbids more than one labelable element inside a
+  // single <label>) while still being visually clustered with the
+  // dropdown — the form's default 0.85rem inter-field gap would feel
+  // disconnected here.
+  showSectionWrap: {
+    display: "flex", flexDirection: "column",
+    gap: "0.35rem",
+  },
+  // Subtle slate text-button. Underlined so it reads as a tertiary
+  // affordance — not a primary CTA, not a form input. Aligned to the
+  // dropdown's left edge.
+  toggleOlder: {
+    background: "transparent",
+    border: "none",
+    padding: "0.15rem 0 0",
+    color: "#94a3b8",
+    fontFamily: "inherit",
+    fontSize: "0.72rem",
+    fontWeight: 600,
+    letterSpacing: "0.04em",
+    textDecoration: "underline",
+    textUnderlineOffset: "3px",
+    textDecorationColor: "rgba(148, 163, 184, 0.45)",
+    cursor: "pointer",
+    alignSelf: "flex-start",
   },
 
   // ─── Submit (primary action inside form) ───────────────────────────
