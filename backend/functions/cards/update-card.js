@@ -46,7 +46,7 @@ exports.handler = async (event) => {
     } else {
       return json(400, { error: "targetPrice must be a non-negative number under 10,000,000 or null" });
     }
-    setClauses.push(`target_price = $${values.length}`);
+    setClauses.push(`sell_target_price = $${values.length}`);
   }
 
   if (setClauses.length === 0) return json(400, { error: "No fields to update" });
@@ -68,7 +68,7 @@ exports.handler = async (event) => {
   const result = await db.query(
     `UPDATE cards SET ${setClauses.join(", ")}
      WHERE id = $${idIdx} AND user_id = $${userIdIdx}
-     RETURNING id, my_cost, target_price`,
+     RETURNING id, my_cost, sell_target_price`,
     values
   );
 
@@ -76,6 +76,6 @@ exports.handler = async (event) => {
   return json(200, {
     id: row.id,
     myCost:      row.my_cost      != null ? parseFloat(row.my_cost)      : null,
-    targetPrice: row.target_price != null ? parseFloat(row.target_price) : null,
+    targetPrice: row.sell_target_price != null ? parseFloat(row.sell_target_price) : null,
   });
 };

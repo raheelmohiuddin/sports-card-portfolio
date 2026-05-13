@@ -23,7 +23,7 @@ exports.handler = async (event) => {
             c.s3_image_key, c.cardhedger_image_url,
             c.s3_back_image_key, c.back_image_url,
             c.psa_population, c.psa_population_higher,
-            c.manual_price, c.my_cost, c.target_price,
+            c.manual_price, c.my_cost, c.sell_target_price,
             c.estimated_value, c.avg_sale_price, c.last_sale_price,
             c.num_sales, c.price_source, c.value_last_updated,
             c.estimate_price, c.estimate_price_low, c.estimate_price_high,
@@ -72,7 +72,7 @@ exports.handler = async (event) => {
 
   const manualPrice = row.manual_price ? parseFloat(row.manual_price) : null;
   const myCost      = row.my_cost      ? parseFloat(row.my_cost)      : null;
-  const targetPrice = row.target_price ? parseFloat(row.target_price) : null;
+  const targetPrice = row.sell_target_price ? parseFloat(row.sell_target_price) : null;
   const estValue    = manualPrice ?? (row.estimated_value ? parseFloat(row.estimated_value) : null);
   const targetReached = targetPrice != null && estValue != null && estValue >= targetPrice;
 

@@ -72,7 +72,7 @@ exports.handler = async (event) => {
     `INSERT INTO cards
        (user_id, cert_number, year, brand, sport, player_name, card_number,
         grade, grade_description, image_url, back_image_url,
-        psa_population, psa_population_higher, psa_data, my_cost, target_price,
+        psa_population, psa_population_higher, psa_data, my_cost, sell_target_price,
         grader, category)
      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
      ON CONFLICT (user_id, cert_number) DO NOTHING
