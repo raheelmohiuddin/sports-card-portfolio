@@ -521,11 +521,154 @@ here in the same commit as the fix.
 
 ## 6. Commit standards
 
-(to be drafted — `area: short imperative` subject format with observed
-prefix vocabulary, body-text expectation with the plan-doc carve-out,
-no Co-Authored-By trailers per saved memory `feedback_git_identity.md`,
-diff-before-commit gate per saved memory `feedback_diff_review_gate.md`,
-canonical git identity)
+Every commit follows the same structural rules: an `area: subject`
+header, a body that explains the why, and atomic scope. Commits are
+the project's audit trail — each one should be independently
+revertible and independently understandable months later.
+
+### Subject format
+
+`area: short imperative description`. Lowercase area, colon-space,
+short imperative subject (≤70 chars total).
+
+Area prefixes observed in this repo fall into four shapes:
+
+- **Domain-named.** `db:`, `frontend:`, `cards:`, `shows:`, `chore:`,
+  `docs:`. The default — pick the broadest area that scopes the
+  change.
+- **File-named.** `get-value:`, `MarkSoldBlock:`. Use when one file
+  dominates the diff.
+- **Concept-named.** `category:`, `iam:`. Use when the change crosses
+  multiple files unified by one concept.
+- **Feature-named.** `potential-acquisitions:`. Use for multi-commit
+  rollouts where every commit shares a feature label.
+
+All four are acceptable. Pick the one that makes the commit most
+discoverable later via `git log --grep=<area>`.
+
+**We do not use Conventional Commits** (`feat:`, `fix:`, `refactor:`).
+Domain / file / concept / feature prefixes are more useful for this
+codebase than change-type prefixes.
+
+### Body
+
+Required for non-trivial commits. Empty body is acceptable only when
+the commit's artifact IS the documentation:
+
+- Plan-doc additions (e.g. `dd60507 docs: add potential-acquisitions
+  implementation plan` — the plan doc itself is the body).
+- One-line README fixes.
+
+A non-trivial commit body:
+
+- Explains the **why**, not the what (the diff shows what changed).
+- Cites the plan doc and locked OQs that drove the work
+  (`Per .agents/<feature>-plan.md §3`, `Per OQ-N locked`).
+- References commit SHAs of related work when the commit is part of
+  an atomic chain.
+
+### Trailers and identity
+
+**No `Co-Authored-By` trailers.** Period. Enforced by saved memory
+`feedback_git_identity.md` (see §5 pattern 7).
+
+Canonical commit identity: `Raheel Mohiuddin
+<raheelmohiuddin@users.noreply.github.com>`. Set via inline `-c`
+flags on every commit:
+
+```
+git -c user.name="Raheel Mohiuddin" -c user.email="raheelmohiuddin@users.noreply.github.com" commit -m "..."
+```
+
+**Never modify `.git/config`.** Inline flags only — they leave no
+local state that could drift.
+
+### Atomic boundaries
+
+One commit per logical unit of work. Apply these split tests:
+
+- Could this commit be reverted without breaking unrelated work? If
+  no → split.
+- Could this commit have a single-line accurate summary? If forced
+  to use "and" → split.
+- Schema + code that depend on each other → must be atomic
+  (see §7).
+- Cross-Lambda drift fixes (admin twin + user Lambda) → must be
+  atomic (see §5 pattern 1).
+
+### The diff-gate rule
+
+Show every diff before committing. No exceptions. This is the rule
+§3 (Execute phase) references; this is where it's codified.
+
+- Multi-file commit: show the diff of every modified file, plus
+  snippets of any new code that introduces non-obvious logic.
+- Single-file commit: show the diff.
+- The diff is approved before the commit runs.
+
+The diff-gate failed three times during the mark-as-sold rollout —
+plan commit `a2ba2bd`, migration commit `da44021`, and Lambda commit
+`6e7265c` all had the diff shown only after the commit had landed on
+origin. Saved memory `feedback_diff_review_gate.md` is the
+resolution.
+
+### Pre-commit verification
+
+Before the commit runs:
+
+- Run any tests that exist for changed files (`npm test --workspace
+  backend` or `--workspace frontend`).
+- `git status` shows only intended changes.
+- Working tree is clean of accidental files (`node_modules/`, `.env`,
+  scratch logs, IDE state).
+
+### Push cadence
+
+Push after every commit on master. The current convention is
+master-only with no feature branches — revisit if multiple
+contributors join (see §13). No accumulating commits locally; each
+commit is visible on origin within seconds of landing.
+
+This works because the cycle (Recon → Plan → Execute → Verify) gates
+every commit. Verification fails before push, not after.
+
+### Examples
+
+**Good (substantive commit)** — `d98d948`:
+
+```
+potential-acquisitions: add 4 Lambdas + register in api-stack + OQ-6 PA-detection branch
+
+Per .agents/potential-acquisitions-plan.md §3.
+
+New Lambdas:
+- add-pa.js: POST /potential-acquisitions. Includes OQ-8 optional
+  front+back image upload (mirrors add-card pattern). ON CONFLICT
+  clause includes WHERE cert_number IS NOT NULL to match the
+  partial unique index from migration 0005.
+- list-pas.js, delete-pa.js, move-to-collection.js: ...
+```
+
+Area-prefix subject. Body cites plan section, every locked OQ that
+shaped the work, and the recon flag that informed the return shape.
+
+**Good (terse, doc-only)** — `dd60507`:
+
+```
+docs: add potential-acquisitions implementation plan
+```
+
+No body. The plan doc itself is the artifact.
+
+**Bad (would be rejected).**
+
+```
+fix stuff
+```
+
+No area prefix. Vague subject. No body. Cannot be discovered later
+via `git log --grep`. Cannot be reverted with confidence (what is
+"stuff"?). Cannot be cited from a future commit body.
 
 ---
 
