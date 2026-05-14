@@ -1024,12 +1024,60 @@ descriptive facts) or here (for prescriptive rules).
 
 ## 13. Standards evolution
 
-(to be drafted — how this doc changes:
-amend in the same commit as the change that breaks a rule or
-establishes a new convention; commit message uses `docs:` prefix and
-cites the §; if a rule turns out to be wrong, replace it rather than
-adding an exception; lay down "we did X but it didn't work, now we do Y
-because Z" rationale rather than just "now we do Y")
+This doc is not frozen. Engineering conventions evolve as the
+codebase teaches new lessons. When a rule here becomes wrong — no
+longer reflects how we work, or actively misleads — the rule
+changes. Amendments ship as commits with rationale, like any other
+code change. The doc must not be aspirational, frozen, or out of
+sync with actual practice.
+
+**When to update.**
+
+- A new convention is established → add the rule.
+- An existing convention proves wrong or impractical → amend it.
+- A revisit trigger fires (e.g. first non-Raheel user lands →
+  `OPERATIONS.md` gets written; §12's trigger becomes historical).
+- A pattern in §5 gets exercised again → add evidence to the
+  existing entry, don't create a duplicate.
+
+**How to update.**
+
+- Edit the relevant section.
+- Update §12 forward-references if a referenced doc is now written.
+- Commit with body explaining what changed and why.
+- If the change reverses a previously-locked decision, cite the
+  original locked state in the commit body.
+- For substantive changes (new section, deletion, major rewrite),
+  re-read §0 first to reconfirm voice consistency.
+
+**Revisit triggers across the doc.** Three exist currently:
+
+- **§6 push cadence** — revisit when multiple contributors join.
+- **§7 two-step rename** — revisit when any Lambda affected by a
+  rename receives traffic during deploy.
+- **§10 formal code review** — first formal code-reviewer subagent
+  dispatch should validate §10 against actual practice.
+
+When any fires, the relevant section's rules get re-examined and
+either confirmed or amended.
+
+**What not to do.**
+
+- Don't delete sections — amend if a rule no longer applies;
+  preserve the history.
+- Don't update silently — every amendment needs a commit and a
+  rationale.
+- Don't add aspirational content — document what we do or have
+  explicitly decided to do, not what we hope to do.
+- Don't fragment the doc by adding sections speculatively (per §12's
+  "don't write speculatively" principle).
+
+**On this doc's first complete version.** Drafted across one
+extended session 2026-05-13 / 2026-05-14. The first 13 sections
+cover workflow, conventions, and meta. Future contributors will
+amend rules and (eventually) split out surface-specific conventions
+per §12. The pattern: preserve voice and structure as the doc
+evolves.
 
 ---
 
