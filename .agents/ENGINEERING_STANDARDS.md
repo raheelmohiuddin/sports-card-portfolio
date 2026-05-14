@@ -251,10 +251,141 @@ See §5 for the full catalog. The cycle specifically addresses:
 
 ## 4. Plan documents
 
-(to be drafted — 8-section template verified across mark-as-sold,
-potential-acquisitions, valuation-rebuild plans; OQ-locking pattern
-with the option-block + "Locked: (X)" + rationale shape; when to write
-a plan doc vs. when to just commit)
+A plan doc is the locked specification for a multi-file or
+multi-surface change. It exists to surface every decision before
+implementation begins so the Execute phase can be mechanical. Three
+plan docs are in `.agents/` as reference: `mark-as-sold-plan.md`,
+`potential-acquisitions-plan.md`, `valuation-rebuild-plan.md`.
+
+### When to write a plan doc
+
+Write one when the change touches:
+
+- **Multiple files** (more than two source files, or anything that
+  crosses a Lambda + frontend boundary), OR
+- **Multiple surfaces** (DB schema + backend code, or backend +
+  frontend, or frontend + IaC), OR
+- **A breaking change to an established contract** (column rename,
+  API field rename, response shape change).
+
+### When not to write a plan doc
+
+- **Single-file change** — typo fix, single CSS value, isolated bug
+  fix in one Lambda. Just commit it.
+- **Doc-only commit** — README edit, plan-doc revision itself,
+  `ROADMAP.md` entry. The doc is the artifact.
+- **Hot-fix on broken production** — fix first; once the bleeding
+  stops, write a retroactive `<feature>-plan.md` capturing what
+  shipped and the post-mortem.
+
+### Naming
+
+`.agents/<feature>-plan.md`. Lowercase, hyphenated, descriptive
+(`mark-as-sold-plan.md`, not `marksoldplan.md`). Lives alongside the
+other working docs in `.agents/` (see §1).
+
+### The 8-section template
+
+Every plan doc has these eight sections in this order:
+
+| § | Title | Contents |
+|---|---|---|
+| 1 | Overview | One paragraph: what this builds, why now, what it explicitly does NOT do |
+| 2 | Schema changes | Migration files in full (per §7), column types, index decisions |
+| 3 | Backend changes (file-by-file) | Every Lambda touched, with code snippets and call-site references |
+| 4 | Frontend changes (file-by-file) | Every component touched, every API contract change |
+| 5 | *Flex slot* | See "The §5 flex slot" below |
+| 6 | Commit sequence | Ordered list of commits, each with scope and verification step |
+| 7 | Rollback story | Per-commit: how to undo if deploy fails |
+| 8 | Open questions | OQ list — see "OQ structure and the Locked pattern" below |
+
+### The §5 flex slot
+
+Section 5 is intentionally flexible. Its purpose: capture
+rollout-specific work that doesn't fit cleanly in §3 / §4 / §6 but
+must be documented before implementation. Past examples:
+
+- `mark-as-sold-plan.md` §5 — **Helper unification** (consolidating
+  `isSold` across frontend + backend).
+- `potential-acquisitions-plan.md` §5 — **UI label rename inventory**
+  (every site where "Target Price" became "Sell Target").
+- `valuation-rebuild-plan.md` §5 — **MASTER.md addition**
+  (design-system doc updates the rebuild required).
+
+Use §5 when the work has a clear rollout-specific deliverable that
+doesn't fit in backend or frontend alone. Leave it as a stub
+(`§5 — N/A`) when there's nothing rollout-specific to capture.
+
+### OQ structure and the Locked pattern
+
+Every plan doc closes with an Open Questions section (§8). Each OQ
+captures a decision that must be made before implementation begins.
+
+**OQ format.** A short title naming the decision; a setup paragraph
+of context; an A/B/C list of options with trade-offs; a single
+`**Locked: (X)**` paragraph naming the chosen option and the
+rationale.
+
+**Verbatim example** (from `potential-acquisitions-plan.md` §8):
+
+```
+### OQ-1 — Soft-delete vs hard-delete for `delete-pa`
+
+Spec uses hard DELETE. Alternatives:
+
+- (A) **Hard delete** — `DELETE FROM potential_acquisitions WHERE ...`. **Spec'd.** Row gone, no recovery from UI.
+- (B) **Soft delete** — add `deleted_at timestamptz`, set on "delete". Allows undo, audit, and analytics ("things I changed my mind about").
+- (C) **Hard delete + audit log table** — separate `pa_history` table receives a row on every delete/move. Heavier but separates concerns.
+
+**Locked: (A).** Hard delete. Users curate their PA list freely;
+soft-delete clutter isn't useful. Trigger for soft-delete
+reconsideration: first user complaint about an accidental delete.
+```
+
+**The "Locked:" rule.** Every OQ must end with a `**Locked: (X)**`
+marker before implementation begins. No `Recommendation:`, no "likely
+(A) but TBD" — those are unfinished decisions and indicate the plan
+isn't ready. If a locked answer turns out wrong during execution,
+return to Plan phase, update the OQ with what changed, and re-lock.
+
+**Reversal triggers.** When a locked decision specifies a reversal
+trigger (e.g. "first user complaint about accidental delete"), record
+it in the rationale. Revisits are then explicit and warranted, not
+silent drift.
+
+### Commit sequence and rollback stories
+
+§6 of every plan doc is the ordered commit sequence the rollout will
+produce. Each entry:
+
+1. A short identifier (`Commit 1: schema migration 0007`).
+2. The scope (files touched, surfaces affected).
+3. The verification step (what to check after this commit deploys).
+
+§7 is the rollback story, paired commit-by-commit with §6. Each entry
+is one line on how to undo the commit if the deploy fails. For schema
+commits this often involves a separate rollback migration; for code
+commits it's `git revert` + redeploy.
+
+The rollback story exists not because rollback is common, but because
+writing it forces clarity about what the commit actually changes.
+
+### Plan doc lifecycle
+
+- **Created** during the Plan phase (see §3); committed before any
+  implementation commit.
+- **Updated** when reality diverges from plan during execution. Two
+  cases:
+  - The plan was right, the implementation was wrong → return to
+    Execute, fix the code, plan stays as-is.
+  - The plan turned out to be wrong (recon missed something, or the
+    locked decision proved unworkable) → amend the plan in the same
+    commit as the deviating change. The plan-vs-code state must
+    always agree once a commit lands.
+- **Preserved** indefinitely. Plan docs are the audit trail for past
+  decisions. Don't delete them after a rollout completes — future
+  work often retrieves "why did we do it this way?" from a plan doc
+  that shipped months ago.
 
 ---
 
