@@ -34,6 +34,7 @@
 
 - **TradeDesk redesign branch** — Paused before rebase; master has moved significantly. Resume requires rebase + finish phase 2. Size: M
 - **`sport` column deprecation** — Keeping both `sport` and `category` columns indefinitely; revisit if migration friction emerges.
+- **Node 22 LTS upgrade** — Coordinated bump across Windows + Mac dev environments + AWS Lambda runtime (currently `NODEJS_20_X` per `infrastructure/lib/api-stack.ts:63` — must upgrade in same commit chain to keep local and Lambda runtime aligned) + dependency verification. Triggers (any of): (a) AWS SDK breaks under Node 20, (b) any production dependency drops Node 20 support, (c) Q3 2026 soft deadline regardless. AWS SDK v3 already emits `"upgrade to node >=22"` deprecation warning during backend tests (observed Mac smoke-test 4, 2026-05-14); Node 20 LTS hit maintenance Oct 2025 and is technically past EOL (April 2026) but working fine. Size: S (~2–3 hours).
 
 ## Documentation
 
