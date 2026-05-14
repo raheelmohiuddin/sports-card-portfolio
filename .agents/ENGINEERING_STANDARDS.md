@@ -1001,26 +1001,24 @@ after deploy is expensive. Major-rollout recon always includes
 
 ## 12. Other standards docs
 
-(to be drafted — pointers to:
-- `BACKEND_CONVENTIONS.md` — Lambda structure, helper modules, response
-  shape, validation patterns. **Trigger to write:** when 5+ Lambdas
-  diverge from the `_db` / `_response` / `_validate` pattern.
-- `FRONTEND_CONVENTIONS.md` — component organization, state management,
-  inline-style design system, services/api.js conventions.
-  **Trigger to write:** when a second engineer joins, or when
-  PortfolioPage.jsx (3,911 LOC) gets decomposed.
-- `INFRASTRUCTURE_CONVENTIONS.md` — CDK stack split, IAM grant
-  patterns, route registration. **Trigger to write:** when api-stack.ts
-  (909 LOC) gets split into per-domain stacks.
-- `TESTING.md` — what we test, what we don't, when to add a test.
-  **Trigger to write:** when test count exceeds ~20 files or a test
-  framework decision needs to be locked.
-- `OPERATIONS.md` — deploy procedures, monitoring, backup/recovery,
-  cost monitoring. **Trigger to write:** as part of P0 hardening
-  work (currently paused at PA rollout commit 3a).
-- `INCIDENT_RESPONSE.md` — severity classification, rollback
-  procedures, communication templates, alarm playbooks.
-  **Trigger to write:** alongside `OPERATIONS.md` when alarms ship.)
+`ENGINEERING_STANDARDS.md` is the workflow spine. Surface-specific
+conventions live in separate docs to keep this one navigable. Some
+don't exist yet — each entry below has an explicit trigger for when
+it should be written.
+
+| Doc | Scope | Trigger for writing it |
+|---|---|---|
+| `BACKEND_CONVENTIONS.md` | Lambda structure, helper modules, validation patterns, response shape, error handling | Before the next major backend feature ships (PA commit 3b onward is borderline — if started, write this first) |
+| `FRONTEND_CONVENTIONS.md` | Component patterns, state management, `services/api.js` conventions, inline styles | When a 4th major frontend page joins PortfolioPage / ShowsPage / TradeDesk |
+| `INFRASTRUCTURE_CONVENTIONS.md` | CDK stack organization, IAM patterns, naming, deploy workflow | When the first 2nd contributor needs to deploy infrastructure |
+| `TESTING.md` | What gets tested, what doesn't (yet), test anti-patterns | Before the test suite grows beyond the current ~7 files |
+| `OPERATIONS.md` | Deploy procedures, monitoring, backup, alerting, on-call basics | Before the first non-Raheel user lands |
+| `INCIDENT_RESPONSE.md` | Severity classification, rollback procedures, communication, post-incident review | After the first production incident OR before the first non-Raheel user — whichever comes first |
+
+**The principle.** Don't write these docs speculatively. Write each
+when its trigger fires; until then, the relevant conventions live
+implicitly in the codebase and explicitly in `CONTEXT.md` (for
+descriptive facts) or here (for prescriptive rules).
 
 ---
 
