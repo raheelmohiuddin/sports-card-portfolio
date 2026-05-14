@@ -857,11 +857,47 @@ was inferred from another verification.
 
 ## 9. Debugging discipline
 
-(to be drafted — cites `methodology/systematic-debugging.md` as the
-discipline reference. Adapts the four-phase framework to our context:
-PostgreSQL parse-phase errors, Lambda cold-start vs warm-start,
-CardHedger vs PSA API failure modes, the "3+ fixes = architectural
-problem" escape valve)
+Treat `methodology/systematic-debugging.md` as authoritative for any
+non-trivial debugging session. The four-phase frame in one sentence:
+**Root cause → Pattern analysis → Hypothesis → Implementation**, with
+the fix landing only after Phase 1 produces a verified root cause.
+
+This-project adaptations:
+
+- **Phase 1 — Recent-changes check first.** This codebase ships fast;
+  the prime suspect for any new bug is the most recent commit that
+  touched the relevant surface. `git log --oneline -10
+  <affected-file>` before anything else.
+- **Phase 1 — Multi-component evidence in serverless land.** Lambdas
+  can't be stepped through locally (see §2). Instrument with
+  `console.log` before and after suspect operations, deploy, and read
+  CloudWatch logs across every Lambda in the call chain (e.g.
+  `add-card` → `fetchValuation` → CardHedger client).
+- **Phase 2 — Helpers are the reference.** When a Lambda misbehaves
+  while a sibling Lambda doesn't, compare them. `_db.js`,
+  `_validate.js`, `_response.js` are the shared baseline; deviation
+  from them is often the bug.
+- **Phase 3 — Test hypotheses via minimal-diff deploys.** Without a
+  local emulator, hypothesis tests are deploy-and-observe cycles.
+  Make the smallest possible change, deploy, read logs. One variable
+  per cycle.
+- **Phase 4 — The 3+ fixes escape valve.** Three failed fixes means
+  architectural problem, not bug. In this codebase, that triggers a
+  return to Plan phase (§3) — open a plan-doc-level discussion before
+  attempting a fourth fix.
+
+**Language to avoid.** "Try this and see" — that's a guess, not a
+hypothesis. "It's probably X" — Phase 1 isn't done. "I know what this
+is" without checking — Phase 2 skip.
+
+**Real example.** Commit `e4156d0` ("shows: fix attendedOnly
+Parse-phase type-inference error") fixed a Postgres `42P18` raised
+when the `attendedOnly` query path collapsed all cast sites for `$2`
+in `list-shows.js`. Phase 1 identified the error as missing parameter
+type inference; Phase 2 diffed against the pre-`attendedOnly` SQL and
+spotted the dropped `::date` cast; Phase 3 hypothesized "Postgres
+needs at least one cast site for the parameter type"; Phase 4 added
+the no-op `($2::date IS NULL OR TRUE)` clause to restore inference.
 
 ---
 
