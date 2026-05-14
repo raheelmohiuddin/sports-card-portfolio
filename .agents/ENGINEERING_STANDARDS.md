@@ -674,11 +674,141 @@ via `git log --grep`. Cannot be reverted with confidence (what is
 
 ## 7. Schema changes
 
-(to be drafted — migration file naming + comment-block header
-convention from migrations 0005/0006/0007, Data API workflow with
-exact `aws rds-data execute-statement` invocation, coordinated SQL +
-`cdk deploy` sequence with timing capture, idempotency rule
-`IF NOT EXISTS` / `IF EXISTS`, type-alignment verification step)
+Every schema change is a numbered migration file applied via the RDS
+Data API. The file is the source of truth; the live database is the
+target. This section codifies the file convention, the apply
+workflow, and the verification step. See §5 pattern 3 for why
+direct-to-DB changes are rejected.
+
+### Migration file convention
+
+**Location.** `backend/db/migrations/`.
+
+**Naming.** `000N_descriptive_name.sql`. Four-digit zero-padded
+sequence number, underscore, lowercase descriptive name, `.sql`
+extension. Examples in repo: `0005_potential_acquisitions.sql`,
+`0006_rename_target_price.sql`, `0007_pa_image_columns.sql`.
+
+**Header comment block.** Every migration opens with:
+
+- File name on line 1.
+- One-line intent statement.
+- Multi-line rationale citing the locked OQ (or recon flag) that
+  drove the change.
+- Idempotency note (every migration uses `IF NOT EXISTS` / `IF
+  EXISTS` / `ADD COLUMN IF NOT EXISTS` etc. — re-running must be
+  safe).
+- Type-alignment notes if the migration mirrors columns from another
+  table (e.g. 0007 explicitly notes `varchar(500)` vs `text`
+  alignment with `cards`).
+
+**Idempotency.** Every statement guarded so re-application is a no-op:
+
+- `CREATE TABLE IF NOT EXISTS`
+- `CREATE INDEX IF NOT EXISTS`
+- `ALTER TABLE ... ADD COLUMN IF NOT EXISTS`
+- `ALTER TABLE ... DROP COLUMN IF EXISTS`
+
+`ALTER TABLE ... RENAME COLUMN` doesn't have an `IF EXISTS` form —
+it errors on a second run. That's acceptable; the rename either
+already happened (live state agrees with code) or it didn't (apply
+again).
+
+### Coordinated SQL + code deploy workflow
+
+The canonical workflow, used for migration 0006 (commit `21ecab0`,
+the `target_price` → `sell_target_price` rename):
+
+1. **Capture start time** so the misalignment window is measurable:
+   `echo "=== START: $(date -u +%Y-%m-%dT%H:%M:%SZ) ==="`.
+2. **Apply SQL** via the RDS Data API using cluster + secret + DB
+   identifiers from `CONTEXT.md` §2:
+   ```
+   aws rds-data execute-statement \
+     --resource-arn "$CLUSTER_ARN" \
+     --secret-arn "$SECRET_ARN" \
+     --database "$DB_NAME" \
+     --region us-east-1 \
+     --sql "$(cat backend/db/migrations/0NNN_*.sql)"
+   ```
+3. **Deploy code** that depends on the new schema: `cd infrastructure
+   && cdk deploy --require-approval never`.
+4. **Verify** the schema landed: `information_schema.columns` query
+   confirming column names + types.
+5. **Smoke test** affected Lambda logs: `aws logs tail
+   /aws/lambda/scp-<function-name> --since 5m --filter-pattern ERROR`.
+
+The misalignment window (between SQL apply and code deploy
+completing) was **2m 33s** for migration 0006. Acceptable in this
+case because no live traffic hit affected Lambdas during the window
+(verified by checking unfiltered logs in addition to the ERROR
+filter).
+
+### Backward-incompatible renames under traffic
+
+The single-step rename above works for a low-traffic prototype. With
+live traffic on the affected surface, a column rename requires
+two deploys:
+
+1. Add the new column. Code dual-writes (writes both old and new),
+   reads from the new column. Deploy.
+2. Drop the old column once you've confirmed the new column has full
+   coverage. Deploy.
+
+This codebase doesn't yet have surfaces where the single-step is
+unsafe — current convention is single-step rename with measured
+misalignment window. Revisit when any Lambda affected by a rename
+receives traffic during deploy (see §13). When traffic justifies the
+two-step, write the sequence into the plan doc's §6 (Commit
+sequence).
+
+### Applying migrations
+
+- **Always** via `aws rds-data execute-statement` (or the AWS Console
+  Query Editor for one-off investigative queries).
+- **Never** via direct `psql` or ad-hoc Lambda for substantive
+  changes. The `_migrations/` Lambdas under `backend/functions/`
+  are deprecated for the same reason — see §5 pattern 3.
+
+The Console Query Editor is acceptable for non-mutating queries
+(`SELECT`, `EXPLAIN`, `\d table_name`) where you want fast feedback
+without copying ARNs.
+
+### Verifying migrations
+
+Verification is the Verify-phase step (§3) for schema work. Two
+queries cover the common cases:
+
+- **New columns / tables:**
+  ```sql
+  SELECT column_name, data_type, is_nullable
+  FROM information_schema.columns
+  WHERE table_name = 'cards'
+  ORDER BY ordinal_position;
+  ```
+- **Renames:** confirm old name absent, new name present, type
+  preserved:
+  ```sql
+  SELECT column_name FROM information_schema.columns
+  WHERE table_name = 'cards'
+    AND column_name IN ('<old_name>', '<new_name>');
+  ```
+
+Expected: zero rows for `<old_name>`, one row for `<new_name>`.
+
+### Rollback
+
+- Schema rollbacks are **forward-only** — write a new migration
+  (`0NNN_rollback_of_0XXX.sql`) that undoes the change.
+- **Never delete** a migration file once committed. The numbered
+  sequence is the audit trail.
+- Rollback migrations are themselves idempotent (`IF EXISTS` guards).
+
+For most changes, code revert + redeploy is sufficient — the schema
+change is additive (`ADD COLUMN IF NOT EXISTS`) and the column simply
+goes unused. A schema rollback is only needed when the column itself
+is the problem (wrong type, wrong constraint, fundamentally wrong
+shape).
 
 ---
 
