@@ -903,11 +903,55 @@ the no-op `($2::date IS NULL OR TRUE)` clause to restore inference.
 
 ## 10. Code review
 
-(to be drafted — cites `methodology/code-reviewer-template.md` as the
-template for dispatching a code-reviewer subagent. Project-specific
-adaptations: when to invoke (after non-trivial commits, before
-deployment of high-risk changes), what context to provide
-(plan section + locked OQs + commit range))
+Use the template at `methodology/code-reviewer-template.md` for any
+formal code review. Dispatch it to a fresh subagent or new session
+with crafted context — the diff, the plan if one exists, relevant
+CONTEXT.md sections, a one-paragraph intent description. Never the
+implementing session's history. Context isolation is the point: the
+reviewer reads the work product, not the thought process that
+produced it.
+
+**When to invoke:**
+
+- Before merging any plan-doc-driven rollout — mandatory, on the
+  final commit before resuming feature work.
+- After complex algorithm work where correctness is non-obvious
+  (valuation precedence, trade analysis, cross-table aggregations).
+- When stuck — fresh perspective catches what you've stopped seeing.
+- Before any commit that introduces a new pattern not already in
+  §5 / §6 / §7 — the reviewer evaluates pattern consistency with
+  adjacent code.
+
+**Severity and response.** The methodology's rubric, with this
+project's response:
+
+- **Critical** — must fix before merge. Blocks further work.
+- **Important** — fix before the next commit, unless an explicit
+  deferral with rationale lands in ROADMAP.
+- **Minor** — nice to have. Log to ROADMAP if not addressed; doesn't
+  block.
+
+Reviewer output structure: Strengths / Issues (by severity, with
+file:line refs) / Recommendations / Assessment.
+
+**Disagreement.** Push back with reasoning, not refusal. If the
+reviewer is wrong, show the code, tests, or docs that prove it;
+don't override silently.
+
+**Language to avoid.** "Looks good to me" without running the
+template is a rubber-stamp. "I already reviewed this myself" —
+self-review and external review serve different purposes; neither
+replaces the other. Ignoring Important issues because "they're not
+Critical" misreads the rubric — Important means "fix before next
+commit," not "optional."
+
+**Real example — none yet.** This project has not dispatched a
+formal code-reviewer subagent on any completed rollout. Review
+during sessions to date has been inline-in-conversation, a weaker
+form. The discipline is documented here but not yet exercised at
+the formal subagent-dispatch level. The first formal dispatch
+should validate this section against actual practice — see §13 for
+the revisit trigger.
 
 ---
 
