@@ -391,11 +391,131 @@ writing it forces clarity about what the commit actually changes.
 
 ## 5. Anti-patterns we reject
 
-(to be drafted — project-history-grounded catalog. Sources include
-git log fix/revert patterns, CONTEXT.md §10 recorded incidents, the
-Co-Authored-By trailer drift caught during recon, sweeping cosmetic
-changes that triggered three-commit revert chains, cross-Lambda drift
-between user and admin handlers)
+This is the project-history-grounded catalog of patterns that have
+caused real bugs or wasted real time in this codebase. Each entry
+names the pattern, cites the evidence, and states the rule going
+forward. Not a comprehensive list of bad ideas — only the ones the
+codebase has explicitly taught us to reject.
+
+### 1. Cross-Lambda drift
+
+**What it is.** Admin Lambdas mirror user Lambdas (e.g.
+`admin/get-card.js` mirrors `cards/get-card.js`); when only one is
+updated, the response shape silently diverges and admin views break.
+
+**Evidence.** Commit `3c7b0f8` ("cards/admin: return sold_* fields +
+join card_shows; fix admin drift") fixed exactly this drift after the
+mark-as-sold rollout updated user-side `get-card.js` but left the
+admin Lambda unchanged.
+
+**Rule.** When updating a Lambda that has an admin twin, update both
+in the same commit. The plan doc's §3 (Backend changes) must list both
+files when relevant.
+
+### 2. Sweeping cosmetic changes across many files
+
+**What it is.** Design-token sweeps that touch 10+ files without an
+anchoring decision (a MASTER.md update or a locked OQ) get reverted
+because the change spreads ambiguously and the rollback is
+indistinguishable from drift.
+
+**Evidence.** Three-commit revert chain `23e364f` / `8169f5d` /
+`b80ae9e` reverted the antique-gold sweep across 15 files. The
+eventual fix was formalizing a two-gold system in `MASTER.md` §1.3 —
+not the sweep.
+
+**Rule.** Cosmetic sweeps require an anchor commit first
+(design-system doc update, locked decision in MASTER.md). The sweep
+then cites the anchor in its commit message. No anchor → no sweep.
+
+### 3. Direct production database changes without a migration file
+
+**What it is.** Schema changes applied via Console / `psql` / ad-hoc
+Lambda without a numbered migration file in `backend/db/migrations/`.
+The live schema and the committed schema diverge silently.
+
+**Evidence.** `CONTEXT.md` §10 records `backend/db/schema.sql` was
+bootstrapped at project start and never updated; the live schema is
+now authoritatively documented in CONTEXT.md §8 instead. Earlier
+in-Lambda migrations under `backend/functions/_migrations/` are also
+deprecated for the same reason.
+
+**Rule.** Every schema change is a numbered migration file (per §7).
+No exceptions — even one-line `ALTER TABLE` statements get a
+migration file. The Data API and Query Editor are convenient for
+*applying* migrations, not for replacing them.
+
+### 4. Cross-table aggregations without explicit precedence
+
+**What it is.** Aggregations that pick a value from multiple sources
+(e.g. `manual_price ?? estimate_price ?? sold_price`) without a
+written precedence rule end up double-counting, missing branches, or
+choosing the wrong source.
+
+**Evidence.** `994d0e3` ("portfolio: fix get-value totalValue
+double-count for sold + traded cards") and `12e207c` ("get-value: fix
+totalValue precedence to use estimate_price") were both same-class
+bugs caught after deploy. Both were fixes to the same totalValue
+calculation.
+
+**Rule.** When an aggregation pulls from multiple sources, the
+precedence is written down — in the code (with comment) and in the
+plan doc's §3 (Backend changes). Test the aggregation on a row from
+each source category before claiming the change is done.
+
+### 5. ON CONFLICT without matching partial-index predicate
+
+**What it is.** When a partial unique index exists
+(e.g. `WHERE cert_number IS NOT NULL`), `INSERT ... ON CONFLICT`
+clauses must include the same predicate. Postgres rejects the INSERT
+otherwise — the conflict target is unmatchable.
+
+**Evidence.** Caught during PA commit 2 recon: the plan-doc draft of
+`add-pa.js` had `ON CONFLICT (user_id, cert_number) DO NOTHING`
+without the matching `WHERE cert_number IS NOT NULL` from migration
+0005's partial index. Would have been a deploy-time failure.
+
+**Rule.** When recon for a Lambda touches a table with partial
+indexes, list every partial-index predicate in the plan and verify
+each `ON CONFLICT` clause matches.
+
+### 6. State declared below the effect that depends on it
+
+**What it is.** React `useState` declared *after* the `useEffect` that
+references it produces a temporal-dead-zone error and a blank-page
+render — not a stack trace, just a white page.
+
+**Evidence.** `58a00da` ("Fix /shows blank page: hoist nearMe state
+above the fetch effect") fixed exactly this. The page rendered blank
+in production with no obvious console output.
+
+**Rule.** All `useState` declarations come before any `useEffect`.
+Order in the component: hooks first (state, refs, computed memos),
+then effects, then handlers, then render. When debugging a blank
+page, this is the first thing to check.
+
+### 7. Convention drift across sessions
+
+**What it is.** Locked conventions (e.g. no Co-Authored-By trailers
+on commits) decay silently between sessions when there's no
+enforcement mechanism. Documentation alone doesn't hold a convention.
+
+**Evidence.** 8 of the 50 commits before `dca6fc0` (2026-05-12)
+included `Co-Authored-By: Claude ...` trailers despite the convention
+being recorded in `CONTEXT.md`. Trailers stopped only when saved
+memory `feedback_git_identity.md` was added — the saved memory loads
+on every session; the doc only loads when read.
+
+**Rule.** When a convention is decided, the enforcement is a saved
+memory in `~/.claude/.../memory/` (not just doc text). Saved memories
+load every session; doc text only loads when consulted. If a
+convention isn't worth a saved memory, it isn't actually locked.
+
+---
+
+This list is not exhaustive — it codifies anti-patterns the codebase
+has explicitly taught us to reject. When new lessons surface, add them
+here in the same commit as the fix.
 
 ---
 
