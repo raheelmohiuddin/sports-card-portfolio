@@ -957,11 +957,45 @@ the revisit trigger.
 
 ## 11. Documentation requirements
 
-(to be drafted — when each doc gets updated:
-`CONTEXT.md` rarely-but-substantively for documented-surface changes
-in the same commit; `ROADMAP.md` for parked items; plan docs for
-multi-commit features; methodology docs only when discipline itself
-changes; this doc per §13)
+Documentation lives in source control alongside code. Every commit
+that changes a documented surface updates the documenting surface
+in the same commit. Drift between code and docs is a bug.
+
+**Per-doc update triggers:**
+
+- **`CONTEXT.md`** — Update when a documented surface changes (a
+  Lambda's response shape, a helper's signature, a schema column, a
+  design-system token, a lifecycle semantic). Not for ephemeral
+  state. The doc's own update rule lives at its top.
+- **`ROADMAP.md`** — Update when work is parked (scope deferred,
+  blocked, deprioritized) or completed (worth recording as
+  historical accomplishment). Additive only — don't delete completed
+  entries.
+- **`methodology/`** — Update only when the methodology genuinely
+  evolves. Most stable doc set. Currently four imported reference
+  docs with attribution headers. New entries belong here only if
+  they're durable engineering patterns, not project-specific.
+- **Plan docs** — Update during execution when reality diverges from
+  plan (per §4). Same commit as the deviating code change.
+- **`ENGINEERING_STANDARDS.md`** (this doc) — Update when a
+  convention changes or a new one is established. See §13.
+- **Other standards docs** (per §12) — per their own update rules
+  once each is written.
+
+**Doc-only commits.** Acceptable as a category. Plan-doc additions,
+ROADMAP entries, methodology imports, this doc's section drafts —
+all ship as `docs:` commits per §6.
+
+**What does not belong in `.agents/`.** Not code (source belongs in
+its tree). Not tests (those go in test directories). Not
+configuration (`package.json`, `cdk.json`, `.env`). Not session
+transcripts. The directory holds human/agent-facing documentation
+only.
+
+**Drift detection.** When code and docs disagree, the gap surfaces
+during Recon (§3 Phase 1). Catching it then is cheap; catching it
+after deploy is expensive. Major-rollout recon always includes
+"what does the doc say about this surface?"
 
 ---
 
