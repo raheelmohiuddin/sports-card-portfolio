@@ -7,6 +7,11 @@
 > [mark-as-sold-plan.md](./mark-as-sold-plan.md) and
 > [potential-acquisitions-plan.md](./potential-acquisitions-plan.md) —
 > same shape, same conventions.
+>
+> **Amended 2026-05-14 during execute phase** — see §3.5 (undeployed
+> Lambda drift discovery) and §6 (Commit 1 inserted; existing commits
+> renumbered 2–6). OQ-10 and OQ-11 added to §8. Per §4 + §13 (plan
+> amendments during execution).
 
 ---
 
@@ -70,9 +75,11 @@ Concretely, Session A ships:
   have DLQs configured. DLQ rollout is a separate change; parking
   noted in §5 to consider in a future hardening session.
 
-The rollout produces **5 commits, 2 separate `cdk deploy` invocations**
-(commits 1 and 2 deploy infrastructure; commits 3/4/5 are doc-only).
-See §6 for the full sequence.
+The rollout produces **6 commits, 3 separate `cdk deploy` invocations**
+(commits 1, 2, and 3 deploy infrastructure; commits 4/5/6 are doc-only).
+Commit 1 was inserted during execute phase to catch up an undeployed
+Lambda drift discovered at the cdk-diff gate; see §3.5 and §6 for the
+full sequence.
 
 ---
 
@@ -231,6 +238,48 @@ Two minimal exposure changes on the existing `ApiStack` class:
 No other change to `api-stack.ts` — every Lambda definition, route,
 authorizer, and CORS setting stays intact. Diff is bounded.
 
+### 3.5 Execute-phase discovery: undeployed Lambda drift from 9cbf9cc
+
+Surfaced during the original Commit 1's cdk-diff gate (now Commit 2 in
+§6 post-amendment — the backup retention change) on 2026-05-14. The
+diff showed 5 unexpected Lambda S3Key changes (AddCard, GetCards,
+GetCard, UpdateCard, AdminCard) alongside the expected backup-retention
+property change. Investigation traced these to commit 9cbf9cc (PA tab
+scaffolding + targetPrice→sellTargetPrice atomic flip, 2026-05-13 21:24
+UTC), which bundled backend JS-layer renames alongside the frontend
+changes per §5 atomic-flip discipline. The frontend was auto-deployed
+by Amplify on push; the backend `cdk deploy` was overlooked.
+
+Live state assessment (2026-05-14 ~10:00 UTC):
+- Backend Lambdas: still on pre-9cbf9cc code (return `targetPrice`,
+  expect `targetPrice` in request bodies).
+- Frontend: post-9cbf9cc code (sends `sellTargetPrice`, expects
+  `sellTargetPrice` in responses).
+- DB schema: `sell_target_price` column only (rename completed in
+  21ecab0).
+- Contract drift duration: ~13 hours.
+- User impact: **Sev-3 advisory.** Zero write-Lambda invocations in
+  the window (add-card / update-card / admin-card each had 0
+  invocations per `aws cloudwatch get-metric-statistics`). ~55
+  read-Lambda invocations (get-cards 53, get-card 2) returned wrong
+  JSON keys; frontend's permissive rendering hid the missing fields.
+  No data loss. No 5xx errors. No silent state corruption.
+
+This shifts Session A's commit sequence: catchup-deploy must precede
+backup retention to (a) resolve the live contract drift, (b) keep
+Commit 2's (formerly Commit 1) cdk diff scoped to backup retention
+only.
+
+**What contained the blast radius:** §5 atomic-flip discipline in
+`21ecab0` (SQL rename + query-ref update in same commit) meant Lambdas
+never hit a "column does not exist" error. The bug was silent
+field-name mismatch in the JSON layer, not SQL failure.
+
+**What failed:** no monitoring for git-master-vs-deployed-Lambda-source
+drift. Manual `cdk deploy` + auto Amplify deploy can desync
+indefinitely without signal. This gap is parked separately in
+ROADMAP — see §5.4 below.
+
 ---
 
 ## 4. Frontend changes (file-by-file)
@@ -270,8 +319,8 @@ Skeleton structure with shipping sections populated:
 > Sections marked TODO are stubbed until their trigger fires
 > (first non-Raheel user). Do not fill speculatively.
 
-## 1. Backup and recovery       ← POPULATED in commit 3
-## 2. Monitoring and alerting    ← POPULATED in commit 3
+## 1. Backup and recovery       ← POPULATED in commit 4
+## 2. Monitoring and alerting    ← POPULATED in commit 4
 ## 3. Deploy procedures          ← TODO before first non-Raheel user
 ## 4. On-call basics             ← TODO before first non-Raheel user
 ## 5. Routine maintenance        ← TODO before first non-Raheel user
@@ -312,7 +361,7 @@ Skeleton structure with shipping sections populated:
 > procedures. Sections marked TODO are stubbed until trigger fires
 > (first incident, or first non-Raheel user — whichever first).
 
-## 1. Severity classification     ← POPULATED in commit 4
+## 1. Severity classification     ← POPULATED in commit 5
 ## 2. First-response actions      ← TODO
 ## 3. Communication               ← TODO before first non-Raheel user
 ## 4. Post-incident review        ← TODO after first incident
@@ -331,7 +380,7 @@ Skeleton structure with shipping sections populated:
 ### 5.3 `.agents/CONTEXT.md` updates
 
 CONTEXT.md is the authoritative descriptive doc per §11. Updates in
-commit 5:
+commit 6:
 - §8 (or wherever schema / infrastructure facts live) records the new
   7-day backup retention and the SNS topic ARN.
 - New subsection: **Alarm inventory** — same table as OPERATIONS.md
@@ -341,7 +390,7 @@ commit 5:
 
 ### 5.4 `.agents/ROADMAP.md` updates
 
-Three edits in commit 5:
+Four edits in commit 6:
 - **Add to "Completed audits / one-time work":** "2026-05-14: P0
   hardening Session A — backup retention 1→7d, 8–12 CloudWatch alarms
   on Lambda/RDS/HttpApi, SNS notification path, OPERATIONS.md +
@@ -357,15 +406,76 @@ Three edits in commit 5:
   currently on `default.aurora-postgresql16`. No immediate trigger;
   revisit when a parameter change is needed (logging tuning, slow
   query log, etc). Size: S."
+- **Add to "Tech debt":** "Git-vs-deployed Lambda source drift
+  detection — there is currently no signal for 'backend Lambda source
+  has commits past the deployed asset hash.' Manual `cdk deploy` +
+  auto-Amplify-on-push can desync indefinitely. Drift was discovered
+  manually during P0 Hardening Session A's cdk-diff gate (2026-05-14);
+  without that gate, the drift was indefinitely-undetectable. Trigger
+  to act: CI/CD pipeline gets built (drift detection becomes a
+  pipeline check) OR first non-Raheel user (manual checks
+  insufficient). Size: M (~3–4 hours; involves comparing git log per
+  Lambda directory against deployed S3Key asset hashes, scriptable
+  but needs careful design to avoid false positives during active
+  development)."
 
 ---
 
 ## 6. Commit sequence
 
-Five commits, in deploy order. Two `cdk deploy` invocations gate
-commits 1 and 2; commits 3/4/5 are doc-only and don't deploy.
+Six commits, in deploy order. Three `cdk deploy` invocations gate
+commits 1, 2, and 3 (the catchup, the backup retention, and the
+monitoring stack); commits 4/5/6 are doc-only and don't deploy.
 
-### Commit 1 — `db: bump RDS backup retention 1d → 7d`
+### Commit 1 — `chore: catchup-deploy 9cbf9cc backend Lambda updates`
+
+- **Scope.** Empty git commit (`git commit --allow-empty`) anchoring a
+  deploy of 9cbf9cc's backend Lambda code that was committed but never
+  deployed. No source-code changes. The deploy IS the action; the
+  commit IS the artifact tying that action to a SHA in the audit
+  trail.
+- **Atomic boundary justification.** Per §6 atomic-boundary test #2,
+  single-line summary: "catchup-deploy pending backend Lambda updates"
+  — no "and" needed. Distinct from Commit 2 (backup retention) in
+  resource scope (Lambdas vs RDS cluster), distinct in deploy
+  granularity (5 Lambda S3Key updates vs 1 RDS property change),
+  distinct in commit subject. Splitting is correct.
+- **Verify.**
+  1. `cd infrastructure && npx cdk diff` shows ONLY 5 Lambda S3Key
+     updates (AddCard, GetCards, GetCard, UpdateCard, AdminCard) plus
+     the cosmetic CloudFormation Description encoding fixes (em-dash).
+     No other resource changes.
+  2. `cd infrastructure && npx cdk deploy --require-approval never`
+     succeeds.
+  3. Post-deploy: `aws cloudformation describe-stacks --stack-name
+     SportsCardPortfolio --query 'Stacks[0].LastUpdatedTime' --output
+     text` returns a timestamp from this deploy.
+  4. Smoke-test the live API: hit GET /cards once (Raheel's
+     portfolio); confirm the response now includes `sellTargetPrice`
+     and `sellTargetReached` keys (matching the frontend's
+     expectation).
+  5. CloudWatch logs over the next 10 minutes show zero new errors on
+     the 5 affected Lambdas.
+- **Commit message:**
+
+```
+chore: catchup-deploy 9cbf9cc backend Lambda updates
+
+Empty git commit anchoring a deploy of backend Lambda code that
+landed at 9cbf9cc (2026-05-13 21:24 UTC) but was never deployed.
+No source changes in this commit; the deploy itself is the action.
+
+Discovered during P0 Hardening Session A execute-phase cdk-diff
+gate (.agents/p0-hardening-session-a-plan.md §3.5). The frontend
+was auto-deployed by Amplify on push; the backend cdk deploy was
+overlooked. Contract drift was live for ~13 hours, Sev-3 advisory.
+
+5 Lambdas affected: AddCard, GetCards, GetCard, UpdateCard,
+AdminCard. Source already in git master at 9cbf9cc; this commit
+just anchors the deploy event.
+```
+
+### Commit 2 — `db: bump RDS backup retention 1d → 7d`
 
 - **Scope.** Single file: `infrastructure/lib/database-stack.ts`. Adds
   the `backup` prop per §3.1.
@@ -377,7 +487,7 @@ commits 1 and 2; commits 3/4/5 are doc-only and don't deploy.
   3. `aws rds describe-db-clusters --query 'DBClusters[*].[BackupRetentionPeriod,PreferredBackupWindow]' --output table`
      returns `7` and the OQ-5-locked window.
 
-### Commit 2 — `monitoring: add CloudWatch alarms + SNS topic + monitoring-stack`
+### Commit 3 — `monitoring: add CloudWatch alarms + SNS topic + monitoring-stack`
 
 - **Scope.** Three files:
   - `infrastructure/lib/monitoring-stack.ts` (new).
@@ -404,17 +514,17 @@ commits 1 and 2; commits 3/4/5 are doc-only and don't deploy.
      --state-value ALARM --state-reason "smoke test"`; confirm email
      lands; reset state to OK.
 
-### Commit 3 — `docs: OPERATIONS.md skeleton + backup + monitoring sections`
+### Commit 4 — `docs: OPERATIONS.md skeleton + backup + monitoring sections`
 
 - **Scope.** Single file: `.agents/OPERATIONS.md` (new). Skeleton per
   §5.1; §1 and §2 populated; §3–§5 stubbed as TODO.
 - **Verify.** File exists. Backup retention value cited matches the
-  live cluster post-commit-1 deploy (7 days). Alarm inventory table
-  matches the alarms actually deployed in commit 2 — every row in
+  live cluster post-commit-2 deploy (7 days). Alarm inventory table
+  matches the alarms actually deployed in commit 3 — every row in
   the doc table has a corresponding `aws cloudwatch describe-alarms`
   entry; every deployed alarm has a row.
 
-### Commit 4 — `docs: INCIDENT_RESPONSE.md skeleton + alarm-driven severity`
+### Commit 5 — `docs: INCIDENT_RESPONSE.md skeleton + alarm-driven severity`
 
 - **Scope.** Single file: `.agents/INCIDENT_RESPONSE.md` (new).
   Skeleton per §5.2; §1 populated with severity table; §2–§4 stubbed.
@@ -423,15 +533,15 @@ commits 1 and 2; commits 3/4/5 are doc-only and don't deploy.
   lookup). Severity tiering is internally consistent (no alarm
   assigned to multiple sevs).
 
-### Commit 5 — `docs: CONTEXT.md + ROADMAP — record P0-hardening-A outcomes`
+### Commit 6 — `docs: CONTEXT.md + ROADMAP — record P0-hardening-A outcomes`
 
 - **Scope.** Two files: `.agents/CONTEXT.md`, `.agents/ROADMAP.md`.
   Edits per §5.3 / §5.4.
 - **Verify.** CONTEXT.md alarm-inventory subsection matches
   OPERATIONS.md §2 and the live `describe-alarms` output. ROADMAP has
-  one new "Completed audits" entry and two new "Tech debt" entries
-  (StorageEncrypted, custom parameter group). No deletion of existing
-  ROADMAP entries.
+  one new "Completed audits" entry and three new "Tech debt" entries
+  (StorageEncrypted, custom parameter group, git-vs-deployed Lambda
+  drift detection). No deletion of existing ROADMAP entries.
 
 ---
 
@@ -439,39 +549,51 @@ commits 1 and 2; commits 3/4/5 are doc-only and don't deploy.
 
 Per-commit. Each entry is the one-line undo path.
 
-- **Commit 1.** `git revert <SHA> && npm run cdk -- deploy`. CloudFormation
+- **Commit 1.** `git revert <SHA>` is mechanically a no-op for code
+  (the commit was empty; no source changed). The only way to actually
+  revert the Lambda code is to `git checkout 9cbf9cc^`, deploy that
+  older source, then return HEAD to current. **Strongly discouraged**
+  — the catchup deploy resolves the Sev-3 contract drift documented
+  in §3.5; reverting reinstates the drift and the frontend/backend
+  field-name mismatch.
+- **Commit 2.** `git revert <SHA> && npm run cdk -- deploy`. CloudFormation
   reverts `BackupRetentionPeriod` to 1. PITR window narrows back to
   1 day from the moment the revert deploys. Existing automated
   snapshots already retained for 7 days are not deleted by the
   revert — they age out on their original 7-day schedule.
-- **Commit 2.** `git revert <SHA> && npm run cdk -- deploy`. CDK tears
+- **Commit 3.** `git revert <SHA> && npm run cdk -- deploy`. CDK tears
   down MonitoringStack: every alarm deleted, SNS topic deleted, email
   subscription deleted (subscriber will need to re-confirm if/when we
   redeploy — there's no way around this). No effect on application
   Lambdas or the cluster.
-- **Commit 3.** `git revert <SHA>`. Doc-only; no deploy. Deletes the
+- **Commit 4.** `git revert <SHA>`. Doc-only; no deploy. Deletes the
   `.agents/OPERATIONS.md` file. Note that alarms remain deployed but
   undocumented operationally until re-landed — this is *worse* than
-  the pre-Session-A state for incident response, so reverting commit 3
-  in isolation is rarely the right move. Prefer to revert commits 2 +
-  3 together.
-- **Commit 4.** `git revert <SHA>`. Doc-only; no deploy. Same
-  "deployed-but-undocumented" caveat as commit 3.
-- **Commit 5.** `git revert <SHA>`. Doc-only; no deploy. CONTEXT.md
+  the pre-Session-A state for incident response, so reverting commit 4
+  in isolation is rarely the right move. Prefer to revert commits 3 +
+  4 together.
+- **Commit 5.** `git revert <SHA>`. Doc-only; no deploy. Same
+  "deployed-but-undocumented" caveat as commit 4.
+- **Commit 6.** `git revert <SHA>`. Doc-only; no deploy. CONTEXT.md
   and ROADMAP.md edits revert; the ROADMAP "Completed audits" entry
-  is removed, the two parked Tech-debt entries are removed.
+  is removed, the three parked Tech-debt entries are removed.
 
-**Compound rollback** (whole session). `git revert` commits 5 → 4 → 3 →
-2 → 1 in reverse order, with `cdk deploy` after commits 2 and 1's
-reverts land. Returns the system to pre-Session-A state.
+**Compound rollback** (whole session). `git revert` commits 6 → 5 → 4
+→ 3 → 2 in reverse order, with `cdk deploy` after commits 2's and
+commit 3's reverts land. Commit 1's catchup is best left in place per
+its own rationale above — reverting it would reinstate the Sev-3
+drift. Returns the system to roughly pre-Session-A state with the
+catchup-deploy's Lambda changes retained.
 
 ---
 
 ## 8. Open questions
 
-> **Status:** all 9 OQs LOCKED 2026-05-14 (same session as draft and
-> recon). Each OQ closes with a **Locked: (X).** marker and rationale
-> per §4. Reversal triggers recorded inline where applicable.
+> **Status:** all 11 OQs LOCKED 2026-05-14 (OQ-1 through OQ-9 during
+> initial plan draft; OQ-10 and OQ-11 added during execute-phase
+> amendment after the undeployed-Lambda-drift discovery — see §3.5).
+> Each OQ closes with a **Locked: (X).** marker and rationale per §4.
+> Reversal triggers recorded inline where applicable.
 
 ### OQ-1 — Aggregate vs per-Lambda alarms
 
@@ -732,3 +854,48 @@ StorageEncrypted entry includes the multi-hour-migration framing and
 explicit triggers (PII/PHI scope expansion OR compliance requirement
 OR before first non-Raheel user); the parameter group entry is lower
 priority since there's no immediate pressure. No reversal trigger.
+
+### OQ-10 — Catchup-commit mechanism for undeployed-Lambda-drift discovery
+
+Surfaced during execute phase (see §3.5). Need an audit-trail-anchored
+way to mark the catchup deploy.
+
+- (A) **`git commit --allow-empty`** with explanatory body. Explicit,
+  atomic, ties deploy to a SHA. Unusual but honest.
+- (B) **Doc-only commit** editing `.agents/CONTEXT.md` to record the
+  deploy event. Anchors deploy to a doc edit's SHA. Lower-friction
+  but the doc edit and deploy are conceptually different things
+  bundled in one commit.
+- (C) **Deploy without commit**, cite the prior 9cbf9cc SHA in
+  Commit 2's body. Loses dedicated audit-trail entry.
+
+**Locked: (A).** Empty git commit. The deploy is the action that
+needs auditing; the commit is the audit anchor. Option (B) muddles
+artifact-vs-action distinction. Option (C) loses granularity.
+Option (A) is the cleanest mapping of one-deploy-event to
+one-git-artifact. No reversal trigger — this mechanism is for
+catchup-deploys specifically, of which we hope there are few.
+
+### OQ-11 — Sev classification and post-mortem handling for the drift incident
+
+The drift discovery (§3.5) is a real incident, even if Sev-3. Need to
+lock how it's documented.
+
+- (A) **Write up in INCIDENT_RESPONSE.md §1** as the first incident
+  exemplar. Conflates incident-response procedures with case studies.
+- (B) **Create a retroactive incident plan doc**
+  (`.agents/incident-2026-05-14-undeployed-lambda-drift.md`) AFTER
+  Session A completes, per §4 carve-out for hot-fix retroactive
+  plans. `INCIDENT_RESPONSE.md` stays scoped to severity
+  classification + alarm-to-response mapping.
+- (C) **Skip the write-up.** The incident is minor enough to leave
+  undocumented.
+
+**Locked: (B).** Retroactive incident plan doc, created after
+Session A. §4 explicitly provides for this pattern ("Hot-fix on
+broken production — fix first; once the bleeding stops, write a
+retroactive `<feature>-plan.md`"). `INCIDENT_RESPONSE.md`'s scope
+stays clean — severity tiers and alarm-to-response wiring only, no
+case studies. The incident doc cross-references
+`INCIDENT_RESPONSE.md`'s severity table once that exists. Reversal
+trigger: none — this is a one-time retroactive write-up.
