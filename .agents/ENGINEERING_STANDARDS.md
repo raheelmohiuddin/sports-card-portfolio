@@ -116,10 +116,136 @@ should be markdown or a directory of markdown.
 
 ## 3. The development workflow
 
-(to be drafted — recon → plan → execute → verify pattern, with the
-PA rollout 2026-05-13 timeline as the canonical demonstration:
-plan doc at 15:21, first commit at 16:21, four implementation commits
-ending at 17:24)
+Every non-trivial change goes through four phases: **Recon → Plan →
+Execute → Verify**. The cycle exists to surface decisions early
+(Recon), lock them deliberately (Plan), apply them mechanically
+(Execute), and confirm they hold (Verify). Skipping a phase usually
+means redoing the work later.
+
+### Recon (Phase 1)
+
+Read existing code before changing it. Inventory the surface area —
+every file, function, and call site the change will touch, with exact
+`file:line` references. Identify the patterns the change extends and
+the gaps it fills. Flag every discrepancy between assumed and actual
+behavior.
+
+**Done when:** factual basis is in hand; no "I think X does Y"
+speculation remains in the working notes.
+
+**Skip for:** typo fixes, single-line CSS adjustments, doc-only
+commits.
+
+**Real example.** Recon for the PA rollout's commit 2 (Lambda creation)
+caught three real bugs before any code shipped:
+
+- The partial unique index from migration 0005
+  (`WHERE cert_number IS NOT NULL`) requires the same predicate in
+  `INSERT ... ON CONFLICT` clauses; the plan-doc draft was missing it.
+- The plan's `add-pa.js` referenced image columns that 0005 had never
+  added — surfaced a real schema gap, fixed by migration 0007.
+- The image columns the plan implied as `text` actually existed on
+  `cards` as `varchar(500)`. Type mismatch caught against
+  `information_schema` before 0007 shipped.
+
+All three would have been deploy-time errors. None reached deploy.
+
+### Plan (Phase 2)
+
+Write or update a plan doc in `.agents/<feature>-plan.md` for any work
+touching multiple files or surfaces. Plan docs follow the 8-section
+template (see §4). Lock every decision via the OQ process before
+implementation begins.
+
+**Done when:** every open question is locked (`**Locked:**` marker),
+every commit in the sequence has a rollback story, every dependency on
+existing code is verified during recon.
+
+**Skip the formal plan doc for:** single-file changes, doc-only
+commits, hot-fixes (post-mortem the hot-fix into a retroactive plan
+update once the bleeding stops).
+
+**Real example.** PA rollout: plan doc committed at `dd60507`
+(2026-05-13 15:21); first implementation commit at `94f7fc8` (16:21).
+The 60-minute plan-commit to first-implementation-commit gap is the
+sign the cycle was followed — recon found enough surprises to be worth
+a plan, the plan locked them, then execution was mechanical.
+
+### Execute (Phase 3)
+
+Follow the plan's commit sequence in order. One commit per logical
+unit of work (see §6 for commit boundaries). Show the diff before
+committing — every time, no exceptions (this is the diff-gate rule
+codified in §6). If reality diverges from the plan during execution,
+stop and return to Plan rather than forcing the change through.
+
+**Done when:** every commit from the plan sequence is pushed and
+deployed.
+
+**Real example.** PA rollout commit 2 (`d98d948`) staged 8 files
+(4 new Lambdas + 1 new migration + 3 modifications). Diffs of all
+modified files plus snippets of the highest-risk new code
+(`add-pa.js`, the `add-card.js` PA-detection branch) were shown for
+review before the commit ran. No surprises landed in the commit
+because the diff was reviewed first.
+
+### Verify (Phase 4)
+
+Run the verification commands and read the output before claiming the
+work is complete. This is the discipline codified in
+`methodology/verification-before-completion.md` — see §8 for the full
+treatment. The form of verification depends on what changed:
+
+- Code change → run the tests that exist; read the output.
+- Schema change → query `information_schema` to confirm the columns
+  exist with the expected types.
+- Backend deploy → smoke test the affected Lambdas; check CloudWatch
+  for new errors in the deploy window.
+- Frontend deploy → exercise the affected UI in a browser; watch the
+  network tab for 4xx / 5xx responses.
+
+**Done when:** the deploy succeeded, the verification commands
+returned expected results, and no new errors appeared in logs over a
+reasonable observation window.
+
+**Real example.** After PA commit 2 (`d98d948`) deployed, verification
+ran three commands:
+`aws lambda get-function-configuration` confirmed the 4 new Lambdas
+existed with the expected runtime + handler;
+`aws apigatewayv2 get-routes` confirmed the 4 routes registered;
+an `information_schema.columns` query confirmed the new columns landed
+with the right types. Only after all three came back clean was
+"commit 2 deployed" claimed.
+
+### Loop discipline
+
+- **Reality diverges from plan during Execute** → stop, return to
+  Plan, update the plan doc with what changed and why.
+- **Verification fails** → stop, return to Execute. If the failure
+  surfaces a misunderstanding of the system, return to Recon.
+- **Three or more failed fixes** → this is an architecture problem,
+  not a bug. See `methodology/systematic-debugging.md` (§9) for the
+  escape valve.
+
+### When to skip the full cycle
+
+- **Trivial change** (typo, README correction, single CSS value):
+  Execute + Verify only.
+- **Hot-fix on broken production**: Verify-the-fix-then-Recon
+  (post-mortem); document the fix in a retroactive plan update once
+  the bleeding stops.
+- **Pure exploration / spike**: no commits, scratch work only; delete
+  the spike and start fresh under the cycle.
+
+### Anti-patterns this cycle prevents
+
+See §5 for the full catalog. The cycle specifically addresses:
+
+- "I'll just make this small change" without recon → catches the
+  partial-index ON CONFLICT class of bug before it reaches deploy.
+- "I'll skip the plan, it's just a refactor" → ends up touching 15
+  files with no rollback story.
+- "Tests probably pass" → no; run them and read the output.
 
 ---
 
