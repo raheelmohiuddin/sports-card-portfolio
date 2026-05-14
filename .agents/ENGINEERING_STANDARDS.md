@@ -60,8 +60,57 @@ in this doc.
 
 ## 2. Development environment
 
-(to be drafted — bootstrap, npm workspaces, AWS CLI + CDK install,
-how to run dev server, where credentials come from)
+**Prerequisites.** Node 20.x, npm, AWS CLI v2 (configured with
+`us-east-1` as default region), git. Windows / macOS / Linux all
+work — see "Windows quirks" below.
+
+**Bootstrap.** Clone, then `npm ci` from the root. The repo is an npm
+workspace; one install bootstraps `frontend/`, `backend/`, and
+`infrastructure/`. Do not `npm install` inside sub-directories — it
+splits the lockfile and breaks workspace resolution.
+
+**AWS access.** All commands assume credentials for AWS account
+`501789774892` (us-east-1). Verify with `aws sts get-caller-identity`.
+Resource inventory (cluster ARN, secret ARN, API endpoint, Cognito
+pool, etc.) is in `CONTEXT.md` §2.
+
+**Commands from the root.** `npm run dev` (Vite at
+`http://localhost:5173`, pointed at the deployed AWS backend),
+`npm run build`, `npm run synth`, `npm run deploy:infra`. Tests:
+`npm test --workspace backend` (Jest), `npm test --workspace frontend`
+(Vitest).
+
+**No local backend.** Lambdas don't run locally — there's no emulator
+configured. Backend changes require `cdk deploy` to exercise (see §7
+for the coordinated SQL + code deploy workflow).
+
+**No staging environment.** Master is the only environment. Frontend
+auto-deploys to Amplify on push; backend deploys via explicit
+`cdk deploy`. This is a known P0 gap — flagged for `OPERATIONS.md`
+when that doc gets written (see §12).
+
+**Database access.** Aurora lives in `PRIVATE_ISOLATED` subnets;
+direct connection from your laptop is impossible. Use the RDS Data
+API (`aws rds-data execute-statement ...`) or the AWS Console Query
+Editor — both authenticate via IAM. ARNs in `CONTEXT.md` §2.
+
+**CDK workflow.** `cd infrastructure` first. `cdk diff` before every
+`cdk deploy` to see the resource delta. `cdk synth` is safe to run
+anytime — it doesn't touch AWS.
+
+**Windows quirks.**
+- Git Bash's `claude` shim resolves to a non-existent path. Workaround:
+  invoke the binary directly from PowerShell —
+  `& 'C:\Users\Raheel\AppData\Roaming\npm\node_modules\@anthropic-ai\claude-code\bin\claude.exe' <args>`.
+- `aws logs tail /aws/lambda/...` paths get mangled by MSYS path
+  translation in Git Bash. Workaround: prefix with `MSYS_NO_PATHCONV=1`.
+- PowerShell 5.1 doesn't support `&&` between commands. Use
+  `; if ($?) { ... }` to chain on success, or run separately.
+
+**`.agents/` scope.** This directory holds human/agent-facing docs
+only. It must never be bundled into Lambda packages, the frontend
+build, or CDK output. Verify with `git ls-files .agents/` — every file
+should be markdown or a directory of markdown.
 
 ---
 
