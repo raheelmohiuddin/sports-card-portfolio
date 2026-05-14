@@ -1081,5 +1081,5 @@ evolves.
 
 ---
 
-*Draft in progress. §0 and §1 written; §2–§13 are scaffolds. See git
-history for incremental drafting.*
+*Doc complete — see §13 for the evolution rules that govern
+amendments.*
