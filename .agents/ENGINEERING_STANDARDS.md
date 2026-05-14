@@ -814,11 +814,44 @@ shape).
 
 ## 8. Verification discipline
 
-(to be drafted — cites `methodology/verification-before-completion.md`
-as the discipline reference. Adapts the Iron Law to our context:
-no completion claims without running the verification command in this
-session. Examples drawn from our pattern of post-deploy log smoke tests,
-verification SQL queries after migrations, build-then-deploy ordering)
+The authoritative reference for verification discipline is
+`methodology/verification-before-completion.md` — read it once. The
+Iron Law in one sentence: **no completion claims without fresh
+verification evidence**. If you haven't run the verification command
+in this session, you can't claim it passes.
+
+This section captures the project-specific shapes of "the
+verification command":
+
+- **Schema changes** — `information_schema.columns` query confirming
+  the change landed (templates in §7).
+- **Backend deploy** — `aws lambda get-function-configuration` for
+  every new or modified Lambda, plus `aws logs tail /aws/lambda/scp-*
+  --filter-pattern ERROR` over the deploy window.
+- **Frontend deploy** — exercise the affected UI in a browser; watch
+  the network tab for 4xx / 5xx responses.
+- **Cross-Lambda changes** — verify both the user-side and admin-side
+  Lambdas if applicable (see §5 pattern 1 — admin twins drift
+  silently).
+- **Helper changes** — run the existing test suite for the affected
+  helper (`npm test --workspace backend` or `--workspace frontend`).
+
+**Language to avoid.** "Should work" / "looks fine" / "probably
+passes" — none of these are verification. Either the command was run
+in this session and produced expected output (verified) or it wasn't
+(unverified). "Tests pass" without a fresh test run is a lie. "Deploy
+succeeded" without a log check confuses *the deploy didn't error*
+with *the deployed code works*.
+
+**Real example.** After `cdk deploy` completed for PA commit 2
+(`d98d948`), "commit 2 deployed" was claimed only once three
+independent verifications returned clean: `aws lambda
+get-function-configuration` confirmed all 4 new Lambdas existed with
+the expected runtime + handler; `aws apigatewayv2 get-routes`
+confirmed the 4 routes registered with the API; an
+`information_schema.columns` query confirmed the new columns landed
+with the right types. No verification was skipped. No verification
+was inferred from another verification.
 
 ---
 
