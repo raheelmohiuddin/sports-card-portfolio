@@ -34,12 +34,12 @@
 
 - **TradeDesk redesign branch** — Paused before rebase; master has moved significantly. Resume requires rebase + finish phase 2. Size: M
 - **`sport` column deprecation** — Keeping both `sport` and `category` columns indefinitely; revisit if migration friction emerges.
-- **Node 22 LTS upgrade** — *Active migration in progress 2026-05-19.* Coordinated bump across Windows + Mac dev environments + AWS Lambda runtime (currently `NODEJS_20_X` per `infrastructure/lib/api-stack.ts:63`) + dependency verification. AWS Health notification received 2026-05-19 confirms deadlines are now binding, not soft:
+- **Node 22 LTS upgrade** — *Active migration in progress 2026-05-19.* Coordinated bump across Windows + Mac dev environments + AWS Lambda runtime (currently `NODEJS_20_X` per `infrastructure/lib/api-stack.ts:63`) + dependency verification. AWS Lambda `nodejs20.x` deprecation timeline (verified 2026-05-19 against [AWS Lambda runtimes — Deprecated runtimes](https://docs.aws.amazon.com/lambda/latest/dg/lambda-runtimes.html)):
   - Phase 1 (2026-04-30, already active) — no security patches to `nodejs20.x`, no console editing of `nodejs20.x` functions.
-  - Phase 2 (2026-08-31) — cannot CREATE new `nodejs20.x` functions.
-  - Phase 3 (2026-09-30) — cannot UPDATE existing `nodejs20.x` functions; hard deadline.
+  - Phase 2 (2027-02-01) — cannot CREATE new `nodejs20.x` functions.
+  - Phase 3 (2027-03-03) — cannot UPDATE existing `nodejs20.x` functions; hard deadline.
 
-  AWS SDK v3 already emits `"upgrade to node >=22"` deprecation warning during backend tests (observed Mac smoke-test 4, 2026-05-14). Earlier framing of this entry as "Q3 2026 soft deadline" was stale; the AWS notification is the staleness event. Detailed plan in `.agents/node22-lts-upgrade-plan.md` (forthcoming). Size: S–M (~3–4 hours for upgrade execution itself; add recon + plan-doc time per §3/§4 if not yet done).
+  Phase 2 and Phase 3 dates reflect AWS's **extended-grace exception** for `nodejs20.x` — AWS docs note: *"For some runtimes, AWS is delaying the block-function-create and block-function-update dates beyond the usual 30 and 60 days after deprecation … to give you more time to upgrade your functions."* The AWS Health email received 2026-05-19 quoted the default 30/60-day policy (2026-08-31 / 2026-09-30) and was superseded by the extended-grace dates above; corrected in this commit. Phase 1 (2026-04-30) is unaffected. AWS SDK v3 already emits `"upgrade to node >=22"` deprecation warning during backend tests (observed Mac smoke-test 4, 2026-05-14). Earlier framing of this entry as "Q3 2026 soft deadline" was stale; the AWS notification + extended-grace publication is the staleness event. Detailed plan in `.agents/node22-lts-upgrade-plan.md` (forthcoming). Size: S–M (~3–4 hours for upgrade execution itself; add recon + plan-doc time per §3/§4 if not yet done).
 
 ## Documentation
 
