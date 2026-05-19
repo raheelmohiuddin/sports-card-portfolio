@@ -34,7 +34,12 @@
 
 - **TradeDesk redesign branch** — Paused before rebase; master has moved significantly. Resume requires rebase + finish phase 2. Size: M
 - **`sport` column deprecation** — Keeping both `sport` and `category` columns indefinitely; revisit if migration friction emerges.
-- **Node 22 LTS upgrade** — Coordinated bump across Windows + Mac dev environments + AWS Lambda runtime (currently `NODEJS_20_X` per `infrastructure/lib/api-stack.ts:63` — must upgrade in same commit chain to keep local and Lambda runtime aligned) + dependency verification. Triggers (any of): (a) AWS SDK breaks under Node 20, (b) any production dependency drops Node 20 support, (c) Q3 2026 soft deadline regardless. AWS SDK v3 already emits `"upgrade to node >=22"` deprecation warning during backend tests (observed Mac smoke-test 4, 2026-05-14); Node 20 LTS hit maintenance Oct 2025 and is technically past EOL (April 2026) but working fine. Size: S (~2–3 hours).
+- **Node 22 LTS upgrade** — *Active migration in progress 2026-05-19.* Coordinated bump across Windows + Mac dev environments + AWS Lambda runtime (currently `NODEJS_20_X` per `infrastructure/lib/api-stack.ts:63`) + dependency verification. AWS Health notification received 2026-05-19 confirms deadlines are now binding, not soft:
+  - Phase 1 (2026-04-30, already active) — no security patches to `nodejs20.x`, no console editing of `nodejs20.x` functions.
+  - Phase 2 (2026-08-31) — cannot CREATE new `nodejs20.x` functions.
+  - Phase 3 (2026-09-30) — cannot UPDATE existing `nodejs20.x` functions; hard deadline.
+
+  AWS SDK v3 already emits `"upgrade to node >=22"` deprecation warning during backend tests (observed Mac smoke-test 4, 2026-05-14). Earlier framing of this entry as "Q3 2026 soft deadline" was stale; the AWS notification is the staleness event. Detailed plan in `.agents/node22-lts-upgrade-plan.md` (forthcoming). Size: S–M (~3–4 hours for upgrade execution itself; add recon + plan-doc time per §3/§4 if not yet done).
 
 ## Documentation
 
