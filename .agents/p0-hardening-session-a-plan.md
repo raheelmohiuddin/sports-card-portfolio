@@ -375,8 +375,13 @@ Skeleton structure with shipping sections populated:
 
 **§2 Monitoring and alerting — content:**
 - Alarm inventory table: each alarm name, metric, threshold,
-  evaluation period, severity classification, link to §3 of
-  INCIDENT_RESPONSE.md for response procedure.
+  evaluation period, severity classification, link to §1 of
+  INCIDENT_RESPONSE.md for severity classification + first-glance
+  interpretation. (Amended 2026-05-20 during Commit 4 — original
+  text said "§3 of INCIDENT_RESPONSE.md for response procedure"
+  but per §5.2, §3 is "Communication (TODO)"; the
+  response-procedure content actually lives in §1 Severity
+  classification. Cross-reference target corrected to §1.)
 - SNS topic ARN + how to add/remove subscribers.
 - How to silence an alarm temporarily (set state to OK via CLI; how
   to find the alarm name).
