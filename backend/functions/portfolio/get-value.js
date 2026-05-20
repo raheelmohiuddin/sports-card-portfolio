@@ -66,10 +66,16 @@ exports.handler = async (event) => {
     const isHeld = row.status === null && row.consignment_status !== "sold";
     if (isHeld && displayValue) totalValue += displayValue;
     if (isHeld && cost)         totalCost  += cost;
+    // Response shape mirrors cards/get-card.js + cards/get-cards.js canonical
+    // Card fields: manualPrice, estimatePrice, estimatedValue exposed as
+    // separate raw-column values. Frontend's effectiveValue helper
+    // (portfolio.js) handles the manualPrice ?? estimatePrice ?? estimatedValue
+    // precedence — server no longer pre-resolves into the estimatedValue field.
     return {
       id:            row.id,
       manualPrice,
-      estimatedValue: displayValue,
+      estimatePrice,
+      estimatedValue,
       avgSalePrice:   row.avg_sale_price  ? parseFloat(row.avg_sale_price)  : null,
       lastSalePrice:  row.last_sale_price ? parseFloat(row.last_sale_price) : null,
       numSales:       row.num_sales       ?? null,

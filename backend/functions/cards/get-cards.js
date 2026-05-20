@@ -82,7 +82,15 @@ exports.handler = async (event) => {
       const manualPrice = row.manual_price ? parseFloat(row.manual_price) : null;
       const myCost      = row.my_cost      ? parseFloat(row.my_cost)      : null;
       const sellTargetPrice = row.sell_target_price ? parseFloat(row.sell_target_price) : null;
-      const estValue    = manualPrice ?? (row.estimated_value ? parseFloat(row.estimated_value) : null);
+      const estimatePrice  = row.estimate_price  ? parseFloat(row.estimate_price)  : null;
+      const estimatedValue = row.estimated_value ? parseFloat(row.estimated_value) : null;
+      // Same precedence as frontend effectiveValue (portfolio.js): manualPrice →
+      // estimatePrice → estimatedValue. Used for sellTargetReached below, which
+      // would otherwise miss cards where the post-rebuild estimate_price has
+      // reached the target but the legacy estimated_value column hasn't. Same
+      // bug class as 12e207c (get-value precedence) and 0ae510a (admin SQL
+      // precedence).
+      const estValue    = manualPrice ?? estimatePrice ?? estimatedValue;
       const sellTargetReached = sellTargetPrice != null && estValue != null && estValue >= sellTargetPrice;
 
       return {
@@ -105,7 +113,7 @@ exports.handler = async (event) => {
         myCost,
         sellTargetPrice,
         sellTargetReached,
-        estimatedValue:   estValue,
+        estimatedValue,
         avgSalePrice:     row.avg_sale_price   ? parseFloat(row.avg_sale_price)   : null,
         lastSalePrice:    row.last_sale_price  ? parseFloat(row.last_sale_price)  : null,
         numSales:         row.num_sales        ?? null,
@@ -117,9 +125,13 @@ exports.handler = async (event) => {
         priceSource:      manualPrice !== null ? "manual" : (row.price_source ?? null),
         valueLastUpdated: row.value_last_updated ?? null,
         // Valuation rebuild fields per .agents/valuation-rebuild-plan.md §3.
-        // Frontend reads estimatePrice as the new headline value; estimatedValue
-        // remains populated as a fallback during the staggered transition.
-        estimatePrice:         row.estimate_price          ? parseFloat(row.estimate_price)          : null,
+        // estimatePrice is the canonical post-rebuild price; estimatedValue
+        // (above) remains as the legacy raw-column fallback. Frontend's
+        // effectiveValue helper (portfolio.js) handles the manualPrice ??
+        // estimatePrice ?? estimatedValue precedence per the canonical Card
+        // shape; the backend exposes the three raw fields and does not
+        // pre-resolve.
+        estimatePrice,
         estimatePriceLow:      row.estimate_price_low      ? parseFloat(row.estimate_price_low)      : null,
         estimatePriceHigh:     row.estimate_price_high     ? parseFloat(row.estimate_price_high)     : null,
         estimateConfidence:    row.estimate_confidence    != null ? parseFloat(row.estimate_confidence) : null,
