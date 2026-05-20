@@ -534,16 +534,50 @@ just anchors the deploy event.
   the wiring or the exposure. §6 atomic-boundary test #2 (single-line
   summary): "add CloudWatch alarms" — no "and" needed. ✓
 - **Verify.**
-  1. `npm run cdk -- diff` shows: 1 SNS topic, 1 SNS email
-     subscription, OQ-2-count alarms, IAM permissions for CloudWatch
-     → SNS Publish.
+  1. `npm run cdk -- diff` shows: 1 SNS Topic, 1 SNS Subscription,
+     9 Alarms, 1 CfnOutput (`AlertTopicArn`). **No** explicit IAM or
+     `AWS::SNS::TopicPolicy` resource — CDK same-account
+     CloudWatch → SNS uses service-trust default; no explicit IAM
+     resource is synthesized. This is correct behavior, not a gap.
+     (Amended 2026-05-20 — original step 1 asserted IAM permissions
+     would appear; that was wrong.)
   2. `npm run cdk -- deploy` succeeds.
   3. Email subscription confirmation arrives at OQ-4-locked address;
      confirm via the link in the email (manual step — SNS requires
      subscriber confirmation before delivery).
-  4. `aws cloudwatch describe-alarms --query 'length(MetricAlarms)' --output text`
-     returns the OQ-2-locked count.
-  5. End-to-end notification test: pick one alarm (suggest
+  4. Verify SNS subscription is `Confirmed` (not
+     `PendingConfirmation`) **before running the smoke-test in step
+     6**. Any alarm publish to a `PendingConfirmation` subscription
+     is silently dropped by SNS — the smoke-test would yield no
+     email and falsely look like a path failure.
+
+     PowerShell:
+     ```
+     aws sns list-subscriptions-by-topic `
+       --topic-arn <ARN from CfnOutput AlertTopicArn> `
+       --region us-east-1 `
+       --query 'Subscriptions[].[Endpoint,SubscriptionArn]' `
+       --output table
+     ```
+     Expected: `raheel4293@gmail.com` row with `SubscriptionArn`
+     NOT equal to `PendingConfirmation` (will be an actual ARN).
+     (Inserted 2026-05-20 — original §6 had no explicit ordering gate
+     between confirmation and smoke-test.)
+  5. Prefix-filtered alarm count returns 9. Raw
+     `length(MetricAlarms)` is fragile if any AWS-managed service
+     auto-creates alarms (e.g., Performance Insights). Use the
+     prefix filter for our three alarm families:
+
+     PowerShell:
+     ```
+     aws cloudwatch describe-alarms --region us-east-1 `
+       --query 'length(MetricAlarms[?starts_with(AlarmName, `Lambda-`) || starts_with(AlarmName, `RDS-`) || starts_with(AlarmName, `HttpApi-`)])' `
+       --output text
+     ```
+     Bash equivalent: same query string, no escaping changes.
+     Expected: `9`. (Amended 2026-05-20 — original step 4 used raw
+     describe-alarms count, fragile if AWS auto-creates alarms.)
+  6. End-to-end notification test: pick one alarm (suggest
      `Lambda-Errors-Aggregate` since it's safe to flip), run
      `aws cloudwatch set-alarm-state --alarm-name <name>
      --state-value ALARM --state-reason "smoke test"`; confirm email
@@ -709,6 +743,19 @@ Notes:
 - Threshold values are conservative defaults. Tune after first week
   of real traffic data — record any tuning as a separate "monitoring:
   tune <alarm> threshold" commit per §6 atomicity.
+- **`treatMissingData` lock (added 2026-05-20):** all 9 alarms use
+  `cloudwatch.TreatMissingData.NOT_BREACHING`. Rationale: sparse
+  counter metrics (`Errors`, `Throttles`, `5xx`, `4xx`) only publish
+  data points when nonzero; treating missing data as `MISSING`
+  would leave those alarms in `INSUFFICIENT_DATA` indefinitely
+  during idle periods, masking the alarm's signal. For continuous
+  RDS gauge metrics (`CPUUtilization`, `DatabaseConnections`,
+  `FreeableMemory`, `ACUUtilization`) and the `Latency` p99,
+  `NOT_BREACHING` is functionally equivalent to `MISSING` during
+  normal operation. Reversal trigger: first observed false-negative
+  where a real Lambda/HttpApi error condition coincided with
+  missing-data treatment masking the alarm (would indicate
+  `BREACHING` or `MISSING` is more appropriate for sparse counters).
 
 - (A) **Accept the table above as locked.**
 - (B) **Modify specific rows.** Specify which.
