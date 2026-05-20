@@ -199,6 +199,9 @@ treatment. The form of verification depends on what changed:
 - Code change → run the tests that exist; read the output.
 - Schema change → query `information_schema` to confirm the columns
   exist with the expected types.
+- Backend code commit → after pushing, run `cdk diff` and confirm
+  zero pending changes for production-affecting resources. Non-zero
+  means a `cdk deploy` is overdue. See §5 pattern 9.
 - Backend deploy → smoke test the affected Lambdas; check CloudWatch
   for new errors in the deploy window.
 - Frontend deploy → exercise the affected UI in a browser; watch the
@@ -541,6 +544,36 @@ advisory. The "~20 resources" threshold sometimes cited (e.g.,
 in `.agents/node22-lts-upgrade-plan.md` §3.8) is a defensive
 heuristic, not a known firing point — the actual omission
 boundary is undocumented.
+
+### 9. Backend code committed but not deployed
+
+**What it is.** This codebase has split deploy paths: frontend
+auto-deploys to Amplify on every push to `master`; backend deploys
+via explicit `cdk deploy`. A commit that touches both surfaces will
+deploy the frontend half automatically and leave the backend half
+waiting for someone to run `cdk deploy`. The two paths can desync
+indefinitely with no signal until the next unrelated `cdk deploy`
+happens to expose the gap.
+
+**Evidence.** Commit `9cbf9cc` (2026-05-13) renamed the JSON field
+`targetPrice` → `sellTargetPrice` across 5 backend Lambdas + 4
+frontend files. Frontend auto-deployed on push; backend `cdk deploy`
+was missed. The codebase ran ~13 hours of silent contract drift
+(~55 read invocations, 0 writes, 0 errors, 0 alarms) before
+discovery during P0 Hardening Session A's `cdk diff` gate. Full
+post-mortem in
+[`incident-2026-05-14-undeployed-lambda-drift.md`](./incident-2026-05-14-undeployed-lambda-drift.md)
+(`ab20584`).
+
+**Rule.** Every backend-touching commit requires an accompanying
+`cdk deploy` before the next commit lands. Verification step in §3
+(Verify phase): after pushing, run `cdk diff` and confirm zero
+pending changes for production-affecting resources. Non-zero pending
+changes mean a `cdk deploy` is overdue. Related: §5 pattern 8
+codifies a parallel discipline for trusting `cdk diff`'s output
+itself — both patterns share the broader principle that diff-shaped
+tools are starting points for investigation, not conclusions (see
+the incident doc's §8 for the tool-vs-discipline generalization).
 
 ---
 
