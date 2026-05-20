@@ -280,6 +280,41 @@ drift. Manual `cdk deploy` + auto Amplify deploy can desync
 indefinitely without signal. This gap is parked separately in
 ROADMAP — see §5.4 below.
 
+### 3.6 Execute-phase discovery: backup-window/maintenance-window overlap rejected by RDS API
+
+Surfaced during Commit 2's deploy attempt (2026-05-19 22:37 ET).
+The initial OQ-5 lock value of `preferredWindow: "06:00-06:30"`
+UTC was rejected by AWS RDS at deploy time with:
+
+> "The backup window and maintenance window must not overlap.
+> (Service: Rds, Status Code: 400)"
+
+The existing maintenance window is `sat:06:18-sat:06:48` UTC
+(AWS-auto-assigned). The locked backup window `06:00-06:30`
+partially overlaps (06:18–06:30 Saturday).
+
+OQ-5's original rationale stated: *"The minor Saturday overlap
+with the maintenance window is fine — Aurora handles backup and
+maintenance simultaneously."*
+
+**That assertion was wrong at the RDS API level.** AWS RDS rejects
+ANY overlap between the two windows at the configuration layer,
+regardless of Aurora's actual operational capability to run them
+simultaneously. The constraint is a configuration-time validation,
+not a runtime conflict check.
+
+**Deploy outcome.** CloudFormation auto-rolled back cleanly to
+`UPDATE_ROLLBACK_COMPLETE` state. Zero data impact. The change set
+was created successfully (`describe-change-set` verified scope as
+1 RDS::DBCluster Modify with `Replacement: False`); the failure
+was during CloudFormation's execution of the change set, not
+during change-set construction.
+
+**Re-lock OQ-5.** `preferredWindow` value changes from
+`"06:00-06:30"` to `"07:00-07:30"`. Starts 12 minutes after the
+maintenance window ends. Maintains the same low-traffic
+positioning (02:00–02:30 US Central / 03:00–03:30 ET).
+
 ---
 
 ## 4. Frontend changes (file-by-file)
@@ -762,13 +797,16 @@ two-line diff for forever-undocumented timing — operationally
 unclean for OPERATIONS.md §1 which wants to record "snapshots are
 taken at <X>".
 
-**Locked: (A).** `06:00–06:30 UTC` (= 01:00–01:30 US Central).
-Genuinely low-traffic for this app's user base. Documented in IaC
-means OPERATIONS.md §1 can cite a concrete window rather than
-"AWS-auto." The minor Saturday overlap with the maintenance window
-(`sat:06:18-sat:06:48` UTC) is fine — Aurora handles backup and
-maintenance simultaneously. No reversal trigger needed unless usage
-patterns change significantly.
+**Locked: (B), re-locked 2026-05-19.** `07:00–07:30 UTC`
+(= 02:00–02:30 US Central / 03:00–03:30 ET). The original lock at
+(A) `06:00–06:30 UTC` was rejected by the AWS RDS API on the
+2026-05-19 deploy attempt — see §3.6 for full discovery. The two
+windows must be non-overlapping at the configuration layer
+regardless of Aurora's runtime ability to coexist them. (B) starts
+12 minutes after the maintenance window `sat:06:18-sat:06:48` ends,
+fully clear. Same low-traffic rationale as the original (A) lock;
+documented in IaC means OPERATIONS.md §1 can still cite a concrete
+window. No reversal trigger.
 
 ### OQ-6 — Commit chain ordering
 
