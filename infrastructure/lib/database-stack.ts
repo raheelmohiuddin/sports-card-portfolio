@@ -49,6 +49,10 @@ export class DatabaseStack extends Construct {
       enableDataApi: true,
       removalPolicy: cdk.RemovalPolicy.RETAIN,
       deletionProtection: true,
+      backup: {
+        retention: cdk.Duration.days(7),
+        preferredWindow: "07:00-07:30",
+      },
     });
 
     this.secret = this.cluster.secret!;
