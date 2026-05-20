@@ -21,12 +21,12 @@ export class AuthStack extends Construct {
     // We grant cognito-idp:AdminUpdateUserAttributes back on the pool ARN
     // after pool creation (chicken-and-egg → use addToRolePolicy below).
     const postConfirmationFn = new NodejsFunction(this, "PostConfirmation", {
-      runtime: lambda.Runtime.NODEJS_20_X,
+      runtime: lambda.Runtime.NODEJS_22_X,
       timeout: cdk.Duration.seconds(10),
       memorySize: 256,
       functionName: "scp-post-confirmation",
       entry: path.join(__dirname, "../../backend/functions/auth/post-confirmation.js"),
-      bundling: { minify: false, sourceMap: false, target: "node20" },
+      bundling: { minify: false, sourceMap: false, target: "node22" },
     });
 
     // V3 — Cognito refuses schema attribute updates (preferred_username

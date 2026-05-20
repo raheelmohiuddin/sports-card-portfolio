@@ -60,7 +60,7 @@ export class ApiStack extends Construct {
     // NodejsFunction uses esbuild to bundle each handler + its imports into a
     // single file — no node_modules directory needed in the deployment zip.
     const sharedNodejsProps = {
-      runtime: lambda.Runtime.NODEJS_20_X,
+      runtime: lambda.Runtime.NODEJS_22_X,
       timeout: cdk.Duration.seconds(30),
       memorySize: 512,
       vpc: props.vpc,
@@ -70,8 +70,7 @@ export class ApiStack extends Construct {
       bundling: {
         minify: false,
         sourceMap: false,
-        // esbuild targets Node 20
-        target: "node20",
+        target: "node22",
       },
     };
 
