@@ -6,6 +6,8 @@ dist/
 cdk.out/
 cdk.context.json
 cdk-outputs.json
+cdk-*.txt
+cfn-deployed-template.*
 out.json
 frontend/src/aws-exports.js
 *.js.map

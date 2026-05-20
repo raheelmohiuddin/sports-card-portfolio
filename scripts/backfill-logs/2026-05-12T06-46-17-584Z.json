@@ -1,0 +1,378 @@
+{
+  "startedAt": "2026-05-12T06:47:36.797Z",
+  "decisions": [
+    {
+      "cert": "158313469",
+      "decision": "skipped",
+      "approval": "manual"
+    },
+    {
+      "cert": "148861529",
+      "decision": "applied",
+      "approval": "auto",
+      "idMismatch": false,
+      "from": {
+        "cardhedger_id": "1767282529218x940317926827627400",
+        "estimated_value": "698.90",
+        "variant": null
+      },
+      "to": {
+        "cardhedger_id": "1767282529218x940317926827627400",
+        "variant": "X-Fractor",
+        "estimate_price": 672,
+        "estimate_confidence": 1,
+        "estimate_method": "direct"
+      }
+    },
+    {
+      "cert": "03282869",
+      "decision": "applied",
+      "approval": "auto",
+      "idMismatch": false,
+      "from": {
+        "cardhedger_id": "1695175037660x324265512725496300",
+        "estimated_value": "7305.26",
+        "variant": null
+      },
+      "to": {
+        "cardhedger_id": "1695175037660x324265512725496300",
+        "variant": "Essential Credentials Future",
+        "estimate_price": 9400,
+        "estimate_confidence": 0.282,
+        "estimate_method": "direct"
+      }
+    },
+    {
+      "cert": "155434781",
+      "decision": "no_data"
+    },
+    {
+      "cert": "28502022",
+      "decision": "no_data"
+    },
+    {
+      "cert": "96287380",
+      "decision": "applied",
+      "approval": "auto",
+      "idMismatch": false,
+      "from": {
+        "cardhedger_id": "1687993974477x685136523964710900",
+        "estimated_value": "3144.40",
+        "variant": null
+      },
+      "to": {
+        "cardhedger_id": "1687993974477x685136523964710900",
+        "variant": "Full Art",
+        "estimate_price": 3050,
+        "estimate_confidence": 1,
+        "estimate_method": "direct"
+      }
+    },
+    {
+      "cert": "125736011",
+      "decision": "applied",
+      "approval": "auto",
+      "idMismatch": false,
+      "from": {
+        "cardhedger_id": "1732936704151x306860576612707500",
+        "estimated_value": "12969.90",
+        "variant": null
+      },
+      "to": {
+        "cardhedger_id": "1732936704151x306860576612707500",
+        "variant": "Base",
+        "estimate_price": 14525,
+        "estimate_confidence": 1,
+        "estimate_method": "direct"
+      }
+    },
+    {
+      "cert": "150931689",
+      "decision": "applied",
+      "approval": "auto",
+      "idMismatch": false,
+      "from": {
+        "cardhedger_id": "1757369331446x585541923607937000",
+        "estimated_value": "32169.34",
+        "variant": null
+      },
+      "to": {
+        "cardhedger_id": "1757369331446x585541923607937000",
+        "variant": "Base",
+        "estimate_price": 33500,
+        "estimate_confidence": 0.9548,
+        "estimate_method": "direct"
+      }
+    },
+    {
+      "cert": "65534500",
+      "decision": "applied",
+      "approval": "auto",
+      "idMismatch": false,
+      "from": {
+        "cardhedger_id": "1664422049907x737490529634600800",
+        "estimated_value": "3867.10",
+        "variant": null
+      },
+      "to": {
+        "cardhedger_id": "1664422049907x737490529634600800",
+        "variant": "Full Art",
+        "estimate_price": 4428.33,
+        "estimate_confidence": 1,
+        "estimate_method": "direct"
+      }
+    },
+    {
+      "cert": "65534500",
+      "decision": "applied",
+      "approval": "auto",
+      "idMismatch": false,
+      "from": {
+        "cardhedger_id": "1664422049907x737490529634600800",
+        "estimated_value": "4537.50",
+        "variant": null
+      },
+      "to": {
+        "cardhedger_id": "1664422049907x737490529634600800",
+        "variant": "Full Art",
+        "estimate_price": 4428.33,
+        "estimate_confidence": 1,
+        "estimate_method": "direct"
+      }
+    },
+    {
+      "cert": "111268274",
+      "decision": "skipped",
+      "approval": "manual"
+    },
+    {
+      "cert": "17610377",
+      "decision": "applied",
+      "approval": "auto",
+      "idMismatch": false,
+      "from": {
+        "cardhedger_id": "1667943805261x299137130302272060",
+        "estimated_value": "10939.90",
+        "variant": null
+      },
+      "to": {
+        "cardhedger_id": "1667943805261x299137130302272060",
+        "variant": "Base",
+        "estimate_price": 10566.75,
+        "estimate_confidence": 0.0769,
+        "estimate_method": "direct_adjusted"
+      }
+    },
+    {
+      "cert": "17610377",
+      "decision": "applied",
+      "approval": "auto",
+      "idMismatch": false,
+      "from": {
+        "cardhedger_id": "1667943805261x299137130302272060",
+        "estimated_value": "10939.90",
+        "variant": "Base"
+      },
+      "to": {
+        "cardhedger_id": "1667943805261x299137130302272060",
+        "variant": "Base",
+        "estimate_price": 10566.75,
+        "estimate_confidence": 0.0769,
+        "estimate_method": "direct_adjusted"
+      }
+    },
+    {
+      "cert": "63140444",
+      "decision": "applied",
+      "approval": "auto",
+      "idMismatch": false,
+      "from": {
+        "cardhedger_id": "1658270131641x664931731287740800",
+        "estimated_value": "5639.00",
+        "variant": null
+      },
+      "to": {
+        "cardhedger_id": "1658270131641x664931731287740800",
+        "variant": "Blue",
+        "estimate_price": 9650,
+        "estimate_confidence": 0.161,
+        "estimate_method": "direct"
+      }
+    },
+    {
+      "cert": "150582399",
+      "decision": "no_data"
+    },
+    {
+      "cert": "21364651",
+      "decision": "skipped",
+      "approval": "manual"
+    },
+    {
+      "cert": "148429683",
+      "decision": "applied",
+      "approval": "auto",
+      "idMismatch": false,
+      "from": {
+        "cardhedger_id": "1762727230420x227139533791821600",
+        "estimated_value": "2762.40",
+        "variant": null
+      },
+      "to": {
+        "cardhedger_id": "1762727230420x227139533791821600",
+        "variant": "Base",
+        "estimate_price": 2760.96,
+        "estimate_confidence": 1,
+        "estimate_method": "direct"
+      }
+    },
+    {
+      "cert": "150125873",
+      "decision": "applied",
+      "approval": "auto",
+      "idMismatch": false,
+      "from": {
+        "cardhedger_id": "1762727230420x227139533791821600",
+        "estimated_value": "2762.40",
+        "variant": null
+      },
+      "to": {
+        "cardhedger_id": "1762727230420x227139533791821600",
+        "variant": "Base",
+        "estimate_price": 2760.96,
+        "estimate_confidence": 1,
+        "estimate_method": "direct"
+      }
+    },
+    {
+      "cert": "121731112",
+      "decision": "no_data"
+    },
+    {
+      "cert": "42291668",
+      "decision": "applied",
+      "approval": "auto",
+      "idMismatch": false,
+      "from": {
+        "cardhedger_id": "1627010526322x568822845319957060",
+        "estimated_value": "6202.10",
+        "variant": "Blue Wave"
+      },
+      "to": {
+        "cardhedger_id": "1627010526322x568822845319957060",
+        "variant": "Blue Wave",
+        "estimate_price": 6155,
+        "estimate_confidence": 0.4017,
+        "estimate_method": "card_interpolation"
+      }
+    },
+    {
+      "cert": "42291668",
+      "decision": "skipped",
+      "approval": "manual"
+    },
+    {
+      "cert": "101154849",
+      "decision": "skipped",
+      "approval": "manual"
+    },
+    {
+      "cert": "116835000",
+      "decision": "no_data"
+    },
+    {
+      "cert": "85830854",
+      "decision": "applied",
+      "approval": "auto",
+      "idMismatch": false,
+      "from": {
+        "cardhedger_id": "1625707763017x693073286428549360",
+        "estimated_value": "22559.50",
+        "variant": null
+      },
+      "to": {
+        "cardhedger_id": "1625707763017x693073286428549360",
+        "variant": "Refractor",
+        "estimate_price": 31000,
+        "estimate_confidence": 0.666,
+        "estimate_method": "direct"
+      }
+    },
+    {
+      "cert": "27120870",
+      "decision": "applied",
+      "approval": "auto",
+      "idMismatch": false,
+      "from": {
+        "cardhedger_id": "1666051333235x528756288342634430",
+        "estimated_value": "5760.00",
+        "variant": null
+      },
+      "to": {
+        "cardhedger_id": "1666051333235x528756288342634430",
+        "variant": "Platinum Medallion",
+        "estimate_price": 5760,
+        "estimate_confidence": 0.0706,
+        "estimate_method": "direct"
+      }
+    },
+    {
+      "cert": "27120870",
+      "decision": "applied",
+      "approval": "auto",
+      "idMismatch": false,
+      "from": {
+        "cardhedger_id": "1666051333235x528756288342634430",
+        "estimated_value": "5760.00",
+        "variant": null
+      },
+      "to": {
+        "cardhedger_id": "1666051333235x528756288342634430",
+        "variant": "Platinum Medallion",
+        "estimate_price": 5760,
+        "estimate_confidence": 0.0706,
+        "estimate_method": "direct"
+      }
+    },
+    {
+      "cert": "148861537",
+      "decision": "applied",
+      "approval": "auto",
+      "idMismatch": false,
+      "from": {
+        "cardhedger_id": "1766864656368x727063608337711400",
+        "estimated_value": "418.00",
+        "variant": null
+      },
+      "to": {
+        "cardhedger_id": "1766864656368x727063608337711400",
+        "variant": "Base",
+        "estimate_price": 405,
+        "estimate_confidence": 0.5843,
+        "estimate_method": "direct"
+      }
+    },
+    {
+      "cert": "93794097",
+      "decision": "applied",
+      "approval": "auto",
+      "idMismatch": false,
+      "from": {
+        "cardhedger_id": "1708405886740x952933036486960300",
+        "estimated_value": "1089.79",
+        "variant": null
+      },
+      "to": {
+        "cardhedger_id": "1708405886740x952933036486960300",
+        "variant": "Red Ice",
+        "estimate_price": 1238,
+        "estimate_confidence": 1,
+        "estimate_method": "direct"
+      }
+    },
+    {
+      "cert": "146725674",
+      "decision": "no_data"
+    }
+  ]
+}
