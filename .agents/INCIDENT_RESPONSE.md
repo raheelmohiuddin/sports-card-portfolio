@@ -120,17 +120,15 @@ cross-reference parity.
 - **`RDS-Connections-High`** (Sev-2) — Connection count averaged
   above 80 in a 5-min window. First move: query
   `pg_stat_activity` via the RDS Data API to enumerate active
-  connections by `client_addr`, `state`, `query_start`, and
-  `state_change`. (If `application_name` were set by our
-  connection layer in
-  [backend/functions/_db.js](../backend/functions/_db.js) it would
-  identify the calling Lambda; we don't currently set it — see
-  [ROADMAP.md](./ROADMAP.md) tech debt entry for the gap. Without
-  it, identify the calling Lambda by correlating `client_addr`
-  (NAT-gateway IPs) and timing with CloudWatch invocation
-  metrics.) Suspect a connection-pool leak (Lambdas not closing
-  connections in `finally` blocks) or a cold-start burst opening
-  fresh connections faster than they idle out.
+  connections by `application_name`, `client_addr`, `state`,
+  `query_start`, and `state_change`. The `application_name`
+  column carries the Lambda function name (set in
+  [backend/functions/_db.js](../backend/functions/_db.js)'s Pool
+  config from `process.env.AWS_LAMBDA_FUNCTION_NAME`) and
+  identifies the calling Lambda directly. Suspect a
+  connection-pool leak (Lambdas not closing connections in
+  `finally` blocks) or a cold-start burst opening fresh
+  connections faster than they idle out.
 
 - **`RDS-FreeableMemory-Low`** (Sev-1) — Cluster has scaled to max
   ACU AND physical memory is near-exhausted. First move: confirm

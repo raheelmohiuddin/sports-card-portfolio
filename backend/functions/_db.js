@@ -21,6 +21,7 @@ async function getPool() {
     ssl: { rejectUnauthorized: false },
     max: 5,
     idleTimeoutMillis: 30000,
+    application_name: process.env.AWS_LAMBDA_FUNCTION_NAME,
   });
 
   return pool;
