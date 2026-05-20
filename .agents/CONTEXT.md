@@ -50,11 +50,37 @@ hosted on Amplify, fronted by CloudFront + WAF.
 - **DB cluster ARN**: `arn:aws:rds:us-east-1:501789774892:cluster:sportscardportfolio-databasecluster5b53a178-asr01cwjobbs`
 - **DB secret ARN**: `arn:aws:secretsmanager:us-east-1:501789774892:secret:SportsCardPortfolioDatabase-etmMTTGC8xX3-G6o7EM`
 - **DB name**: `cardportfolio`, master user `dbadmin`
+- **DB backup retention**: 7 days, preferred window `07:00-07:30` UTC (PITR coverage widens to the full 7 days as the new retention accumulates from 2026-05-20)
 - **API endpoint**: `https://d7r0yfjooj.execute-api.us-east-1.amazonaws.com`
 - **Cognito user pool**: `us-east-1_77vBnz05o`, client `1unui8cgfcl3a6iq2iv1bl4d68`
 - **CloudFront URL**: `https://dfsp491q2ndfx.cloudfront.net`
 - **Card images bucket**: `sports-card-images-501789774892`
+- **Alarm SNS topic ARN**: `arn:aws:sns:us-east-1:501789774892:SportsCardPortfolio-MonitoringAlertTopicB48B06C2-pnXUQDHo1pmd` (CloudFormation output key is hash-suffixed by CDK — see [OPERATIONS.md §2](./OPERATIONS.md) for the `contains()` lookup)
 - **Aurora is in PRIVATE_ISOLATED subnets**. Direct connection from your laptop is impossible. Use **RDS Data API** (`enableDataApi: true` is set on the cluster) — Query Editor in the console, or `aws rds-data execute-statement` from CLI.
+
+### Alarm inventory
+
+Nine CloudWatch alarms deployed by [`infrastructure/lib/monitoring-stack.ts`](../infrastructure/lib/monitoring-stack.ts) (Session A Commit 3, 2026-05-20). This table is the architectural inventory — "what was deployed." Operational procedures (silencing, subscriber management, smoke-testing, cost) live in [OPERATIONS.md §2](./OPERATIONS.md). Incident-response severity classification and first-glance interpretation per alarm live in [INCIDENT_RESPONSE.md §1](./INCIDENT_RESPONSE.md).
+
+| Alarm name | Namespace · Metric (Stat) | Dimensions | Threshold | Eval (period × N) | Severity |
+|---|---|---|---|---|---|
+| `Lambda-Errors-Aggregate` | AWS/Lambda · `Errors` (Sum) | none (aggregate) | > 5 | 5 min × 1 | Sev-1 |
+| `Lambda-Throttles-Aggregate` | AWS/Lambda · `Throttles` (Sum) | none (aggregate) | > 0 | 5 min × 1 | Sev-1 |
+| `RDS-CPU-High` | AWS/RDS · `CPUUtilization` (Average) | `DBClusterIdentifier` | > 80 % | 5 min × 2 | Sev-2 |
+| `RDS-Connections-High` | AWS/RDS · `DatabaseConnections` (Average) | `DBClusterIdentifier` | > 80 | 5 min × 1 | Sev-2 |
+| `RDS-FreeableMemory-Low` | AWS/RDS · `FreeableMemory` (Average) | `DBClusterIdentifier` | < 100 MiB | 5 min × 2 | Sev-1 |
+| `RDS-ACU-NearMax` | AWS/RDS · `ACUUtilization` (Average) | `DBClusterIdentifier` | > 87.5 % | 5 min × 2 | Sev-2 |
+| `HttpApi-5xx-High` | AWS/ApiGateway · `5xx` (Sum) | `ApiId` | > 5 | 5 min × 1 | Sev-1 |
+| `HttpApi-4xx-High` | AWS/ApiGateway · `4xx` (Sum) | `ApiId` | > 50 | 5 min × 1 | Sev-3 |
+| `HttpApi-Latency-High` | AWS/ApiGateway · `Latency` (p99) | `ApiId` | > 3000 ms | 10 min × 1 | Sev-2 |
+
+**Dimension values.** `DBClusterIdentifier` = `sportscardportfolio-databasecluster5b53a178-asr01cwjobbs` (matches the AWS environment block above). `ApiId` = the live HttpApi v2 ID extracted from the API endpoint in the AWS environment block above. The `5xx` / `4xx` / `Latency` metric names are HttpApi v2 (lowercase) — using v1 REST API names (`5XXError`, etc.) silently returns no data.
+
+**Missing-data treatment.** All 9 alarms use `TreatMissingData.NOT_BREACHING`. Sparse counter metrics (`Errors`, `Throttles`, `5xx`, `4xx`) only publish data points when nonzero, so treating missing as `MISSING` would leave them in `INSUFFICIENT_DATA` indefinitely during idle periods and mask their signal. Lock rationale in [.agents/p0-hardening-session-a-plan.md §8 OQ-2](./p0-hardening-session-a-plan.md).
+
+**Notification path.** All 9 alarms publish to the SNS topic recorded in the AWS environment block above; subscriber list and add/remove procedures live in [OPERATIONS.md §2](./OPERATIONS.md).
+
+**Source.** All 9 alarms are defined in [`infrastructure/lib/monitoring-stack.ts`](../infrastructure/lib/monitoring-stack.ts) (Session A Commit 3, 2026-05-20).
 
 ---
 
