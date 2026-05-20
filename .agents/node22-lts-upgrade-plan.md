@@ -60,8 +60,8 @@ docs). Concretely it ships:
   version, so the doc is not version-pinned and needs no update.
   Version pinning lives in `ENGINEERING_STANDARDS.md` §2 only.
 
-The rollout produces **3 commits, 1 `cdk deploy`**. Commit 1
-deploys infrastructure; Commits 2 and 3 do not.
+The rollout produces **4 commits, 1 `cdk deploy`**. Commit 1
+deploys infrastructure; Commits 2, 3, and 4 do not.
 
 ---
 
@@ -219,6 +219,78 @@ use`, Windows via `nvm-windows`'s `nvm use` if/when installed). No
 effect on contributors who don't use nvm; no effect on CI (which
 uses `actions/setup-node` instead).
 
+### 3.7 Execute-phase discovery: cdk diff display omission
+
+Surfaced during Commit 1's cdk-diff gate (2026-05-19, this
+session). `cdk diff` displayed only **46 of 56 expected Lambda
+Runtime updates**. The 10 omitted Lambdas (including
+`Auth/PostConfirmation`, `Api/PsaLookup`, `Api/PortfolioValue`,
+`Api/PortfolioRefresh`, `Api/PortfolioHistory`,
+`Api/PricingPreview`, `Api/UpdatePrice`, `Api/UpdateCard`,
+`Api/UnmarkAttending`, `Api/TravelTime`) were silently dropped
+from the display layer but **were present in the underlying
+CloudFormation change set**.
+
+Investigation steps that surfaced this:
+
+1. `cdk diff` and `cdk diff --strict` both showed 46 Runtime
+   updates (expected 56).
+2. Deployed CFN template (via `aws cloudformation get-template`)
+   confirmed all 56 Lambdas currently on `nodejs20.x` — no
+   pre-upgraded ones.
+3. Synthesized template (`cdk.out/SportsCardPortfolio.template.json`)
+   confirmed all 56 changing to `nodejs22.x`.
+4. `cdk deploy --no-execute --change-set-name <name>` created a
+   no-execute change set.
+5. `aws cloudformation describe-change-set` returned **135 total
+   changes** (56 Lambda Function modifies + 39 Lambda Permission
+   modifies + 38 ApiGatewayV2 Integration modifies + 1 Cognito
+   UserPool modify + 1 CDK Metadata modify) — including ALL 56
+   expected Lambda Runtime updates.
+
+**Conclusion:** `cdk diff`'s formatted output is **not
+authoritative** for large multi-Lambda changes. The CloudFormation
+change set (via `aws cloudformation describe-change-set`) is the
+deploy-time source of truth.
+
+This finding generates a new ENGINEERING_STANDARDS §5
+anti-pattern (to land as its own commit before the CI workflow
+commit of this upgrade) — see §3.8 below.
+
+### 3.8 Standards-doc follow-up commit
+
+The cdk diff display omission discovered in §3.7 is anti-pattern
+class — it represents a verification-tool failure mode that
+future contributors must know about. Per ENGINEERING_STANDARDS
+§13 (Standards evolution), this is a NEW §5 entry, not an
+addition to an existing one.
+
+This commits as **Commit 2** in §6 below, between the runtime
+deploy (Commit 1) and the CI workflow update (Commit 3). The new
+§5 entry codifies:
+
+- **Pattern name:** cdk diff display omission for multi-resource
+  changes.
+- **What it is:** `cdk diff`'s formatted output silently drops
+  some changes from its display for large multi-resource diffs.
+  The underlying CloudFormation change set contains all changes;
+  the display layer doesn't.
+- **Evidence:** This commit chain (2026-05-19). `cdk diff` showed
+  46 of 56 Lambda Runtime updates during the Node 22 upgrade;
+  the missing 10 surfaced only via
+  `aws cloudformation describe-change-set` on a `--no-execute`
+  change set.
+- **Rule:** For any infrastructure change touching >20 resources,
+  verify scope via `aws cloudformation describe-change-set` on a
+  `--no-execute` change set, not by reading `cdk diff`'s
+  formatted output alone. The change set is the deploy-time
+  source of truth.
+
+Plan §6 commit sequence renumbers: Commit 1 → Commit 1
+(unchanged), **NEW Commit 2** (standards-doc entry), former
+Commit 2 → Commit 3 (CI workflows + `.nvmrc`), former Commit 3
+→ Commit 4 (doc cleanup).
+
 ---
 
 ## 4. Frontend changes (file-by-file)
@@ -300,8 +372,8 @@ contributors know to check both places.
 
 ## 6. Commit sequence
 
-Three commits, in deploy order. Only Commit 1 invokes `cdk
-deploy`; Commits 2 and 3 do not.
+Four commits, in deploy order. Only Commit 1 invokes `cdk
+deploy`; Commits 2, 3, and 4 do not.
 
 ### Commit 1 — `infra: bump Lambda runtime nodejs20.x → nodejs22.x`
 
@@ -319,16 +391,40 @@ deploy`; Commits 2 and 3 do not.
   every command below has a Bash and a PowerShell variant since
   PowerShell 5.1 doesn't support `&&` chaining (per CONTEXT.md
   §11.1).
-  1. **cdk diff.** Expect only Lambda `Runtime` property updates
-     (56 functions: `nodejs20.x` → `nodejs22.x`) and S3Key
-     updates (56 asset-hash changes from the `target: "node22"`
-     esbuild reconfig). No resource recreations. No unrelated
-     property deltas.
+  1. **cdk diff scope check.** `cdk diff` WILL DISPLAY ~46 of
+     the 56 Lambda Runtime updates. The display layer omits ~10
+     Lambdas silently (`cdk diff` bug; see §3.7). Confirm via the
+     authoritative CFN change set instead — see step 2.
      - Bash: `cd infrastructure && npx cdk diff`
      - PowerShell: `cd infrastructure; if ($?) { npx cdk diff }`
-  2. **Expected cdk diff scale: 56 Lambdas × 2 property changes
-     each ≈ 112 property-level deltas.** Per recon §I, this is
-     normal. Do not panic.
+  2. **Authoritative scope check via CFN change set.** Run
+     `cdk deploy` in `--no-execute` mode to create a change set,
+     then `describe-change-set` to read the actual scope:
+     - PowerShell:
+       ```powershell
+       $ts = Get-Date -Format 'yyyyMMddHHmmss'
+       $csName = "node22-deploy-$ts"
+       cd infrastructure; if ($?) { npx cdk deploy --no-execute --change-set-name $csName --require-approval never }
+       aws cloudformation describe-change-set --stack-name SportsCardPortfolio --region us-east-1 --change-set-name $csName --query 'Changes[].ResourceChange.{Type:ResourceType,Action:Action}' --output text | Group-Object | Sort-Object Count -Descending | Select-Object Count,Name
+       ```
+     Expected scope (135 total changes, zero replacements):
+     - 56 `AWS::Lambda::Function` Modify (the intended Runtime
+       updates)
+     - 39 `AWS::Lambda::Permission` Modify (downstream cascade)
+     - 38 `AWS::ApiGatewayV2::Integration` Modify (downstream
+       cascade)
+     - 1 `AWS::Cognito::UserPool` Modify (PostConfirmation trigger
+       reference)
+     - 1 `AWS::CDK::Metadata` Modify (CDK build-info, expected
+       every deploy)
+
+     Plus 2 stack-level Output modifications (em-dash encoding
+     fixes — cosmetic; the prior Mac-encoded synth used `?`
+     mojibake; Windows synth produces proper `—`).
+
+     The change set must show **ZERO** replacements
+     (`Action=Replace`) and **ZERO** additions (`Action=Add`) and
+     **ZERO** removals (`Action=Remove`).
   3. **cdk deploy** succeeds in one pass. Wall-clock estimate:
      5–10 minutes (vs the usual 2–3) because every Lambda
      re-bundles via `esbuild` and re-uploads its asset.
@@ -416,7 +512,53 @@ require('punycode'), crypto.createCipher). Recon §B confirmed
 zero native modules → no ABI rebuild needed.
 ```
 
-### Commit 2 — `dev tooling: pin Node 22 for CI and nvm users`
+### Commit 2 — `docs: ENGINEERING_STANDARDS §5 — cdk diff display omission anti-pattern`
+
+- **Scope.** Single file: `.agents/ENGINEERING_STANDARDS.md`.
+  Adds a new anti-pattern entry to §5 (the catalog of
+  anti-patterns we reject) capturing the cdk diff display
+  omission discovered during Commit 1's diff-gate.
+- **Atomic boundary justification.** Single doc edit, single
+  logical unit. Per §6 atomic-boundary test #2 (single-line
+  summary): "add §5 anti-pattern for cdk diff display omission"
+  — no "and" needed.
+- **Verify.**
+  1. The new entry exists in §5 with the expected 4-block
+     structure (Name / What it is / Evidence / Rule).
+  2. Cites this session's evidence: Commit 1 SHA (available
+     after Commit 1 lands), the 46-of-56 display vs 56-of-56
+     change-set finding, the `describe-change-set` command as
+     the workaround.
+  3. Sequence numbering within §5 is correct (next number after
+     the existing pattern 7).
+- **Commit message:**
+
+```
+docs: ENGINEERING_STANDARDS §5 — cdk diff display omission anti-pattern
+
+Per ENGINEERING_STANDARDS §13 (Standards evolution) and
+.agents/node22-lts-upgrade-plan.md §3.7 + §3.8.
+
+Adds a new entry to §5 (the catalog of anti-patterns) capturing
+the cdk diff display omission discovered during Commit 1's
+diff-gate (SHA <Commit 1 SHA>, 2026-05-19). cdk diff's formatted
+output silently dropped 10 of 56 expected Lambda Runtime updates;
+the underlying CFN change set (verified via
+`aws cloudformation describe-change-set`) contained all 56 plus
+79 downstream cascades.
+
+Rule established: for any infrastructure change touching >20
+resources, verify scope via `aws cloudformation describe-change-set`
+on a `--no-execute` change set, not by reading cdk diff's
+formatted output alone. The change set is the deploy-time source
+of truth.
+
+Lands between the runtime deploy (Commit 1) and the CI workflow
+update (Commit 3) so the §5 entry can cite the actual Commit 1
+SHA in its Evidence block.
+```
+
+### Commit 3 — `dev tooling: pin Node 22 for CI and nvm users`
 
 - **Scope.** Three files:
   - `.github/workflows/ci.yml` (3 step edits — lines ~30–33, ~49–52,
@@ -461,7 +603,7 @@ Aligns CI runners and local nvm-managed Node versions with the
 Lambda runtime upgrade landed at <Commit 1 SHA>.
 
 Per .agents/node22-lts-upgrade-plan.md §3.3 + §3.4 + §3.6 and §6
-commit 2.
+commit 3.
 
 Files:
 - .github/workflows/ci.yml — 3 jobs: node-version 20 → 22, step
@@ -474,7 +616,7 @@ No effect on contributors who don't use nvm. No effect on the
 Lambda runtime (separate concern from Commit 1).
 ```
 
-### Commit 3 — `docs: ENGINEERING_STANDARDS + ROADMAP — record Node 22 upgrade complete`
+### Commit 4 — `docs: ENGINEERING_STANDARDS + ROADMAP — record Node 22 upgrade complete`
 
 - **Scope.** Two files:
   - `.agents/ENGINEERING_STANDARDS.md` line 63 — `Node 20.x` →
@@ -547,18 +689,23 @@ Per-commit. Each entry is the one-line undo path.
   continue serving traffic on whichever runtime is currently
   active at each moment. Lambdas-in-flight at the time of revert
   finish on their started runtime version.
-- **Commit 2.** `git revert <SHA>`. No deploy. CI workflows
+- **Commit 2.** `git revert <SHA>`. Doc-only; no deploy. Removes
+  the new §5 anti-pattern entry from
+  `ENGINEERING_STANDARDS.md`. **Strongly discouraged** — the
+  anti-pattern is a real verification lesson and reverting it
+  would lose the audit trail.
+- **Commit 3.** `git revert <SHA>`. No deploy. CI workflows
   return to `node-version: 20` on the next workflow run; the
   `.nvmrc` file is deleted. nvm users would need to manually
   switch back to Node 20 with `nvm use 20` after pulling.
-- **Commit 3.** `git revert <SHA>`. Doc-only; no deploy.
+- **Commit 4.** `git revert <SHA>`. Doc-only; no deploy.
   ROADMAP entry moves back to "Tech debt"; ENGINEERING_STANDARDS
   line 63 reverts to `Node 20.x`.
 
-**Compound rollback** (whole upgrade). `git revert` commits 3 →
-2 → 1 in reverse order, with `cdk deploy` after Commit 1's revert
-lands. Returns the system to pre-upgrade state with the AWS
-`nodejs20.x` runtime live. **Note:** AWS Phase 1 deprecation is
+**Compound rollback** (whole upgrade). `git revert` commits 4 →
+3 → 2 → 1 in reverse order, with `cdk deploy` after Commit 1's
+revert lands. Returns the system to pre-upgrade state with the
+AWS `nodejs20.x` runtime live. **Note:** AWS Phase 1 deprecation is
 still active for `nodejs20.x` (2026-04-30 onward) — reverting
 puts the system back on a deprecated runtime that will not
 receive security patches. Rollback is therefore an emergency-only
