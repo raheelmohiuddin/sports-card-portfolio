@@ -2,8 +2,11 @@
 //
 // Single round-trip: each subquery is a scalar so we can return them all
 // from one DB call. Total portfolio value uses COALESCE(manual_price,
-// estimated_value) to mirror what the rest of the app considers a card's
-// current value when both fields are populated.
+// estimate_price, estimated_value) to mirror the frontend effectiveValue
+// precedence (see portfolio/get-value.js). Same bug class as commit 12e207c —
+// estimate_price was added by the valuation rebuild (migration 0002) and
+// needs to sit between manual_price and estimated_value in every precedence
+// chain.
 const { getPool } = require("../_db");
 const { json } = require("../_response");
 const { requireAdmin } = require("../_admin");
@@ -17,7 +20,7 @@ exports.handler = async (event) => {
     SELECT
       (SELECT COUNT(*) FROM users)                                         AS total_users,
       (SELECT COUNT(*) FROM cards)                                         AS total_cards,
-      (SELECT COALESCE(SUM(COALESCE(manual_price, estimated_value)), 0)
+      (SELECT COALESCE(SUM(COALESCE(manual_price, estimate_price, estimated_value)), 0)
          FROM cards)                                                       AS total_value,
       (SELECT COUNT(*) FROM consignments
          WHERE status NOT IN ('declined', 'sold'))                         AS open_consignments

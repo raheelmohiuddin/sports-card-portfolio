@@ -2,8 +2,8 @@
 //
 // Joins on users so the response carries first/last/email alongside the
 // card details — saves the frontend from a follow-up batch lookup. Returns
-// estimated value as the same COALESCE(manual_price, estimated_value) the
-// portfolio page uses.
+// estimated value as the same COALESCE(manual_price, estimate_price,
+// estimated_value) the portfolio page uses (see portfolio/get-value.js).
 const { getPool } = require("../_db");
 const { json } = require("../_response");
 const { requireAdmin } = require("../_admin");
@@ -22,7 +22,7 @@ exports.handler = async (event) => {
       c.player_name,
       c.grade,
       c.grade_description,
-      COALESCE(c.manual_price, c.estimated_value) AS estimated_value,
+      COALESCE(c.manual_price, c.estimate_price, c.estimated_value) AS estimated_value,
       c.added_at,
       u.given_name,
       u.family_name,
