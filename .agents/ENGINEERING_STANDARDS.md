@@ -60,7 +60,7 @@ in this doc.
 
 ## 2. Development environment
 
-**Prerequisites.** Node 20.x, npm, AWS CLI v2 (configured with
+**Prerequisites.** Node 22.x, npm, AWS CLI v2 (configured with
 `us-east-1` as default region), git. Windows / macOS / Linux all
 work — see "Windows quirks" below.
 
