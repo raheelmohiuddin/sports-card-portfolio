@@ -458,21 +458,31 @@ deploy`; Commits 2, 3, and 4 do not.
   7. **CloudWatch logs over the next 15 minutes:** zero new
      `ERROR` entries across `scp-*` log groups. The 15-minute
      window is computed as a Unix-epoch-millis value passed to
-     `--start-time`.
+     `--start-time`. Note: `aws logs filter-log-events` does
+     **not** accept `--log-group-name-prefix` (only
+     `--log-group-name`), so the working pattern enumerates the
+     `scp-*` log groups first via `describe-log-groups`, then
+     iterates `filter-log-events` per group.
      - Bash:
        ```bash
-       aws logs filter-log-events --region us-east-1 \
-         --log-group-name-prefix /aws/lambda/scp- \
-         --start-time $(($(date +%s) - 900))000 \
-         --filter-pattern ERROR
+       startTime=$(( ($(date -u +%s) - 900) * 1000 ))
+       totalErrors=0
+       for g in $(aws logs describe-log-groups --region us-east-1 --log-group-name-prefix /aws/lambda/scp- --query 'logGroups[].logGroupName' --output text); do
+         count=$(aws logs filter-log-events --region us-east-1 --log-group-name "$g" --start-time "$startTime" --filter-pattern ERROR --query 'length(events)' --output text)
+         totalErrors=$((totalErrors + count))
+       done
+       echo "Total ERROR events across all scp-* groups (last 15 min): $totalErrors"
        ```
      - PowerShell:
        ```powershell
-       $startTime = [int64]((Get-Date).ToUniversalTime().AddMinutes(-15) - [datetime]'1970-01-01').TotalMilliseconds
-       aws logs filter-log-events --region us-east-1 `
-         --log-group-name-prefix /aws/lambda/scp- `
-         --start-time $startTime `
-         --filter-pattern ERROR
+       $startTime = [int64](((Get-Date).ToUniversalTime().AddMinutes(-15) - [datetime]'1970-01-01').TotalMilliseconds)
+       $groups = (aws logs describe-log-groups --region us-east-1 --log-group-name-prefix /aws/lambda/scp- --query 'logGroups[].logGroupName' --output text) -split "\s+" | Where-Object { $_ }
+       $totalErrors = 0
+       foreach ($g in $groups) {
+         $events = aws logs filter-log-events --region us-east-1 --log-group-name $g --start-time $startTime --filter-pattern ERROR --output json | ConvertFrom-Json
+         if ($events.events) { $totalErrors += $events.events.Count }
+       }
+       Write-Host "Total ERROR events across all scp-* groups (last 15 min): $totalErrors"
        ```
   8. **Manual: Amplify console Node-version check per §5.3.**
      Recorded as a verified state in the commit body or a
