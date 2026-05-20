@@ -511,6 +511,37 @@ memory in `~/.claude/.../memory/` (not just doc text). Saved memories
 load every session; doc text only loads when consulted. If a
 convention isn't worth a saved memory, it isn't actually locked.
 
+### 8. cdk diff display omission for multi-resource changes
+
+**What it is.** `cdk diff`'s formatted output silently drops some
+changes from its display for large multi-resource diffs. The
+underlying CloudFormation change set contains all changes; the
+display layer doesn't. Reading cdk diff and concluding "scope is
+N" can understate the actual deploy.
+
+**Evidence.** Commit 1 of the Node 22 LTS upgrade (`1effd50`,
+2026-05-19). `cdk diff` and `cdk diff --strict` both showed 46 of
+56 expected Lambda Runtime updates. The missing 10
+(`Auth/PostConfirmation`, `Api/PsaLookup`, `Api/PortfolioValue`,
+`Api/PortfolioRefresh`, `Api/PortfolioHistory`,
+`Api/PricingPreview`, `Api/UpdatePrice`, `Api/UpdateCard`,
+`Api/UnmarkAttending`, `Api/TravelTime`) surfaced only via
+`aws cloudformation describe-change-set` on a `--no-execute`
+change set, which returned 135 total changes including all 56
+Lambda Function modifies plus 79 downstream cascades. Full
+discovery in `.agents/node22-lts-upgrade-plan.md` §3.7.
+
+**Rule.** For any infrastructure change where the displayed
+`cdk diff` scope is the basis for the safety check (i.e., any
+non-trivial deploy), verify scope via
+`aws cloudformation describe-change-set` on a `--no-execute`
+change set, not `cdk diff`'s formatted output alone. The change
+set is the deploy-time source of truth; the cdk diff display is
+advisory. The "~20 resources" threshold sometimes cited (e.g.,
+in `.agents/node22-lts-upgrade-plan.md` §3.8) is a defensive
+heuristic, not a known firing point — the actual omission
+boundary is undocumented.
+
 ---
 
 This list is not exhaustive — it codifies anti-patterns the codebase
