@@ -31,6 +31,7 @@ interface ApiStackProps {
 export class ApiStack extends Construct {
   public readonly apiUrl: string;
   public readonly apiHostname: string;
+  public readonly httpApi: apigwv2.HttpApi;
 
   constructor(scope: Construct, id: string, props: ApiStackProps) {
     super(scope, id);
@@ -627,6 +628,7 @@ export class ApiStack extends Construct {
         allowHeaders: ["Authorization", "Content-Type"],
       },
     });
+    this.httpApi = api;
 
     const authRoute = { authorizer };
 

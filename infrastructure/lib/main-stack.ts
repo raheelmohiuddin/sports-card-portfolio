@@ -5,6 +5,7 @@ import { StorageStack } from "./storage-stack";
 import { DatabaseStack } from "./database-stack";
 import { ApiStack } from "./api-stack";
 import { SecurityStack } from "./security-stack";
+import { MonitoringStack } from "./monitoring-stack";
 
 export class MainStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
@@ -27,5 +28,11 @@ export class MainStack extends cdk.Stack {
     // WAF + CloudFront in front of API Gateway. Shield Standard is automatic
     // on every AWS account and is enabled at no charge for CloudFront and Route 53.
     new SecurityStack(this, "Security", { apiHostname: api.apiHostname });
+
+    new MonitoringStack(this, "Monitoring", {
+      cluster: database.cluster,
+      httpApi: api.httpApi,
+      alertEmail: "raheel4293@gmail.com",
+    });
   }
 }
