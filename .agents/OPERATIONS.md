@@ -38,12 +38,13 @@ snapshots, no cross-region replication, no read replicas.
 
 | Field | Value |
 |---|---|
-| Cluster identifier | `sportscardportfolio-databasecluster5b53a178-asr01cwjobbs` |
+| Cluster identifier | `sportscardportfolio-encrypted-20260520202459` |
 | Region | `us-east-1` |
 | AWS account | `501789774892` |
-| Engine | Aurora PostgreSQL 16.4 |
+| Engine | Aurora PostgreSQL 16.11 |
 | Capacity range | 0.5 – 4 ACU (Serverless v2) |
-| Encryption at rest | **OFF** — see Known gaps below |
+| Encryption at rest | **ON** — KMS key `arn:aws:kms:us-east-1:501789774892:key/84ff3a75-a308-48cf-9dcd-581099b81d5b` (alias `alias/aws/rds`, AWS-managed) |
+| Previous cluster (preserved) | `sportscardportfolio-databasecluster5b53a178-asr01cwjobbs` — unencrypted, retained until 2026-05-27+ decommission per ROADMAP |
 
 Full architectural detail in [CONTEXT.md](./CONTEXT.md) §2.
 
@@ -71,7 +72,7 @@ zero overlap:
 
 ```powershell
 aws rds describe-db-clusters `
-  --db-cluster-identifier sportscardportfolio-databasecluster5b53a178-asr01cwjobbs `
+  --db-cluster-identifier sportscardportfolio-encrypted-20260520202459 `
   --region us-east-1 `
   --query 'DBClusters[0].[PreferredBackupWindow,PreferredMaintenanceWindow]' `
   --output table
@@ -81,7 +82,7 @@ Verify current backup retention + window match this doc:
 
 ```powershell
 aws rds describe-db-clusters `
-  --db-cluster-identifier sportscardportfolio-databasecluster5b53a178-asr01cwjobbs `
+  --db-cluster-identifier sportscardportfolio-encrypted-20260520202459 `
   --region us-east-1 `
   --query 'DBClusters[0].[BackupRetentionPeriod,PreferredBackupWindow]' `
   --output table
@@ -98,7 +99,7 @@ data as it was at 14:32 today, before the bad migration ran."
 
 ```powershell
 aws rds restore-db-cluster-to-point-in-time `
-  --source-db-cluster-identifier sportscardportfolio-databasecluster5b53a178-asr01cwjobbs `
+  --source-db-cluster-identifier sportscardportfolio-encrypted-20260520202459 `
   --db-cluster-identifier sportscardportfolio-pitr-restore-<short-tag> `
   --restore-to-time 2026-05-20T14:32:00Z `
   --region us-east-1
@@ -115,7 +116,7 @@ Automated snapshots (the ones that back PITR):
 
 ```powershell
 aws rds describe-db-cluster-snapshots `
-  --db-cluster-identifier sportscardportfolio-databasecluster5b53a178-asr01cwjobbs `
+  --db-cluster-identifier sportscardportfolio-encrypted-20260520202459 `
   --snapshot-type automated `
   --region us-east-1 `
   --query 'DBClusterSnapshots[].[DBClusterSnapshotIdentifier,SnapshotCreateTime,Status]' `
@@ -142,17 +143,9 @@ restore is the data point that locks the number.
 
 ### Known gaps
 
-- **Encryption at rest is OFF.** Aurora supports `StorageEncrypted`
-  only at cluster creation; the live cluster was created with the
-  default (false). Flipping requires snapshot →
-  restore-to-new-encrypted-cluster → cutover — multi-hour migration
-  with a downtime window. Parked in [ROADMAP.md](./ROADMAP.md)
-  under Tech debt (lands in Session A Commit 6). Trigger to act:
-  any PII/PHI scope expansion OR compliance requirement OR before
-  first non-Raheel user. **Recovery procedures change once
-  encryption ships** because restored snapshots inherit encryption
-  from the source; PITR-restore commands will need additional
-  KMS flags.
+- **Data API NOT enabled on the new (encrypted) cluster.** Post-migration `HttpEndpointEnabled: false`. Tonight's session (2026-05-20) tried four operator surfaces, none worked: (1) `aws rds modify-db-cluster --enable-http-endpoint` — silent no-op on Aurora Serverless v2 via this CLI version; (2) AWS Console Modify panel — no "Enable Data API" toggle exposed; (3) Connectivity & security tab — no toggle; (4) Configuration tab — property not displayed. Cluster recreation with `HttpEndpointEnabled: true` at create-time or AWS support engagement may be required. Tracked in ROADMAP Tech debt "Data API enablement on Aurora Serverless v2 restored cluster." Interim workaround: target the OLD cluster ARN for Data API queries (still alive until 2026-05-27+ decommission).
+- **CDK source still describes the OLD cluster.** Per Path C scope cap (2026-05-20 RDS encryption migration), no CDK source changes shipped tonight. The 4 RDS alarms in `monitoring-stack.ts` still target the OLD cluster's `DBClusterIdentifier`. New encrypted cluster's metrics are currently unmonitored by our alarms. **DO NOT run `cdk deploy` until CDK takeover ships** — see ROADMAP Tech debt "CDK takeover for encrypted cluster (cdk import)" for the bounded next-session work.
+- **PITR-restore from new cluster's snapshots now requires `--kms-key-id`.** Automated snapshots on the encrypted cluster inherit the KMS key. Any future `aws rds restore-db-cluster-to-point-in-time` against the new cluster's snapshots needs `--kms-key-id alias/aws/rds` (or the underlying key ARN) in addition to the standard restore parameters. The shell-command examples above don't include this flag and should be amended when the OLD cluster is decommissioned.
 - **No cross-region replication.** Single-region (us-east-1). If
   us-east-1 has an extended outage, the cluster is unreachable
   until AWS recovers. Acceptable at current scale; revisit at

@@ -46,9 +46,10 @@ hosted on Amplify, fronted by CloudFront + WAF.
 
 **AWS environment** (us-east-1, account `501789774892`):
 - **Stack name**: `SportsCardPortfolio` (single CDK stack)
-- **DB cluster identifier**: `sportscardportfolio-databasecluster5b53a178-asr01cwjobbs`
-- **DB cluster ARN**: `arn:aws:rds:us-east-1:501789774892:cluster:sportscardportfolio-databasecluster5b53a178-asr01cwjobbs`
-- **DB secret ARN**: `arn:aws:secretsmanager:us-east-1:501789774892:secret:SportsCardPortfolioDatabase-etmMTTGC8xX3-G6o7EM`
+- **DB cluster identifier**: `sportscardportfolio-encrypted-20260520202459` (post-encryption-migration; old cluster `sportscardportfolio-databasecluster5b53a178-asr01cwjobbs` preserved until 2026-05-27+ decommission per ROADMAP)
+- **DB cluster ARN**: `arn:aws:rds:us-east-1:501789774892:cluster:sportscardportfolio-encrypted-20260520202459`
+- **DB encryption**: ON. KMS key: `arn:aws:kms:us-east-1:501789774892:key/84ff3a75-a308-48cf-9dcd-581099b81d5b` (alias `alias/aws/rds`, AWS-managed; auto-provisioned during the 2026-05-20 migration).
+- **DB secret ARN**: `arn:aws:secretsmanager:us-east-1:501789774892:secret:SportsCardPortfolioDatabase-etmMTTGC8xX3-G6o7EM` (same ARN preserved across the migration; secret value's `host` field swapped to new cluster's endpoint)
 - **DB name**: `cardportfolio`, master user `dbadmin`
 - **DB backup retention**: 7 days, preferred window `07:00-07:30` UTC (PITR coverage widens to the full 7 days as the new retention accumulates from 2026-05-20)
 - **API endpoint**: `https://d7r0yfjooj.execute-api.us-east-1.amazonaws.com`
@@ -56,7 +57,7 @@ hosted on Amplify, fronted by CloudFront + WAF.
 - **CloudFront URL**: `https://dfsp491q2ndfx.cloudfront.net`
 - **Card images bucket**: `sports-card-images-501789774892`
 - **Alarm SNS topic ARN**: `arn:aws:sns:us-east-1:501789774892:SportsCardPortfolio-MonitoringAlertTopicB48B06C2-pnXUQDHo1pmd` (CloudFormation output key is hash-suffixed by CDK — see [OPERATIONS.md §2](./OPERATIONS.md) for the `contains()` lookup)
-- **Aurora is in PRIVATE_ISOLATED subnets**. Direct connection from your laptop is impossible. Use **RDS Data API** (`enableDataApi: true` is set on the cluster) — Query Editor in the console, or `aws rds-data execute-statement` from CLI.
+- **Aurora is in PRIVATE_ISOLATED subnets**. Direct connection from your laptop is impossible. RDS Data API access is **CURRENTLY UNAVAILABLE on the new cluster** — `HttpEndpointEnabled: false` post-migration; tonight's session tried `aws rds modify-db-cluster --enable-http-endpoint` (silent no-op on Aurora Serverless v2 via this CLI version) and AWS Console Modify panel (no Data API toggle exposed). Workarounds during the gap: (a) use the OLD cluster's Data API ARN (still alive until 2026-05-27+ decommission), (b) exercise via Lambda. ROADMAP Tech debt entry "Data API enablement on Aurora Serverless v2 restored cluster" tracks resolution.
 
 ### Alarm inventory
 
@@ -74,7 +75,7 @@ Nine CloudWatch alarms deployed by [`infrastructure/lib/monitoring-stack.ts`](..
 | `HttpApi-4xx-High` | AWS/ApiGateway · `4xx` (Sum) | `ApiId` | > 50 | 5 min × 1 | Sev-3 |
 | `HttpApi-Latency-High` | AWS/ApiGateway · `Latency` (p99) | `ApiId` | > 3000 ms | 10 min × 1 | Sev-2 |
 
-**Dimension values.** `DBClusterIdentifier` = `sportscardportfolio-databasecluster5b53a178-asr01cwjobbs` (matches the AWS environment block above). `ApiId` = the live HttpApi v2 ID extracted from the API endpoint in the AWS environment block above. The `5xx` / `4xx` / `Latency` metric names are HttpApi v2 (lowercase) — using v1 REST API names (`5XXError`, etc.) silently returns no data.
+**Dimension values.** `DBClusterIdentifier` is currently set to the OLD cluster `sportscardportfolio-databasecluster5b53a178-asr01cwjobbs` because CDK still describes the old cluster (CDK takeover deferred to follow-on session per the 2026-05-20 RDS encryption migration). The 4 RDS alarms therefore monitor the OLD cluster's metrics, NOT the new encrypted cluster — **operational drift, see ROADMAP Tech debt "CDK takeover for encrypted cluster" for resolution**. Until takeover lands, the new encrypted cluster's metrics are unmonitored. `ApiId` = the live HttpApi v2 ID extracted from the API endpoint in the AWS environment block above. The `5xx` / `4xx` / `Latency` metric names are HttpApi v2 (lowercase) — using v1 REST API names (`5XXError`, etc.) silently returns no data.
 
 **Missing-data treatment.** All 9 alarms use `TreatMissingData.NOT_BREACHING`. Sparse counter metrics (`Errors`, `Throttles`, `5xx`, `4xx`) only publish data points when nonzero, so treating missing as `MISSING` would leave them in `INSUFFICIENT_DATA` indefinitely during idle periods and mask their signal. Lock rationale in [.agents/p0-hardening-session-a-plan.md §8 OQ-2](./p0-hardening-session-a-plan.md).
 
@@ -885,11 +886,11 @@ The `0001_consignment_fee.sql` file under `backend/db/migrations/` is the only m
 The cluster is in `PRIVATE_ISOLATED` subnets. **You cannot connect directly** from the dev machine. Two options:
 
 1. **RDS Query Editor** (browser, fastest): Console → RDS → Query Editor → "Connect with a Secrets Manager ARN" → paste the secret ARN from §2 → DB `cardportfolio`.
-2. **`aws rds-data execute-statement`** from CLI (scriptable):
+2. **`aws rds-data execute-statement`** from CLI (scriptable). **CURRENTLY NON-FUNCTIONAL** against the new encrypted cluster — `HttpEndpointEnabled: false` post-migration (see §2). ROADMAP Tech debt "Data API enablement on Aurora Serverless v2 restored cluster" tracks resolution. Interim workaround: target the OLD cluster ARN `arn:aws:rds:us-east-1:501789774892:cluster:sportscardportfolio-databasecluster5b53a178-asr01cwjobbs` (still alive until 2026-05-27+ decommission). The example below uses the canonical new-cluster ARN; will start working once Data API is enabled on the new cluster.
    ```bash
    aws rds-data execute-statement \
      --secret-arn "arn:aws:secretsmanager:us-east-1:501789774892:secret:SportsCardPortfolioDatabase-etmMTTGC8xX3-G6o7EM" \
-     --resource-arn "arn:aws:rds:us-east-1:501789774892:cluster:sportscardportfolio-databasecluster5b53a178-asr01cwjobbs" \
+     --resource-arn "arn:aws:rds:us-east-1:501789774892:cluster:sportscardportfolio-encrypted-20260520202459" \
      --database cardportfolio \
      --region us-east-1 \
      --sql "<sql here>"
