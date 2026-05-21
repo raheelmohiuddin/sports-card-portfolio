@@ -57,7 +57,7 @@ hosted on Amplify, fronted by CloudFront + WAF.
 - **CloudFront URL**: `https://dfsp491q2ndfx.cloudfront.net`
 - **Card images bucket**: `sports-card-images-501789774892`
 - **Alarm SNS topic ARN**: `arn:aws:sns:us-east-1:501789774892:SportsCardPortfolio-MonitoringAlertTopicB48B06C2-pnXUQDHo1pmd` (CloudFormation output key is hash-suffixed by CDK — see [OPERATIONS.md §2](./OPERATIONS.md) for the `contains()` lookup)
-- **Aurora is in PRIVATE_ISOLATED subnets**. Direct connection from your laptop is impossible. RDS Data API access is **CURRENTLY UNAVAILABLE on the new cluster** — `HttpEndpointEnabled: false` post-migration; tonight's session tried `aws rds modify-db-cluster --enable-http-endpoint` (silent no-op on Aurora Serverless v2 via this CLI version) and AWS Console Modify panel (no Data API toggle exposed). Workarounds during the gap: (a) use the OLD cluster's Data API ARN (still alive until 2026-05-27+ decommission), (b) exercise via Lambda. ROADMAP Tech debt entry "Data API enablement on Aurora Serverless v2 restored cluster" tracks resolution.
+- **Aurora is in PRIVATE_ISOLATED subnets**. Direct connection from your laptop is impossible. RDS Data API access is **enabled on the new cluster** (`HttpEndpointEnabled: true`, flipped 2026-05-20 post-migration via the Console `Connect using → Endpoints → Endpoint type → RDS Data API → Enable` path; see §11 for the example command and ROADMAP completed-audits entry for the discoverability story).
 
 ### Alarm inventory
 
@@ -886,7 +886,7 @@ The `0001_consignment_fee.sql` file under `backend/db/migrations/` is the only m
 The cluster is in `PRIVATE_ISOLATED` subnets. **You cannot connect directly** from the dev machine. Two options:
 
 1. **RDS Query Editor** (browser, fastest): Console → RDS → Query Editor → "Connect with a Secrets Manager ARN" → paste the secret ARN from §2 → DB `cardportfolio`.
-2. **`aws rds-data execute-statement`** from CLI (scriptable). **CURRENTLY NON-FUNCTIONAL** against the new encrypted cluster — `HttpEndpointEnabled: false` post-migration (see §2). ROADMAP Tech debt "Data API enablement on Aurora Serverless v2 restored cluster" tracks resolution. Interim workaround: target the OLD cluster ARN `arn:aws:rds:us-east-1:501789774892:cluster:sportscardportfolio-databasecluster5b53a178-asr01cwjobbs` (still alive until 2026-05-27+ decommission). The example below uses the canonical new-cluster ARN; will start working once Data API is enabled on the new cluster.
+2. **`aws rds-data execute-statement`** from CLI (scriptable). Enabled on the new encrypted cluster 2026-05-20 via the Console (`Connect using → Endpoints → Endpoint type → RDS Data API → Enable`). Smoke-tested with `SELECT COUNT(*) FROM cards;` returning the live 14-row baseline.
    ```bash
    aws rds-data execute-statement \
      --secret-arn "arn:aws:secretsmanager:us-east-1:501789774892:secret:SportsCardPortfolioDatabase-etmMTTGC8xX3-G6o7EM" \
