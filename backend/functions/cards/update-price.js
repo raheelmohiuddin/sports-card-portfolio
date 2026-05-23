@@ -32,7 +32,7 @@ exports.handler = async (event) => {
   if (existing.rows.length === 0) return json(404, { error: "Card not found" });
 
   const price = clearing ? null : parseFloat(manualPrice);
-  await db.query("UPDATE cards SET manual_price = $1 WHERE id = $2", [price, cardId]);
+  await db.query("UPDATE cards SET manual_price = $1 WHERE id = $2 AND user_id = $3", [price, cardId, userId]);
 
   return json(200, { id: cardId, manualPrice: price });
 };

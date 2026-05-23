@@ -22,7 +22,7 @@ exports.handler = async (event) => {
   if (existing.rows.length === 0) return json(404, { error: "Card not found" });
 
   const { s3_image_key, s3_back_image_key } = existing.rows[0];
-  await db.query("DELETE FROM cards WHERE id = $1", [cardId]);
+  await db.query("DELETE FROM cards WHERE id = $1 AND user_id = $2", [cardId, userId]);
 
   const bucket = process.env.CARD_IMAGES_BUCKET;
   const deletes = [];
