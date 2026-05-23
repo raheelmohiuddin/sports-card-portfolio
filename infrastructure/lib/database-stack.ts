@@ -5,7 +5,7 @@ import * as secretsmanager from "aws-cdk-lib/aws-secretsmanager";
 import { Construct } from "constructs";
 
 export class DatabaseStack extends Construct {
-  public readonly cluster: rds.DatabaseCluster;
+  public readonly cluster: rds.IDatabaseCluster;
   public readonly secret: secretsmanager.ISecret;
   public readonly vpc: ec2.Vpc;
   public readonly dbSecurityGroup: ec2.SecurityGroup;
@@ -29,37 +29,55 @@ export class DatabaseStack extends Construct {
       description: "Allow Lambda access to Aurora",
     });
 
-    // Aurora Serverless v2 PostgreSQL — cost-effective, auto-scales to zero when idle.
-    // Data API is enabled so the RDS Query Editor (and any IAM-authed callers)
-    // can issue SQL against this isolated cluster without a bastion/VPN — the
-    // cluster lives in PRIVATE_ISOLATED subnets and would otherwise be
-    // unreachable from outside the VPC.
-    this.cluster = new rds.DatabaseCluster(this, "Cluster", {
-      engine: rds.DatabaseClusterEngine.auroraPostgres({
-        version: rds.AuroraPostgresEngineVersion.VER_16_4,
-      }),
-      serverlessV2MinCapacity: 0.5,
-      serverlessV2MaxCapacity: 4,
-      writer: rds.ClusterInstance.serverlessV2("writer"),
-      vpc: this.vpc,
-      vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_ISOLATED },
-      securityGroups: [this.dbSecurityGroup],
-      defaultDatabaseName: "cardportfolio",
-      credentials: rds.Credentials.fromGeneratedSecret("dbadmin"),
-      enableDataApi: true,
-      removalPolicy: cdk.RemovalPolicy.RETAIN,
+    // L1 CfnDBCluster (not L2 rds.DatabaseCluster) because the deployed stack
+    // was populated via `cdk import` and does not include the Secret,
+    // SecretTargetAttachment, DBSubnetGroup, or DBInstance resources that
+    // L2 would auto-emit. Properties match the deployed template exactly.
+    const cfnCluster = new rds.CfnDBCluster(this, "Cluster", {
+      engine: "aurora-postgresql",
+      engineVersion: "16.11",
+      dbClusterIdentifier: "sportscardportfolio-encrypted-20260520202459",
+      dbClusterParameterGroupName: "default.aurora-postgresql16",
+      dbSubnetGroupName:
+        "sportscardportfolio-databaseclustersubnets5540150d-1l9befqursoc",
+      databaseName: "cardportfolio",
       deletionProtection: true,
-      backup: {
-        retention: cdk.Duration.days(7),
-        preferredWindow: "07:00-07:30",
+      enableHttpEndpoint: true,
+      kmsKeyId:
+        "arn:aws:kms:us-east-1:501789774892:key/84ff3a75-a308-48cf-9dcd-581099b81d5b",
+      masterUserPassword: "import-placeholder",
+      masterUsername: "dbadmin",
+      port: 5432,
+      preferredBackupWindow: "07:00-07:30",
+      preferredMaintenanceWindow: "sat:06:18-sat:06:48",
+      serverlessV2ScalingConfiguration: {
+        maxCapacity: 4,
+        minCapacity: 0.5,
       },
+      storageEncrypted: true,
+      backupRetentionPeriod: 7,
+      copyTagsToSnapshot: true,
+      vpcSecurityGroupIds: [this.dbSecurityGroup.securityGroupId],
     });
 
-    this.secret = this.cluster.secret!;
+    cfnCluster.applyRemovalPolicy(cdk.RemovalPolicy.RETAIN);
+    cfnCluster.overrideLogicalId("DatabaseCluster5B53A178");
+
+    this.secret = secretsmanager.Secret.fromSecretCompleteArn(
+      this,
+      "ImportedDbSecret",
+      "arn:aws:secretsmanager:us-east-1:501789774892:secret:SportsCardPortfolioDatabase-etmMTTGC8xX3-G6o7EM"
+    );
+
+    this.cluster = rds.DatabaseCluster.fromDatabaseClusterAttributes(
+      this,
+      "ImportedCluster",
+      {
+        clusterIdentifier: cfnCluster.ref,
+        secret: this.secret,
+      }
+    );
 
     new cdk.CfnOutput(this, "DbSecretArn", { value: this.secret.secretArn });
-    new cdk.CfnOutput(this, "DbClusterEndpoint", {
-      value: this.cluster.clusterEndpoint.hostname,
-    });
   }
 }

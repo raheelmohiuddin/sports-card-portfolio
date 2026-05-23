@@ -21,7 +21,7 @@ const ADMIN_EMAIL = "raheelmohiuddin1@gmail.com";
 interface ApiStackProps {
   userPool: cognito.UserPool;
   userPoolClient: cognito.UserPoolClient;
-  cluster: rds.DatabaseCluster;
+  cluster: rds.IDatabaseCluster;
   dbSecret: secretsmanager.ISecret;
   cardImagesBucket: s3.Bucket;
   vpc: ec2.Vpc;

@@ -8,7 +8,7 @@ import * as apigwv2 from "aws-cdk-lib/aws-apigatewayv2";
 import { Construct } from "constructs";
 
 interface MonitoringStackProps {
-  cluster: rds.DatabaseCluster;
+  cluster: rds.IDatabaseCluster;
   httpApi: apigwv2.HttpApi;
   alertEmail: string;
 }
