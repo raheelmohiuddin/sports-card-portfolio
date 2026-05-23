@@ -133,7 +133,7 @@ export class MonitoringStack extends Construct {
       evaluationPeriods: 2,
       comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
       treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
-      alarmDescription: "Sev-2: Aurora Serverless v2 ACU > 87.5% of max — trigger to bump serverlessV2MaxCapacity.",
+      alarmDescription: "Sev-2: Aurora Serverless v2 ACU > 87.5% of max - trigger to bump serverlessV2MaxCapacity.",
     });
 
     // ─── API Gateway HttpApi v2 layer ────────────────────────────────────
@@ -168,7 +168,7 @@ export class MonitoringStack extends Construct {
       evaluationPeriods: 1,
       comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
       treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
-      alarmDescription: "Sev-3: HttpApi 4xx responses elevated — investigate client behavior or routing.",
+      alarmDescription: "Sev-3: HttpApi 4xx responses elevated - investigate client behavior or routing.",
     });
 
     const httpApiLatencyHigh = new cloudwatch.Alarm(this, "HttpApiLatencyHigh", {

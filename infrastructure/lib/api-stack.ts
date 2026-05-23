@@ -625,7 +625,7 @@ export class ApiStack extends Construct {
       corsPreflight: {
         allowOrigins: ["*"], // Restrict to your Amplify domain in production
         allowMethods: [apigwv2.CorsHttpMethod.ANY],
-        allowHeaders: ["Authorization", "Content-Type"],
+        allowHeaders: ["authorization", "content-type"],
       },
     });
     this.httpApi = api;

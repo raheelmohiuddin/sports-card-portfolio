@@ -12,5 +12,5 @@ const env = {
 
 new MainStack(app, "SportsCardPortfolio", {
   env,
-  description: "Sports Card Portfolio — Auth, API, DB, Storage",
+  description: "Sports Card Portfolio - Auth, API, DB, Storage",
 });

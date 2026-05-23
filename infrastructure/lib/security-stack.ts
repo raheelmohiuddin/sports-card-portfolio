@@ -74,7 +74,7 @@ export class SecurityStack extends Construct {
     // Adds: AWS Shield Standard (auto), edge DDoS absorption, TLS 1.2+ enforcement,
     // global anycast routing, and response-header injection.
     const distribution = new cloudfront.Distribution(this, "Distribution", {
-      comment: "Sports Card Portfolio — API CDN",
+      comment: "Sports Card Portfolio - API CDN",
       defaultBehavior: {
         origin: new origins.HttpOrigin(props.apiHostname, {
           protocolPolicy: cloudfront.OriginProtocolPolicy.HTTPS_ONLY,
@@ -101,7 +101,7 @@ export class SecurityStack extends Construct {
     });
     new cdk.CfnOutput(this, "WebAclArn", {
       value: webAcl.attrArn,
-      description: "WAF WebACL ARN — review CloudWatch metrics to monitor blocks",
+      description: "WAF WebACL ARN - review CloudWatch metrics to monitor blocks",
     });
   }
 }
