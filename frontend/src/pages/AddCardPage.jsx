@@ -176,16 +176,14 @@ export default function AddCardPage() {
               style={{ ...st.lookupBtn, ...(lookupLoading ? st.btnDisabled : {}) }}
               disabled={lookupLoading || !certNumber.trim()}
             >
-              {lookupLoading ? "Looking up…" : "Lookup →"}
+              {lookupLoading ? (
+                <span style={st.lookupBtnLoading}>
+                  <span style={st.lookupSpinner} aria-hidden="true" />
+                  Looking up…
+                </span>
+              ) : "Lookup →"}
             </button>
           </form>
-
-          {error && (
-            <div style={st.error}>
-              <span style={st.errorMark}>!</span>
-              <span>{error}</span>
-            </div>
-          )}
 
           {duplicateId !== null && (
             <div style={st.dupAlert}>
@@ -207,6 +205,19 @@ export default function AddCardPage() {
             </div>
           )}
         </section>
+
+        {/* ── Result area ── Skeleton, error, and success block share this
+            slot. Skeleton renders while the lookup is in flight; error
+            replaces it (mutually exclusive via the skeleton's render
+            guard); cardData success block takes over once results land. */}
+        {error && (
+          <div style={st.error}>
+            <span style={st.errorMark}>!</span>
+            <span>{error}</span>
+          </div>
+        )}
+
+        {lookupLoading && !cardData && !error && <LookupSkeleton />}
 
         {/* ── PSA Result ── */}
         {cardData && (
@@ -401,6 +412,55 @@ function DetailRow({ label, value }) {
   );
 }
 
+// Loading placeholder for the cert-lookup result. Renders in the
+// same slot the success block will populate so the page doesn't
+// shift when real data arrives. Mirrors the detail panel + upload
+// section structure with shimmer rects. Shimmer driven by the
+// global skeletonShimmer keyframe (index.css); gradient values
+// match PortfolioPage.SkeletonTile + TradeTab.cardImgSkeleton so
+// the loading vocabulary stays consistent across surfaces.
+function LookupSkeleton() {
+  return (
+    <>
+      <section style={st.detailPanel} aria-busy="true" aria-label="Loading card details">
+        <div style={st.detailHeader}>
+          <div style={st.detailHeaderLeft}>
+            <div style={{ ...st.skBar, width: "60%", height: "1.5rem" }} />
+            <div style={{ ...st.skBar, width: "40%", height: "0.85rem", marginTop: "0.5rem" }} />
+          </div>
+          <div style={{ ...st.skBar, width: 64, height: 48, borderRadius: 6 }} />
+        </div>
+
+        <div style={st.skValueBlock}>
+          <div style={{ ...st.skBar, width: "40%", height: "1.85rem" }} />
+          <div style={{ ...st.skBar, width: "30%", height: "0.82rem" }} />
+        </div>
+
+        <div style={{ ...st.skBar, width: "100%", height: "0.78rem", marginTop: "1rem" }} />
+
+        <div style={st.detailDivider} />
+
+        <div style={st.detailGrid}>
+          {Array.from({ length: 4 }).map((_, i) => (
+            <div key={i} style={st.detailRow}>
+              <div style={{ ...st.skBar, width: "40%", height: "0.62rem" }} />
+              <div style={{ ...st.skBar, width: "70%", height: "0.92rem", marginTop: "0.3rem" }} />
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section style={st.uploadSection}>
+        <h3 style={st.sectionTitle}>Card Photos</h3>
+        <div style={st.zonesRow}>
+          <div style={{ ...st.skBar, width: "100%", aspectRatio: "5 / 7", borderRadius: 8 }} />
+          <div style={{ ...st.skBar, width: "100%", aspectRatio: "5 / 7", borderRadius: 8 }} />
+        </div>
+      </section>
+    </>
+  );
+}
+
 
 function ImageZone({ side, psaUrl, file, setFile, displayUrl }) {
   const hasPsa  = !!psaUrl;
@@ -535,6 +595,43 @@ const st = {
     transition: "background 0.2s, transform 0.1s",
   },
   btnDisabled: { opacity: 0.5, cursor: "not-allowed" },
+
+  // Inline-flex wrapper so the spinner + label stay centered on the
+  // single button baseline when lookupLoading is true.
+  lookupBtnLoading: {
+    display: "inline-flex", alignItems: "center", gap: "0.5rem",
+  },
+  // Border-trick ring matching the executeSpinner pattern in
+  // TradeTab.jsx. Dark borderTopColor reads against the amber
+  // button background.
+  lookupSpinner: {
+    width: 14, height: 14,
+    borderRadius: "50%",
+    border: "2px solid rgba(15,23,42,0.25)",
+    borderTopColor: "#0f172a",
+    animation: "scp-spin 0.7s linear infinite",
+    display: "inline-block",
+  },
+
+  // ─── Skeleton (lookup-in-flight placeholder) ───
+  // Single-source shimmer bar — width/height/borderRadius/aspectRatio
+  // overridden per-use via spread. Gradient + animation match
+  // PortfolioPage.SkeletonTile and TradeTab.cardImgSkeleton.
+  skBar: {
+    borderRadius: 4,
+    background: "linear-gradient(110deg, rgba(255,255,255,0.025) 30%, rgba(255,255,255,0.07) 50%, rgba(255,255,255,0.025) 70%)",
+    backgroundSize: "200% 100%",
+    animation: "skeletonShimmer 1.4s ease-in-out infinite",
+  },
+  // Tinted sub-card mirroring the valueBlock's visual weight so the
+  // estimated-value placeholder reads as a distinct shape.
+  skValueBlock: {
+    marginTop: "1.25rem",
+    padding: "0.85rem 1rem",
+    background: "rgba(15,23,42,0.3)",
+    borderRadius: 8,
+    display: "flex", flexDirection: "column", gap: "0.55rem",
+  },
 
   error: {
     display: "flex", alignItems: "center", gap: "0.6rem",
