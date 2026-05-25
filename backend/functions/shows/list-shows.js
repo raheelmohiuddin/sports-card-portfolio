@@ -45,7 +45,9 @@ exports.handler = async (event) => {
   const from  = (qs.from ?? "").trim() || null;
   const to    = (qs.to   ?? "").trim() || null;
   const q     = (qs.q    ?? "").trim() || null;
-  const qLike = q ? `%${q}%` : null;
+  // escape LIKE wildcards (%, _, \) before wrapping for ILIKE pattern match
+  const qEscaped = q ? q.replace(/[\\%_]/g, '\\$&') : null;
+  const qLike = qEscaped ? `%${qEscaped}%` : null;
   // attendedOnly switches the endpoint to history-mode for MarkSoldBlock:
   // INNER JOIN user_shows so only attended shows return, AND drops the
   // ">= CURRENT_DATE" date floor so past attended shows are included.
@@ -104,7 +106,7 @@ exports.handler = async (event) => {
     WHERE ${dateFloorClause}
       AND ($3::date IS NULL OR cs.show_date <= $3::date)
       AND ($4::text[] IS NULL OR cs.state = ANY($4::text[]))
-      AND ($5::text IS NULL OR cs.name ILIKE $5::text OR cs.city ILIKE $5::text)
+      AND ($5::text IS NULL OR cs.name ILIKE $5::text ESCAPE '\' OR cs.city ILIKE $5::text ESCAPE '\')
       -- Haversine distance filter — applied only when a radius is set
       -- ($8::numeric NOT NULL). With "Any" radius the center coords
       -- still drive the ORDER BY below; this WHERE clause is skipped
