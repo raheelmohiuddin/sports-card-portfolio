@@ -1354,7 +1354,7 @@ function ShowCard({ show, onToggle }) {
           rows: 1fr in the parent, this gives uniform tile heights. */}
       <div style={st.cardBody}>
         {show.attending && countdown && (
-          <div style={st.countdownRow}>
+          <div style={st.countdownBadgeRow}>
             <span style={st.countdown}>{countdown}</span>
           </div>
         )}
@@ -2384,7 +2384,7 @@ const st = {
   // ── Countdown ──
   // Lives on its own line above the date row so the three-element
   // date layout stays balanced. Right-aligned, small badge.
-  countdownRow: {
+  countdownBadgeRow: {
     display: "flex", justifyContent: "flex-end",
     marginBottom: "-0.1rem",
   },
