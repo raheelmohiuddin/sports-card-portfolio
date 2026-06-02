@@ -63,6 +63,15 @@
 
   Trigger: post-first-non-Raheel-user OR post-1K-rows-per-table OR post-10-user-base (whichever earliest). Size: S (~30 min: write 3-statement migration, deploy via existing migration tooling, verify via EXPLAIN ANALYZE on affected query patterns).
 - **Stop-slop sweep across `.agents/*.md` docs.** Apply the `stop-slop` skill's prose rules retroactively to all existing project docs. Prose discipline only: preserve all technical content, code references, file paths, commit SHAs, command examples, and decision rationale verbatim. In scope: CONTEXT.md, OPERATIONS.md, ROADMAP.md, ENGINEERING_STANDARDS.md, INCIDENT_RESPONSE.md, incident-2026-05-14-undeployed-lambda-drift.md, rds-encryption-migration-plan.md, p0-hardening-session-a-plan.md, valuation-rebuild-plan.md, mark-as-sold-plan.md, node22-lts-upgrade-plan.md, product-marketing-context.md, design-system/MASTER.md. Approach: doc-by-doc commits (one per file) so each diff is reviewable; design-system/MASTER.md is least urgent since it is token-heavy not prose-heavy. Rules at `.claude/skills/stop-slop/SKILL.md`. Origin: user invoked `/stop-slop` on 2026-05-21 and expanded its scope from chat to project docs; opted into the full sweep over a smaller "tonight's edits only" option. Size: L (hours-to-days; 13 docs of varying length). Trigger: next dedicated cleanup session.
+- **Dependency vulnerability remediation (post-js-cookie)** — After the 2026-05-26 js-cookie bump (commit `393f8c8`), `npm audit` reports remaining findings, all triaged as deliberate-upgrade work rather than lockfile fixes:
+
+  (1) `vitest` 2.1.9 → 4.1.8 (via esbuild→vite→vitest chain, moderate): the esbuild advisory is dev-server-only (Vite dev server accepting cross-origin requests, exploitable only by an attacker on the local network while `npm run dev` runs) — does not affect production build, Lambda, or users. Fix requires crossing TWO major versions (2→3→4), each with its own breaking changes (config format, API surface). Frontend test suite is currently green (47 tests, 4 files: perf-static + portfolio/rarity/trade logic) — that suite is the safety net for core business logic, so the upgrade must keep it green. Approach when done: bump one major at a time (2→3, verify suite, 3→4, verify suite), reading each version's migration guide; NOT `npm audit fix --force` straight to 4.x. Deferred 2026-05-26: risk of a two-major test-runner bump outweighs a dev-server-only vuln.
+
+  (2) `fast-uri` (high) + `brace-expansion` (moderate): bundled inside `aws-cdk-lib@2.252.0`, not separately patchable — require an aws-cdk-lib version bump. Low real-world risk: dev/build tooling, attack vectors (path traversal, ReDoS) don't apply to our CDK usage. Deferred to next deliberate aws-cdk-lib upgrade.
+
+  Note: `npm audit` summary reports "1 critical" but no detail entry is flagged critical — aggregation artifact across transitive paths, not a distinct advisory.
+
+  Trigger: dedicated dependency-hygiene session, or fold (2) into the next planned aws-cdk-lib upgrade. Size: M (each bump carries its own verification cost).
 
 ## Documentation
 
