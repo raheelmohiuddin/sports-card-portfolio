@@ -678,6 +678,10 @@ signedCardImageUrl(key) → presigned GET URL (1h TTL, CARD_IMAGES_BUCKET)
 | cardhedger_image_url | text | YES |
 | status | text | YES |
 | grader | text | YES |
+| psa_front_s3_key | varchar(500) | YES |
+| psa_back_s3_key | varchar(500) | YES |
+
+*`psa_front_s3_key` / `psa_back_s3_key` hold S3 keys for PSA official scans (`GetImagesByCertNumber`), stored separately from the user-upload keys (`s3_image_key` / `s3_back_image_key`). Added by migration 0008, applied 2026-06-03.*
 
 ### `consignments`
 
