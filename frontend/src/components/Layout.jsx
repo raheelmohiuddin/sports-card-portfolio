@@ -116,12 +116,23 @@ export default function NavHeader() {
 // header real estate alongside Portfolio / TradeDesk / My Shows.
 export function SiteFooter() {
   const { authStatus } = useAuthenticator((ctx) => [ctx.authStatus]);
+  const { pathname } = useLocation();
   if (authStatus !== "authenticated") return null;
+  // Home and About are marketing pages with no PSA data on them, so the
+  // attribution line isn't required there; the nav links still render.
+  const showAttribution = !["/", "/about"].includes(pathname.toLowerCase());
   return (
     <footer style={st.siteFooter}>
       <div className="container" style={st.siteFooterInner}>
-        <SiteFooterLink to="/" label="Home" />
-        <SiteFooterLink to="/about" label="About" />
+        <div style={st.siteFooterLinks}>
+          <SiteFooterLink to="/" label="Home" />
+          <SiteFooterLink to="/about" label="About" />
+        </div>
+        {showAttribution && (
+          <p style={st.siteFooterAttribution}>
+            Card data is obtained from and is subject to a license agreement with Collectors Universe, Inc. and its divisions PCGS and PSA.
+          </p>
+        )}
       </div>
     </footer>
   );
@@ -870,9 +881,25 @@ const st = {
   },
   siteFooterInner: {
     display: "flex",
+    flexDirection: "column",
+    gap: "0.75rem",
+    alignItems: "center",
+  },
+  siteFooterLinks: {
+    display: "flex",
     gap: "1.75rem",
     justifyContent: "center",
     alignItems: "center",
+  },
+  siteFooterAttribution: {
+    margin: 0,
+    maxWidth: "640px",
+    textAlign: "center",
+    color: "#475569",          // subordinate to the #64748b links, matches HomePage footer tone
+    fontSize: "0.85rem",       // 13.6px ≈ 10.2pt — safely above the 10pt contractual minimum
+    fontWeight: 400,
+    lineHeight: 1.5,
+    letterSpacing: "0.01em",
   },
   siteFooterLink: {
     color: "#64748b",
