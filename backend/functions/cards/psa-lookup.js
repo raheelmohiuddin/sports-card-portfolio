@@ -15,12 +15,43 @@ async function getPsaApiKey() {
   return psaApiKey;
 }
 
-async function probeImage(url) {
+// PSA's GetImagesByCertNumber returns the official front/back scan URLs as
+// an array of { IsFrontImage, ImageURL }: two elements when PSA has the
+// card, an empty array when it doesn't. We pick each side independently
+// (defensive — never assume both-or-neither) and report a tri-state
+// availability signal:
+//   true  → PSA returned scans (array had elements)
+//   false → PSA confirmed no scans (2xx, empty array)
+//   null  → couldn't determine (non-2xx, malformed body, or thrown error)
+// Best-effort: a failure here must NOT fail the overall cert lookup, so
+// everything is wrapped and degrades to the null/unknown state.
+async function fetchCertImages(apiKey, certNumber) {
   try {
-    const res = await fetch(url, { method: "HEAD", signal: AbortSignal.timeout(5000) });
-    return res.ok ? url : null;
+    const res = await fetch(
+      `${process.env.PSA_API_BASE}/cert/GetImagesByCertNumber/${certNumber}`,
+      {
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
+        },
+      }
+    );
+    if (!res.ok) {
+      return { frontImageUrl: null, backImageUrl: null, psaImagesAvailable: null };
+    }
+    const images = await res.json();
+    if (!Array.isArray(images)) {
+      // Unexpected 2xx shape — treat as unknown, not confirmed-empty.
+      return { frontImageUrl: null, backImageUrl: null, psaImagesAvailable: null };
+    }
+    if (images.length === 0) {
+      return { frontImageUrl: null, backImageUrl: null, psaImagesAvailable: false };
+    }
+    const front = images.find((i) => i.IsFrontImage === true)?.ImageURL ?? null;
+    const back  = images.find((i) => i.IsFrontImage === false)?.ImageURL ?? null;
+    return { frontImageUrl: front, backImageUrl: back, psaImagesAvailable: true };
   } catch {
-    return null;
+    return { frontImageUrl: null, backImageUrl: null, psaImagesAvailable: null };
   }
 }
 
@@ -31,17 +62,18 @@ exports.handler = async (event) => {
   }
 
   const apiKey = await getPsaApiKey();
-  const cdnBase = `https://d1htnxwo4o0jhw.cloudfront.net/cert/${certNumber}`;
 
-  const [apiResponse, frontImageUrl, backImageUrl] = await Promise.all([
+  // GetByCertNumber (identity/grade) and GetImagesByCertNumber (scans) run
+  // in parallel; the images call is NOT gated on cert success — on an
+  // invalid cert it simply returns the unknown state and is discarded.
+  const [apiResponse, images] = await Promise.all([
     fetch(`${process.env.PSA_API_BASE}/cert/GetByCertNumber/${certNumber}`, {
       headers: {
         Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/json",
       },
     }),
-    probeImage(`${cdnBase}/front.jpg`),
-    probeImage(`${cdnBase}/back.jpg`),
+    fetchCertImages(apiKey, certNumber),
   ]);
 
   if (!apiResponse.ok) {
@@ -74,8 +106,9 @@ exports.handler = async (event) => {
     variety:             cert.Variety,
     psaPopulation:       cert.TotalPopulation ?? null,
     psaPopulationHigher: cert.PopulationHigher ?? null,
-    frontImageUrl,
-    backImageUrl,
+    frontImageUrl:       images.frontImageUrl,
+    backImageUrl:        images.backImageUrl,
+    psaImagesAvailable:  images.psaImagesAvailable,
     psaData:             cert,
     estimatePrice:       estimate?.price      ?? null,
     estimatePriceLow:    estimate?.priceLow   ?? null,
