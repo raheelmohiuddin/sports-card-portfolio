@@ -7,12 +7,34 @@ const { fetchValuation } = require("../portfolio/pricing");
 
 const s3 = new S3Client({});
 
+// PSA scan URLs come from the lookup response but reach this endpoint as
+// client-supplied input, so a server-side fetch is an SSRF vector. Only
+// fetch from PSA's known CloudFront host (the same host the lookup serves).
+const PSA_IMAGE_HOST = "d1htnxwo4o0jhw.cloudfront.net";
+
 async function makeUploadUrl(bucket, key) {
   return getSignedUrl(
     s3,
     new PutObjectCommand({ Bucket: bucket, Key: key, ContentType: "image/jpeg" }),
     { expiresIn: 300 }
   );
+}
+
+// Best-effort server-side fetch of a PSA scan + store to our S3 bucket.
+// Self-contained: returns false (never throws) on a bad host, malformed
+// URL, non-2xx, or any fetch/S3 error, so a single side's failure can't
+// abort the other side in the Promise.all caller.
+async function storePsaImage(url, bucket, key) {
+  try {
+    if (new URL(url).host !== PSA_IMAGE_HOST) return false;
+    const res = await fetch(url);
+    if (!res.ok) return false;
+    const buf = Buffer.from(await res.arrayBuffer());
+    await s3.send(new PutObjectCommand({ Bucket: bucket, Key: key, Body: buf, ContentType: "image/jpeg" }));
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 exports.handler = async (event) => {
@@ -32,7 +54,7 @@ exports.handler = async (event) => {
     psaPopulation, psaPopulationHigher, psaData,
     myCost, sellTargetPrice,
     hasFrontImage, hasBackImage,
-    grader,
+    grader, psaImagesAvailable,
   } = body;
   // Default to PSA when the field is missing — preserves the contract
   // for any older client that doesn't yet know about graders.
@@ -116,10 +138,10 @@ exports.handler = async (event) => {
   const result = await db.query(
     `INSERT INTO cards
        (user_id, cert_number, year, brand, sport, player_name, card_number,
-        grade, grade_description, image_url, back_image_url,
+        grade, grade_description,
         psa_population, psa_population_higher, psa_data, my_cost, sell_target_price,
         grader, category)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
      ON CONFLICT (user_id, cert_number) DO NOTHING
      RETURNING id`,
     [
@@ -132,8 +154,6 @@ exports.handler = async (event) => {
       sanitize(cardNumber, 100),
       sanitize(grade, 10),
       sanitize(gradeDescription, 200),
-      frontImageUrl ?? null,
-      backImageUrl  ?? null,
       psaPopulation        != null ? parseInt(psaPopulation, 10)       : null,
       psaPopulationHigher  != null ? parseInt(psaPopulationHigher, 10) : null,
       psaData ? JSON.stringify(psaData) : null,
@@ -180,6 +200,33 @@ exports.handler = async (event) => {
       "UPDATE cards SET s3_image_key = $1, s3_back_image_key = $2 WHERE id = $3",
       [frontKey, backKey, cardId]
     );
+  }
+
+  // Best-effort PSA official-scan storage. When the lookup confirmed scans
+  // (psaImagesAvailable === true), fetch each side server-side and store it
+  // under the user's card prefix with a -psa- infix (purge-ability per the
+  // PSA Data License Agreement). Entirely non-fatal: the card is already
+  // committed (no transaction), so any failure must NOT throw — the keys
+  // stay null and the add still succeeds. Mirrors fetchValuation's posture.
+  // Defensive per-side: each side stores independently; we persist a key
+  // only for the side that actually stored.
+  if (psaImagesAvailable === true && (frontImageUrl || backImageUrl)) {
+    try {
+      const psaFrontKey = `cards/${userId}/${cardId}-psa-front.jpg`;
+      const psaBackKey  = `cards/${userId}/${cardId}-psa-back.jpg`;
+      const [frontStored, backStored] = await Promise.all([
+        frontImageUrl ? storePsaImage(frontImageUrl, bucket, psaFrontKey) : Promise.resolve(false),
+        backImageUrl  ? storePsaImage(backImageUrl,  bucket, psaBackKey)  : Promise.resolve(false),
+      ]);
+      if (frontStored || backStored) {
+        await db.query(
+          "UPDATE cards SET psa_front_s3_key = $1, psa_back_s3_key = $2 WHERE id = $3",
+          [frontStored ? psaFrontKey : null, backStored ? psaBackKey : null, cardId]
+        );
+      }
+    } catch (err) {
+      console.warn("[add-card] PSA image store failed:", err.message);
+    }
   }
 
   // Valuation was already fetched pre-INSERT for the OQ-6 PA-detection
