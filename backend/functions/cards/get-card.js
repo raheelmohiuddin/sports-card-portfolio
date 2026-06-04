@@ -22,6 +22,7 @@ exports.handler = async (event) => {
             c.grade, c.grade_description, c.grader,
             c.s3_image_key, c.cardhedger_image_url,
             c.s3_back_image_key, c.back_image_url,
+            c.psa_front_s3_key, c.psa_back_s3_key,
             c.psa_population, c.psa_population_higher,
             c.manual_price, c.my_cost, c.sell_target_price,
             c.estimated_value, c.avg_sale_price, c.last_sale_price,
@@ -66,8 +67,12 @@ exports.handler = async (event) => {
 
   const row = result.rows[0];
   const [imageUrl, backImageUrl] = await Promise.all([
-    row.s3_image_key      ? signedCardImageUrl(row.s3_image_key)      : Promise.resolve(safeImageUrl(row.cardhedger_image_url)),
-    row.s3_back_image_key ? signedCardImageUrl(row.s3_back_image_key) : Promise.resolve(row.back_image_url ?? null),
+    row.psa_front_s3_key    ? signedCardImageUrl(row.psa_front_s3_key)
+      : row.s3_image_key    ? signedCardImageUrl(row.s3_image_key)
+      : Promise.resolve(safeImageUrl(row.cardhedger_image_url)),
+    row.psa_back_s3_key     ? signedCardImageUrl(row.psa_back_s3_key)
+      : row.s3_back_image_key ? signedCardImageUrl(row.s3_back_image_key)
+      : Promise.resolve(row.back_image_url ?? null),
   ]);
 
   const manualPrice = row.manual_price ? parseFloat(row.manual_price) : null;
