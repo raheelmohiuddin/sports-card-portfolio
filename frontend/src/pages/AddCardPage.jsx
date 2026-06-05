@@ -115,6 +115,9 @@ export default function AddCardPage() {
 
   const hasPsaFront = !!cardData?.frontImageUrl;
   const hasPsaBack  = !!cardData?.backImageUrl;
+  // PSA owns the image when the lookup confirmed scans (both-or-none,
+  // card-level signal). When true the upload is locked on both sides.
+  const psaLocked   = cardData?.psaImagesAvailable === true;
   const rare        = isRare(cardData);
 
   return (
@@ -285,7 +288,13 @@ export default function AddCardPage() {
               <div style={st.detailDivider} />
 
               <div style={st.detailGrid}>
-                <DetailRow label="Cert #"   value={cardData.certNumber} />
+                <DetailRow
+                  label="Cert #"
+                  value={cardData.certNumber}
+                  href={(cardData.grader ?? "PSA") === "PSA" && cardData.certNumber
+                    ? `https://www.psacard.com/cert/${encodeURIComponent(cardData.certNumber)}/psa`
+                    : undefined}
+                />
                 <DetailRow label="Card #"   value={cardData.cardNumber} />
                 <DetailRow label="Variety"  value={cardData.variety} />
                 <DetailRow label="Category" value={cardData.category ?? cardData.sport} />
@@ -331,9 +340,9 @@ export default function AddCardPage() {
             <section style={st.uploadSection}>
               <h3 style={st.sectionTitle}>Card Photos</h3>
               <p style={st.sectionSub}>
-                {hasPsaFront || hasPsaBack
-                  ? "PSA images shown by default — drop your own photos to override."
-                  : "Photos are optional — upload your own to enable the 3D card viewer."}
+                {psaLocked
+                  ? "Official PSA scans — used automatically for this card."
+                  : "Add your own photos to enable the 3D card viewer."}
               </p>
 
               <div style={st.zonesRow}>
@@ -343,6 +352,7 @@ export default function AddCardPage() {
                   file={front.file}
                   setFile={front.setFile}
                   displayUrl={front.displayUrl}
+                  psaLocked={psaLocked}
                 />
                 <ImageZone
                   side="Back"
@@ -350,6 +360,7 @@ export default function AddCardPage() {
                   file={back.file}
                   setFile={back.setFile}
                   displayUrl={back.displayUrl}
+                  psaLocked={psaLocked}
                 />
               </div>
             </section>
@@ -402,12 +413,18 @@ export default function AddCardPage() {
   );
 }
 
-function DetailRow({ label, value }) {
+function DetailRow({ label, value, href }) {
   if (!value) return null;
   return (
     <div style={st.detailRow}>
       <span style={st.detailRowLabel}>{label}</span>
-      <span style={st.detailRowValue}>{value}</span>
+      {href ? (
+        <a href={href} target="_blank" rel="noopener noreferrer" style={st.detailRowLink}>
+          {value}<span style={st.detailRowLinkArrow}>↗</span>
+        </a>
+      ) : (
+        <span style={st.detailRowValue}>{value}</span>
+      )}
     </div>
   );
 }
@@ -462,9 +479,30 @@ function LookupSkeleton() {
 }
 
 
-function ImageZone({ side, psaUrl, file, setFile, displayUrl }) {
+function ImageZone({ side, psaUrl, file, setFile, displayUrl, psaLocked }) {
   const hasPsa  = !!psaUrl;
   const hasFile = !!file;
+
+  // PSA-owned image: the official scan is used automatically and cannot
+  // be overridden, so render a read-only preview (no upload / replace /
+  // revert) instead of the interactive DropZone. The shared DropZone is
+  // left untouched (it's also used by the PA add flow).
+  if (psaLocked) {
+    return (
+      <div style={st.zone}>
+        <div style={st.zoneHeader}>
+          <span style={st.zoneLabel}>{side}</span>
+          <span style={st.zoneTagPsa}>PSA</span>
+        </div>
+        <div style={st.lockedZone}>
+          {psaUrl
+            ? <img src={psaUrl} alt={`Official PSA ${side.toLowerCase()} scan`} style={st.lockedImg} draggable={false} />
+            : <div style={st.lockedEmpty}>No scan</div>}
+          <span style={st.lockedCaption}>Official scan</span>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div style={st.zone}>
@@ -809,6 +847,12 @@ const st = {
     color: "#64748b",
   },
   detailRowValue: { fontSize: "0.92rem", color: "#e2e8f0", fontWeight: 500 },
+  detailRowLink: {
+    fontSize: "0.92rem", color: "#fbbf24", fontWeight: 600,
+    textDecoration: "none",
+    display: "inline-flex", alignItems: "center", gap: "0.3rem",
+  },
+  detailRowLinkArrow: { fontSize: "0.7rem", opacity: 0.75 },
 
   popSection: {
     display: "flex", alignItems: "center",
@@ -890,6 +934,41 @@ const st = {
     color: "#64748b", fontSize: "0.72rem",
     cursor: "pointer", padding: "0.5rem 0", marginTop: "0.4rem",
     letterSpacing: "0.02em",
+  },
+
+  // Read-only PSA scan preview (locked state) — mirrors DropZone's frame
+  // but solid-bordered + non-interactive to signal "can't change this".
+  lockedZone: {
+    position: "relative",
+    width: "100%",
+    aspectRatio: "5 / 7",
+    background: "rgba(15,23,42,0.6)",
+    border: "1px solid rgba(245,158,11,0.35)",
+    borderRadius: 12,
+    overflow: "hidden",
+  },
+  lockedImg: {
+    position: "absolute", inset: 0,
+    width: "100%", height: "100%",
+    objectFit: "cover", display: "block",
+  },
+  lockedEmpty: {
+    position: "absolute", inset: 0,
+    display: "flex", alignItems: "center", justifyContent: "center",
+    color: "#64748b", fontSize: "0.78rem",
+  },
+  // Quiet bottom caption over a soft fade — signals the locked state is
+  // intentional ("official scan") without reading as a heavy banner.
+  lockedCaption: {
+    position: "absolute",
+    left: 0, right: 0, bottom: 0,
+    padding: "0.5rem 0.6rem",
+    background: "linear-gradient(to top, rgba(0,0,0,0.6), transparent)",
+    color: "#cbd5e1",
+    fontSize: "0.6rem", fontWeight: 600,
+    letterSpacing: "0.12em", textTransform: "uppercase",
+    textAlign: "center",
+    pointerEvents: "none",
   },
 
   // ─── My Cost ───
