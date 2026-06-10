@@ -624,8 +624,9 @@ signedCardImageUrl(key) → presigned GET URL (1h TTL, CARD_IMAGES_BUCKET)
 ## 8. Database Schema (live)
 
 > **The bootstrap file `backend/db/schema.sql` is severely stale.** It only
-> defines the initial `users` + `cards` tables and predates ~15 ALTER
-> migrations. Use this section as the truth. Live schema dumped via RDS
+> defines the initial `users` + `cards` tables and predates the 8 numbered SQL
+> migrations (`0001`–`0008`) plus the earlier `_migrations/` Lambdas. Use this
+> section as the truth. Live schema dumped via RDS
 > Data API (`information_schema.columns`, table_schema='public').
 >
 > Format: `column | type | nullable`
@@ -672,16 +673,79 @@ signedCardImageUrl(key) → presigned GET URL (1h TTL, CARD_IMAGES_BUCKET)
 | psa_population | integer | YES |
 | psa_population_higher | integer | YES |
 | my_cost | numeric(10,2) | YES |
-| target_price | numeric(10,2) | YES |
+| sell_target_price | numeric(10,2) | YES |
 | cardhedger_id | text | YES |
 | raw_comps | jsonb | YES |
 | cardhedger_image_url | text | YES |
 | status | text | YES |
 | grader | text | YES |
+| estimate_price | numeric(10,2) | YES |
+| estimate_price_low | numeric(10,2) | YES |
+| estimate_price_high | numeric(10,2) | YES |
+| estimate_confidence | numeric(5,4) | YES |
+| estimate_method | varchar(40) | YES |
+| estimate_freshness_days | integer | YES |
+| estimate_last_updated | timestamptz | YES |
+| variant | varchar(100) | YES |
+| category | varchar(100) | YES |
+| sold_price | numeric(10,2) | YES |
+| sold_at | date | YES |
+| sold_venue_type | text | YES |
+| sold_show_id | uuid | YES |
+| sold_auction_house | text | YES |
+| sold_other_text | text | YES |
+| wanted_since | timestamptz | YES |
 | psa_front_s3_key | varchar(500) | YES |
 | psa_back_s3_key | varchar(500) | YES |
 
 *`psa_front_s3_key` / `psa_back_s3_key` hold S3 keys for PSA official scans (`GetImagesByCertNumber`), stored separately from the user-upload keys (`s3_image_key` / `s3_back_image_key`). Added by migration 0008, applied 2026-06-03.*
+
+### `potential_acquisitions`
+
+| Column | Type | Nullable |
+|---|---|---|
+| id | uuid | NO |
+| user_id | uuid | NO |
+| cert_number | varchar(50) | YES |
+| grader | text | YES |
+| year | varchar(10) | YES |
+| brand | varchar(100) | YES |
+| sport | varchar(100) | YES |
+| category | varchar(100) | YES |
+| player_name | varchar(255) | YES |
+| card_number | varchar(100) | YES |
+| grade | varchar(10) | YES |
+| grade_description | varchar(200) | YES |
+| variant | varchar(100) | YES |
+| psa_population | integer | YES |
+| psa_population_higher | integer | YES |
+| buy_target_price | numeric(10,2) | YES |
+| notes | text | YES |
+| priority | text | YES |
+| estimated_value | numeric(10,2) | YES |
+| avg_sale_price | numeric(10,2) | YES |
+| last_sale_price | numeric(10,2) | YES |
+| num_sales | integer | YES |
+| price_source | varchar(20) | YES |
+| value_last_updated | timestamptz | YES |
+| cardhedger_id | text | YES |
+| cardhedger_image_url | text | YES |
+| raw_comps | jsonb | YES |
+| estimate_price | numeric(10,2) | YES |
+| estimate_price_low | numeric(10,2) | YES |
+| estimate_price_high | numeric(10,2) | YES |
+| estimate_confidence | numeric(5,4) | YES |
+| estimate_method | varchar(40) | YES |
+| estimate_freshness_days | integer | YES |
+| estimate_last_updated | timestamptz | YES |
+| added_at | timestamptz | NO |
+| updated_at | timestamptz | NO |
+| s3_image_key | varchar(500) | YES |
+| s3_back_image_key | varchar(500) | YES |
+| image_url | text | YES |
+| back_image_url | text | YES |
+
+*The "Potential Acquisitions" (PA / wishlist) table — cards a user wants but doesn't own yet. Mirrors much of `cards` (cert/grader/player fields, the full `estimate_*` set, `cardhedger_*`, image keys); PA-specific columns are `buy_target_price` and `priority`. Created by migration `0005_potential_acquisitions.sql`; image columns added by `0007_pa_image_columns.sql`.*
 
 ### `consignments`
 
@@ -784,13 +848,13 @@ signedCardImageUrl(key) → presigned GET URL (1h TTL, CARD_IMAGES_BUCKET)
 
 ### Tables NOT in `db/schema.sql`
 
-The bootstrap file defines only `users` (4 cols) and `cards` (16 cols). **Everything else** has been added via the migration Lambdas under `_migrations/` (which run direct-invoke via `aws lambda invoke`):
+The bootstrap file defines only `users` (4 cols) and `cards` (16 cols). **Everything else** was added post-bootstrap — historically via the `_migrations/` Lambdas (`aws lambda invoke`), and more recently via the numbered SQL migrations `0001`–`0008` (see below):
 
-- All 8 tables besides `users` and `cards` are post-bootstrap additions
+- All 8 tables besides `users` and `cards` are post-bootstrap additions (incl. `potential_acquisitions`)
 - `users` has gained 3 columns (given_name, family_name, role) since bootstrap
-- `cards` has gained 16 columns since bootstrap (status, grader, my_cost, target_price, raw_comps, cardhedger_*, manual_price, psa_population*, etc.)
+- `cards` has gained 34 columns since bootstrap (status, grader, my_cost, sell_target_price, raw_comps, cardhedger_*, manual_price, psa_population*, the `estimate_*` valuation set, the `sold_*` mark-as-sold fields, `wanted_since`, `psa_*_s3_key`, etc.)
 
-The `0001_consignment_fee.sql` file under `backend/db/migrations/` is the only migration that lives as a SQL file (vs. a Lambda) — applied manually via Query Editor. New schema changes should follow that pattern.
+`backend/db/migrations/` now holds **8 numbered SQL-file migrations** (`0001_consignment_fee` through `0008_psa_image_columns`), applied via the RDS Data API / Query Editor. This is the current convention; the older in-Lambda `_migrations/` scripts are deprecated. New schema changes follow the numbered-SQL-file pattern.
 
 ---
 
