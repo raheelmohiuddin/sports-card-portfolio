@@ -215,13 +215,22 @@ export default function CardModal({
             <tbody>
               {[
                 ["Card #",  card.cardNumber],
-                ["Cert #",  card.certNumber],
+                ["Cert #",  card.certNumber,
+                  (card.grader ?? "PSA") === "PSA" && card.certNumber
+                    ? `https://www.psacard.com/cert/${encodeURIComponent(card.certNumber)}/psa`
+                    : null],
                 ["Variety", card.variety],
-              ].map(([label, val]) =>
+              ].map(([label, val, href]) =>
                 val ? (
                   <tr key={label}>
                     <td style={st.tdLabel}>{label}</td>
-                    <td style={st.tdVal}>{val}</td>
+                    <td style={st.tdVal}>
+                      {href ? (
+                        <a href={href} target="_blank" rel="noopener noreferrer" style={st.tdLink}>
+                          {val}<span style={st.tdLinkArrow}>↗</span>
+                        </a>
+                      ) : val}
+                    </td>
                   </tr>
                 ) : null
               )}
@@ -903,6 +912,12 @@ const st = {
     fontSize: "0.88rem", color: "#e2e8f0",
     padding: "0.4rem 0", fontWeight: 500,
   },
+  tdLink: {
+    fontSize: "0.88rem", color: "#fbbf24", fontWeight: 600,
+    textDecoration: "none",
+    display: "inline-flex", alignItems: "center", gap: "0.3rem",
+  },
+  tdLinkArrow: { fontSize: "0.7rem", opacity: 0.75 },
   sectionHead: {
     fontSize: "0.62rem", fontWeight: 700,
     letterSpacing: "0.18em", textTransform: "uppercase",
