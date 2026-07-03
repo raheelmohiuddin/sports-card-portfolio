@@ -1,59 +1,7 @@
-const { SecretsManagerClient, GetSecretValueCommand } = require("@aws-sdk/client-secrets-manager");
 const { json } = require("../_response");
 const { isValidCertNumber } = require("../_validate");
 const { fetchEstimateForCert } = require("../portfolio/pricing");
-
-const smClient = new SecretsManagerClient({});
-let psaApiKey;
-
-async function getPsaApiKey() {
-  if (psaApiKey) return psaApiKey;
-  const secret = await smClient.send(
-    new GetSecretValueCommand({ SecretId: "sports-card-portfolio/psa-api-key" })
-  );
-  psaApiKey = JSON.parse(secret.SecretString).apiKey;
-  return psaApiKey;
-}
-
-// PSA's GetImagesByCertNumber returns the official front/back scan URLs as
-// an array of { IsFrontImage, ImageURL }: two elements when PSA has the
-// card, an empty array when it doesn't. We pick each side independently
-// (defensive — never assume both-or-neither) and report a tri-state
-// availability signal:
-//   true  → PSA returned scans (array had elements)
-//   false → PSA confirmed no scans (2xx, empty array)
-//   null  → couldn't determine (non-2xx, malformed body, or thrown error)
-// Best-effort: a failure here must NOT fail the overall cert lookup, so
-// everything is wrapped and degrades to the null/unknown state.
-async function fetchCertImages(apiKey, certNumber) {
-  try {
-    const res = await fetch(
-      `${process.env.PSA_API_BASE}/cert/GetImagesByCertNumber/${certNumber}`,
-      {
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          "Content-Type": "application/json",
-        },
-      }
-    );
-    if (!res.ok) {
-      return { frontImageUrl: null, backImageUrl: null, psaImagesAvailable: null };
-    }
-    const images = await res.json();
-    if (!Array.isArray(images)) {
-      // Unexpected 2xx shape — treat as unknown, not confirmed-empty.
-      return { frontImageUrl: null, backImageUrl: null, psaImagesAvailable: null };
-    }
-    if (images.length === 0) {
-      return { frontImageUrl: null, backImageUrl: null, psaImagesAvailable: false };
-    }
-    const front = images.find((i) => i.IsFrontImage === true)?.ImageURL ?? null;
-    const back  = images.find((i) => i.IsFrontImage === false)?.ImageURL ?? null;
-    return { frontImageUrl: front, backImageUrl: back, psaImagesAvailable: true };
-  } catch {
-    return { frontImageUrl: null, backImageUrl: null, psaImagesAvailable: null };
-  }
-}
+const { getPsaApiKey, fetchCertImages } = require("../_psa");
 
 exports.handler = async (event) => {
   const certNumber = event.pathParameters?.certNumber;
@@ -73,7 +21,7 @@ exports.handler = async (event) => {
         "Content-Type": "application/json",
       },
     }),
-    fetchCertImages(apiKey, certNumber),
+    fetchCertImages(certNumber),
   ]);
 
   if (!apiResponse.ok) {

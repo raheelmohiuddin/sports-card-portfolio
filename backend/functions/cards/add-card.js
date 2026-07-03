@@ -4,13 +4,9 @@ const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
 const { json } = require("../_response");
 const { isValidCertNumber, sanitize, isHttpsUrl, isValidCount, isValidPrice } = require("../_validate");
 const { fetchValuation } = require("../portfolio/pricing");
+const { storePsaImage } = require("../_psa");
 
 const s3 = new S3Client({});
-
-// PSA scan URLs come from the lookup response but reach this endpoint as
-// client-supplied input, so a server-side fetch is an SSRF vector. Only
-// fetch from PSA's known CloudFront host (the same host the lookup serves).
-const PSA_IMAGE_HOST = "d1htnxwo4o0jhw.cloudfront.net";
 
 async function makeUploadUrl(bucket, key) {
   return getSignedUrl(
@@ -18,23 +14,6 @@ async function makeUploadUrl(bucket, key) {
     new PutObjectCommand({ Bucket: bucket, Key: key, ContentType: "image/jpeg" }),
     { expiresIn: 300 }
   );
-}
-
-// Best-effort server-side fetch of a PSA scan + store to our S3 bucket.
-// Self-contained: returns false (never throws) on a bad host, malformed
-// URL, non-2xx, or any fetch/S3 error, so a single side's failure can't
-// abort the other side in the Promise.all caller.
-async function storePsaImage(url, bucket, key) {
-  try {
-    if (new URL(url).host !== PSA_IMAGE_HOST) return false;
-    const res = await fetch(url);
-    if (!res.ok) return false;
-    const buf = Buffer.from(await res.arrayBuffer());
-    await s3.send(new PutObjectCommand({ Bucket: bucket, Key: key, Body: buf, ContentType: "image/jpeg" }));
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 exports.handler = async (event) => {
