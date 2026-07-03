@@ -594,6 +594,20 @@ export class ApiStack extends Construct {
       })
     );
 
+    // execute-trade and move-to-collection fetch official PSA scans
+    // server-side (GetImagesByCertNumber) for cards acquired via trade or
+    // PA-promotion, which needs the same PSA API key. Grant GetSecretValue on
+    // the same secret, scoped to exactly these two functions — same action,
+    // same ARN as psa-lookup, nothing broader.
+    for (const fn of [executeTradeFn, movePaToCollectionFn]) {
+      fn.addToRolePolicy(
+        new iam.PolicyStatement({
+          actions: ["secretsmanager:GetSecretValue"],
+          resources: ["arn:aws:secretsmanager:us-east-1:501789774892:secret:sports-card-portfolio/psa-api-key-s4T0T9"],
+        })
+      );
+    }
+
     // CardHedger pricing API key — read by portfolio/pricing.js inside the
     // portfolio-refresh Lambda (and previously portfolio-value before the
     // SWR split). Also granted to pricing-preview for the Trade Builder,

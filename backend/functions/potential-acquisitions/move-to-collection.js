@@ -13,6 +13,37 @@
 const { getPool, ensureUser } = require("../_db");
 const { json } = require("../_response");
 const { isValidId, isValidPrice } = require("../_validate");
+const { fetchCertImages, storePsaImage } = require("../_psa");
+
+// Best-effort PSA official-scan storage for one newly-created card. Fetches
+// the official scans by cert, stores each side under the card's own prefix,
+// and persists the keys for whichever side stored. Fully non-fatal and
+// self-contained: callers run this AFTER commit, so any failure (including a
+// missing PSA-secret grant) is swallowed and can never roll back or error the
+// surrounding operation. Reuses the shared _psa primitives and mirrors
+// add-card.js's post-commit posture. Gates on cert presence; a non-PSA or
+// imageless cert simply stores nothing (fetchCertImages returns no images).
+async function storePsaScansForCard(db, bucket, userId, cardId, certNumber) {
+  try {
+    if (!certNumber) return;
+    const { frontImageUrl, backImageUrl, psaImagesAvailable } = await fetchCertImages(certNumber);
+    if (psaImagesAvailable !== true || (!frontImageUrl && !backImageUrl)) return;
+    const psaFrontKey = `cards/${userId}/${cardId}-psa-front.jpg`;
+    const psaBackKey  = `cards/${userId}/${cardId}-psa-back.jpg`;
+    const [frontStored, backStored] = await Promise.all([
+      frontImageUrl ? storePsaImage(frontImageUrl, bucket, psaFrontKey) : Promise.resolve(false),
+      backImageUrl  ? storePsaImage(backImageUrl,  bucket, psaBackKey)  : Promise.resolve(false),
+    ]);
+    if (frontStored || backStored) {
+      await db.query(
+        "UPDATE cards SET psa_front_s3_key = $1, psa_back_s3_key = $2 WHERE id = $3",
+        [frontStored ? psaFrontKey : null, backStored ? psaBackKey : null, cardId]
+      );
+    }
+  } catch (err) {
+    console.warn("[move-to-collection] PSA image store failed:", err.message);
+  }
+}
 
 exports.handler = async (event) => {
   const claims = event.requestContext?.authorizer?.jwt?.claims;
@@ -95,7 +126,7 @@ exports.handler = async (event) => {
        FROM potential_acquisitions
        WHERE id = $3 AND user_id = $4
        ON CONFLICT (user_id, cert_number) DO NOTHING
-       RETURNING id`,
+       RETURNING id, cert_number`,
       [myCostValue, sellTargetValue, paId, userId]
     );
 
@@ -107,6 +138,7 @@ exports.handler = async (event) => {
     }
 
     const newCardId = insertResult.rows[0].id;
+    const certNumber = insertResult.rows[0].cert_number;
 
     await client.query(
       "DELETE FROM potential_acquisitions WHERE id = $1 AND user_id = $2",
@@ -114,6 +146,14 @@ exports.handler = async (event) => {
     );
 
     await client.query("COMMIT");
+
+    // Best-effort PSA official-scan storage for the promoted card. Runs
+    // AFTER the promotion has committed and is fully non-fatal — a scan
+    // fetch/store failure must never surface as a promotion error.
+    // Uniform-path (ROADMAP): fetch by cert server-side, keyed under the
+    // new card's own prefix.
+    const bucket = process.env.CARD_IMAGES_BUCKET;
+    await storePsaScansForCard(db, bucket, userId, newCardId, certNumber?.trim());
 
     return json(200, {
       newCardId,
